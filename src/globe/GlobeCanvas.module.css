@@ -143,7 +143,7 @@
     0 0 1px var(--ink-0);
   transition: opacity var(--d-md) var(--ease-out);
 }
-.coordSub {
-  margin-left: 0.8em;
-  color: var(--bone-3);
+.coordFlip .coord {
+  left: auto;
+  right: 36px;
 }

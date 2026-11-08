@@ -122,14 +122,25 @@ function localClock(ms: number, tz: string, seconds = true): Part {
   return num(fmtLocalTime(ms, tz, seconds), zoneAbbr(ms, tz))
 }
 
+/** Below this ground distance the sub-satellite point is "overhead": a bearing would be noise. */
+const OVERHEAD_KM = 15
+/** Below this off-nadir angle the instrument was "looking straight down". */
+const NADIR_DEG = 1.5
+
 /** "786 km overhead" or "786 km up, 61 km to the west" */
 function where(p: Pass): Part[] {
-  if (p.groundDistanceKm < 15) return [num(int(p.altitudeKm), 'km'), ' overhead']
+  if (p.groundDistanceKm < OVERHEAD_KM) return [num(int(p.altitudeKm), 'km'), ' overhead']
   return [num(int(p.altitudeKm), 'km'), ' up, ', num(int(p.groundDistanceKm), 'km'), ` to the ${compassWord(p.azimuthDeg)}`]
 }
 
+/** ", directly overhead." or ", 61 km to the west." */
+function offset(p: Pass): Part[] {
+  if (p.groundDistanceKm < OVERHEAD_KM) return [', directly overhead.']
+  return [', ', num(int(p.groundDistanceKm), 'km'), ` to the ${compassWord(p.azimuthDeg)}.`]
+}
+
 function looking(off: number): Sentence {
-  if (off < 1.5) return ['It was looking straight down.']
+  if (off < NADIR_DEG) return ['It was looking straight down.']
   return ['It was looking ', num(dec1(off), '°'), ' off straight down.']
 }
 
@@ -148,7 +159,7 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
         out.push([
           `Its ${sensorName(capture)} imager swept ${placeLabel} into NASA’s daily true-colour mosaic at `,
           num(int(capture.gsdM), 'm'),
-          ' per pixel. Coarse, but it is a real picture of that day.',
+          ' per pixel.',
         ])
       } else {
         out.push([`${name} crossed `, ...where(p), ' at ', localClock(p.tClosest, tz), ...moving])
@@ -178,11 +189,23 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
       break
     }
     case 'could': {
-      out.push([`${name} passed within view at `, localClock(p.tClosest, tz, false), ', ', num(int(p.groundDistanceKm), 'km'), ` to the ${compassWord(p.azimuthDeg)}.`])
-      if (meta.category === 'radar') {
-        out.push(['Radar sees through cloud and darkness. Pointing ', num(dec1(p.offNadirDeg), '°'), ` to the side, it could have mapped ${placeLabel}. We can’t know whether it did.`])
+      out.push([`${name} passed within view at `, localClock(p.tClosest, tz, false), ...offset(p)])
+      const swath = meta.profile?.swathKm
+      const nadir = p.offNadirDeg < NADIR_DEG
+      if (p.inSwath && swath && !meta.profile?.maxOffNadirDeg) {
+        // Fixed-swath commercial imagers (e.g. Planet's Doves) record continuously, but privately.
+        out.push([`${placeLabel} was inside its `, num(int(swath), 'km'), ' swath. Its operator does not publish where it imaged, so we can’t know whether it did.'])
+      } else if (meta.category === 'radar') {
+        out.push([
+          'Radar sees through cloud and darkness. ',
+          ...(nadir ? [] : ['Pointing ', num(dec1(p.offNadirDeg), '°'), ' to the side, ']),
+          `${nadir ? 'It' : 'it'} could have mapped ${placeLabel}. We can’t know whether it did.`,
+        ])
       } else {
-        out.push(['Pointing ', num(dec1(p.offNadirDeg), '°'), ` off straight down, it could have photographed ${placeLabel}. We can’t know whether it did.`])
+        out.push([
+          ...(nadir ? ['Looking straight down, '] : ['Pointing ', num(dec1(p.offNadirDeg), '°'), ' off straight down, ']),
+          `it could have photographed ${placeLabel}. We can’t know whether it did.`,
+        ])
       }
       break
     }
@@ -194,7 +217,8 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
         localClock(p.tClosest, tz, false),
         ', ',
         num(int(p.elevationDeg), '°'),
-        ` above your horizon to the ${compassWord(p.azimuthDeg)}.`,
+        // Near the zenith the bearing flips around and means nothing.
+        p.elevationDeg >= 80 ? ' above your horizon, almost straight up.' : ` above your horizon to the ${compassWord(p.azimuthDeg)}.`,
       ])
       if (p.sunElevationDeg < -6) out.push(['It was dark where you are. If the station was still in sunlight, it crossed your sky as a bright, steady point.'])
       break

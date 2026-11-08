@@ -61,6 +61,7 @@ export const satellitesVertex = glsl`
   uniform float uShowAmbient;
   uniform float uReveal;
   uniform float uCamDist;     // camera distance to Earth's centre
+  uniform float uEarthPx;     // Earth's apparent radius on screen, CSS px
   uniform vec3 uBone;
   uniform vec3 uSignal;
   uniform vec3 uIce;
@@ -90,6 +91,15 @@ export const satellitesVertex = glsl`
     } else if (uShowAmbient < 0.5) {
       alpha = 0.0;
     }
+    // The alphas above are the design's perceptual values (CSS-style compositing, DESIGN.md §6). This scene
+    // blends in linear light, where the same number reads about twice as bright over ink (35% → ~63%), and
+    // 17k points turn into a loud halo. a^2.2 is the linear-light alpha that lands on the design value over
+    // the dark sky (bone over ink: 35% → sRGB 87, 55% → 131, as in CSS).
+    alpha = pow(alpha, 2.2);
+    // The catalog is a fixed number of points: the smaller the globe on screen, the more of them share each
+    // pixel and the louder the shells get (a phone's overview globe has a quarter of a desktop's area).
+    // Ambient points give back alpha in proportion, so the shells stay faint bands at every size.
+    if (featured < 0.5) alpha *= clamp(uEarthPx / 320.0, 0.45, 1.0);
     if (aMark > 0.5) {
       col = uSignal * 1.35;
       size = 3.2;
@@ -178,9 +188,11 @@ export const glyphFragment = glsl`
       if (uShape == 3) extra = fillCov(length(p) - 1.25 * uPx);
     } else if (uShape == 4) {                 // circle
       sdf = length(p) - R * 0.86;
-    } else if (uShape == 5) {                 // ring with a tick
-      sdf = length(p) - R * 0.86;
-      extra = stroke(p.x, w) * step(abs(p.y + R * 0.86), R * 0.4) * step(p.y, 0.0);
+    } else if (uShape == 5) {                 // ring with a centre dot and a tick above it (Glyph.tsx ◎)
+      float rr = R * 0.72;
+      sdf = length(p) - rr;
+      float tick = stroke(p.x, w) * step(-rr - R * 0.42, p.y) * step(p.y, -rr);
+      extra = max(tick, fillCov(length(p) - 1.25 * uPx));
     } else if (uShape == 6) {                 // plus
       float h = stroke(p.y, w) * step(abs(p.x), R);
       float v = stroke(p.x, w) * step(abs(p.y), R);

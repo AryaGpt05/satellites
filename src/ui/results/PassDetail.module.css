@@ -1,0 +1,174 @@
+.detail {
+  display: flex;
+  flex-direction: column;
+}
+
+.capture {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── overlay on the image ─────────────────────────────────────── */
+.overlay {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity var(--d-md) var(--ease-out);
+}
+.overlayOn {
+  opacity: 1;
+}
+.reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26%;
+  height: 26%;
+  transform: translate(-50%, -50%) scale(2);
+  opacity: 0;
+  transition:
+    transform 500ms var(--ease-out),
+    opacity 240ms var(--ease-out);
+  overflow: visible;
+}
+.reticleLocked {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.knock circle,
+.knock path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink-0) 55%, transparent);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.ring,
+.ticks {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.dot {
+  fill: var(--signal);
+}
+.chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+}
+.tl {
+  top: 8px;
+  left: 8px;
+}
+.tr {
+  top: 8px;
+  right: 8px;
+}
+.br {
+  bottom: 8px;
+  right: 8px;
+}
+.scale {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--d-md) var(--ease-out);
+}
+.scaleOn {
+  opacity: 1;
+}
+.bar {
+  display: block;
+  height: 5px;
+  border: 1px solid var(--bone);
+  border-top: 0;
+}
+.scaleText {
+  align-self: flex-start;
+  padding: 2px 5px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+}
+
+/* ── links under the image ────────────────────────────────────── */
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  text-decoration: none;
+  transition: color var(--d-hover) var(--ease-out);
+}
+.link:hover {
+  color: var(--signal);
+}
+.link:disabled {
+  cursor: progress;
+}
+
+/* ── spot cloud line ──────────────────────────────────────────── */
+.spot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+}
+.spotChecking {
+  color: var(--bone-3);
+}
+.spotMark {
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
+}
+.spotClear {
+  background: var(--bone);
+  border-color: var(--bone);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reticle {
+    transition: opacity 200ms linear;
+  }
+}

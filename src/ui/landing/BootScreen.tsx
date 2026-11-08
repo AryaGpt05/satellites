@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { subsolarPoint } from '@/lib/geo'
 import { useApp } from '@/state/store'
-import { Rule, cx, fmtInt, useExitClone } from '@/ui/system'
+import { Rule, cx, fmtInt, useExitClone, useWallSecondSync } from '@/ui/system'
 import { useCatalogStatus } from '@/ui/hud/catalogStatus'
 import { fmtSun } from '@/ui/hud/readouts'
 import s from './BootScreen.module.css'
@@ -90,6 +90,8 @@ export function BootScreen() {
   const catalogTook = useTookWhen(catalogReady, t0)
   const elapsed = useElapsed(t0, !(globeReady && catalogReady && fonts.done))
   const rootRef = useRef<HTMLDivElement>(null)
+  // WAIT flags blink in step with the HUD's live dot and clock.
+  useWallSecondSync(rootRef)
 
   const pendingDetail = (base: string) => (elapsed > SLOW_MS ? 'Slow connection, still loading' : base)
 

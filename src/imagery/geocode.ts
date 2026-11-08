@@ -30,6 +30,8 @@ export interface PhotonProperties {
   osm_key?: string
   osm_value?: string
   type?: string
+  /** Bounding box of areas: [minLon, maxLat, maxLon, minLat] */
+  extent?: [number, number, number, number]
 }
 
 export interface PhotonFeature {
@@ -71,18 +73,37 @@ export function coordinateLabel(lat: number, lon: number): string {
 
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
 
-/** A forward-search result → Place. Undefined if the feature has no usable position. */
+/** True if `s` carries any letter or digit (OSM has POIs named "-", ".", "🗲", a lone zero-width joiner). */
+export const hasText = (s: string | undefined): s is string => !!s && /[\p{L}\p{N}]/u.test(s)
+const LATIN = /\p{Script=Latin}/u
+
+/**
+ * Join the "where" line. With `lang=en`, OSM still hands back local-script names where no English
+ * one exists ("Tokyo Dome · Tokyo, 東京都, Japan"); under a Latin-script label those read as noise,
+ * so non-Latin parts are dropped, unless nothing would be left.
+ */
+export function sublabelOf(label: string, parts: (string | undefined)[]): string | undefined {
+  let kept = parts
+  if (LATIN.test(label)) {
+    const latin = parts.filter((p) => !p || LATIN.test(p))
+    if (latin.some((p) => p?.trim())) kept = latin
+  }
+  return joinUnique(kept, [label])
+}
+
+/** A forward-search result → Place. Undefined if the feature has no usable position or a junk name. */
 export function photonToPlace(f: PhotonFeature, source: Place['source'] = 'search'): Place | undefined {
   const [lon, lat] = f.geometry?.coordinates ?? []
   if (!finite(lat) || !finite(lon)) return undefined
   const p = f.properties ?? {}
+  if (p.name !== undefined && !hasText(p.name)) return undefined
   const address = p.street ? joinUnique([[p.housenumber, p.street].filter(Boolean).join(' ')]) : undefined
   const label = p.name?.trim() || address || p.city || p.district || p.county || p.state || p.country || coordinateLabel(lat, lon)
   return {
     lat,
     lon,
     label,
-    sublabel: joinUnique([p.city, p.state, p.country], [label]),
+    sublabel: sublabelOf(label, [p.city, p.state, p.country]),
     countryCode: p.countrycode?.toLowerCase() || undefined,
     source,
   }
@@ -113,25 +134,94 @@ export function photonReverseToPlace(f: PhotonFeature, lat: number, lon: number,
     lat,
     lon,
     label,
-    sublabel: joinUnique([p.state, p.country], [label]),
+    sublabel: sublabelOf(label, [p.state, p.country]),
     countryCode: p.countrycode?.toLowerCase() || undefined,
     source,
   }
 }
 
 /**
- * Drop near-identical results: same name (accent/case-insensitive) within 25 km is the same
- * place to a person (OSM often has a city node, its boundary relation and its station).
- * The first (best-ranked) wins.
+ * Drop near-identical results, keeping the first (best-ranked):
+ *  - the same name (accent/case-insensitive) within 25 km is the same place to a person (OSM often
+ *    has a city node, its boundary relation and its station);
+ *  - anything within 1 km of a better result is the same spot for this product (a pass covers
+ *    kilometres; "CN Tower", "CN Tower Edge Walk", "CN Tower tickets").
  */
-export function dedupePlaces(places: Place[], withinKm = 25): Place[] {
-  const out: Place[] = []
-  for (const p of places) {
+export function dedupePlaces(places: Place[], withinKm = 25, sameSpotKm = 1): Place[] {
+  return distinctIndexes(places, withinKm, sameSpotKm).map((i) => places[i])
+}
+
+/** Indexes of the places `dedupePlaces` keeps, in order. */
+function distinctIndexes(places: Place[], withinKm = 25, sameSpotKm = 1): number[] {
+  const kept: number[] = []
+  places.forEach((p, i) => {
     const k = textKey(p.label)
-    if (out.some((q) => textKey(q.label) === k && haversineKm(p, q) < withinKm)) continue
-    out.push(p)
+    const dup = kept.some((j) => {
+      const d = haversineKm(p, places[j])
+      return d < sameSpotKm || (d < withinKm && textKey(places[j].label) === k)
+    })
+    if (!dup) kept.push(i)
+  })
+  return kept
+}
+
+/** Settlements people mean when they type a name that is also a region's. */
+const MAJOR_SETTLEMENT = new Set(['city', 'town', 'village', 'hamlet', 'municipality', 'borough', 'suburb'])
+const ADMIN_PLACE = new Set(['country', 'state', 'province', 'region', 'county', 'district', 'territory'])
+const isSettlement = (p: PhotonProperties) => p.osm_key === 'place' && !!p.osm_value && MAJOR_SETTLEMENT.has(p.osm_value)
+const isAdminArea = (p: PhotonProperties) => p.osm_key === 'boundary' || (p.osm_key === 'place' && !!p.osm_value && ADMIN_PLACE.has(p.osm_value))
+
+function insideExtent(e: PhotonProperties['extent'], pt: LatLon): boolean {
+  if (!e || e.length !== 4) return false
+  const [minLon, maxLat, maxLon, minLat] = e
+  return pt.lat >= minLat && pt.lat <= maxLat && pt.lon >= minLon && pt.lon <= maxLon
+}
+
+/** A result plus the raw properties ranking needs. */
+export interface Hit {
+  place: Place
+  props: PhotonProperties
+}
+
+/**
+ * "São Paulo", "Moscow", "New York", "Cairo": Photon often ranks the region above the city of the
+ * same name, and its point is the region's centroid (São Paulo state: 250 km from the city). When
+ * a same-named settlement lies inside the region, the settlement takes the region's rank and the
+ * region is dropped. Same-named places elsewhere are left alone.
+ */
+export function preferSettlements(hits: Hit[]): Hit[] {
+  const out = [...hits]
+  for (let i = 0; i < out.length; i++) {
+    const a = out[i]
+    if (!isAdminArea(a.props)) continue
+    const k = textKey(a.place.label)
+    const j = out.findIndex(
+      (s) => s !== a && isSettlement(s.props) && textKey(s.place.label) === k && (insideExtent(a.props.extent, s.place) || (!a.props.extent && haversineKm(a.place, s.place) < 50)),
+    )
+    if (j < 0) continue
+    const [s] = out.splice(j, 1)
+    out.splice(out.indexOf(a), 1, s)
+    i = -1 // re-scan: positions moved
   }
   return out
+}
+
+const humanise = (v: string) => v.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+
+/** Two rows reading exactly alike ("Ushuaia · Argentina" twice) get the county, then the kind. */
+function disambiguate(hits: Hit[]): Place[] {
+  const seen = new Set<string>()
+  const key = (p: Place) => `${textKey(p.label)}|${textKey(p.sublabel ?? '')}`
+  return hits.map(({ place, props: p }) => {
+    let out = place
+    if (seen.has(key(out))) {
+      const withCounty = sublabelOf(place.label, [p.county ?? p.district, p.city, p.state, p.country])
+      out = { ...place, sublabel: withCounty }
+      if (seen.has(key(out)) && p.osm_value) out = { ...place, sublabel: sublabelOf(place.label, [humanise(p.osm_value), p.city, p.state, p.country]) }
+    }
+    seen.add(key(out))
+    return out
+  })
 }
 
 /**
@@ -155,15 +245,19 @@ export function parseCoordinates(q: string): LatLon | null {
 const PHOTON_TIMEOUT_MS = 8_000
 const searchCache = new Lru<string, Place[]>(48)
 
+/** Results returned, and asked of Photon (extra, so merged duplicates and junk don't thin the list). */
+const MAX_RESULTS = 6
+const PHOTON_LIMIT = 10
+
 /**
  * Up to 6 places matching `q`, best first, in English where OSM has it. Coordinates are accepted
- * and reverse-geocoded. Resolves [] for queries under 2 characters or that Photon rejects.
- * Rejects on network failure (show "search unavailable") and on abort.
+ * and reverse-geocoded. Resolves [] for queries under 2 characters, with no letters or digits, or
+ * that Photon rejects. Rejects on network failure (show "search unavailable") and on abort.
  */
 export async function searchPlaces(q: string, signal?: AbortSignal): Promise<Place[]> {
   throwIfAborted(signal)
   const query = q.trim().replace(/\s+/g, ' ')
-  if (query.length < 2) return []
+  if (query.length < 2 || !hasText(query)) return []
   const key = textKey(query)
   const hit = searchCache.get(key)
   if (hit) return hit
@@ -176,16 +270,22 @@ export async function searchPlaces(q: string, signal?: AbortSignal): Promise<Pla
 
   let res: PhotonResponse
   try {
-    res = await fetchJson<PhotonResponse>(`${PHOTON}/api/?q=${encodeURIComponent(query)}&limit=6&lang=en`, {
+    res = await fetchJson<PhotonResponse>(`${PHOTON}/api/?q=${encodeURIComponent(query)}&limit=${PHOTON_LIMIT}&lang=en`, {
       signal,
       timeoutMs: PHOTON_TIMEOUT_MS,
       retries: 1,
     })
   } catch (err) {
-    if (err instanceof HttpError && err.status === 400) return [] // e.g. a query of only punctuation
+    if (err instanceof HttpError && err.status === 400) return [] // e.g. a query Photon can't parse
     throw err
   }
-  const places = dedupePlaces((res.features ?? []).map((f) => photonToPlace(f)).filter((p): p is Place => !!p))
+  const hits = (res.features ?? []).flatMap((f): Hit[] => {
+    const place = photonToPlace(f)
+    return place ? [{ place, props: f.properties ?? {} }] : []
+  })
+  const ranked = preferSettlements(hits)
+  const distinct = distinctIndexes(ranked.map((h) => h.place)).map((i) => ranked[i])
+  const places = disambiguate(distinct).slice(0, MAX_RESULTS)
   searchCache.set(key, places)
   return places
 }

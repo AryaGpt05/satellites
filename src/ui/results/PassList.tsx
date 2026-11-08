@@ -12,7 +12,7 @@ import { captureFor, cropSpec, displayUrl, isDailyMosaic } from './lib/captures'
 import { int } from './lib/copy'
 import { visibleCount, type ListItem, type PassGroup, type PassItem, type SatItem } from './lib/groups'
 import { glyphForPass, markColorVar, VERDICT_GLYPH, VERDICT_TAG, VERDICT_TITLE, type Verdict } from './lib/meta'
-import { fmtLocalStamp, fmtRelative } from './lib/time'
+import { fmtLocalDay, fmtLocalStamp, fmtLocalTime, fmtRelative } from './lib/time'
 import type { ResultsModel } from './model'
 import s from './PassList.module.css'
 
@@ -24,8 +24,11 @@ interface Props {
 }
 
 export function PassList({ model, selectedId, now, onSelect }: Props) {
+  // A row's pointerleave never fires when the list unmounts under the pointer (a click opens the
+  // detail), so drop the globe's hover highlight with the list.
+  useEffect(() => () => useApp.getState().setHoveredNorad(undefined), [])
   if (!model.groups.length)
-    return <p className={s.empty}>No satellite we track crossed this place in the window. That is rare; check the footnotes below.</p>
+    return <p className={s.empty}>No satellite we track crossed this place in the window. That is rare; the notes above say if a data source was down.</p>
   return (
     <div className={s.list}>
       {model.groups.map((g) => (
@@ -217,7 +220,8 @@ const SatRow = memo(function SatRow({
             {meta.operator ? <span className={s.operator}>{meta.operator}</span> : null}
           </span>
           <span className={s.metaLine}>
-            Latest {fmtLocalStamp(latest.tClosest, model.tz)}
+            <span className={s.latestWord}>Latest </span>
+            {fmtLocalDay(latest.tClosest, model.tz)} · {fmtLocalTime(latest.tClosest, model.tz)}
             <span className={s.dim}> · {fmtRelative(latest.tClosest, now)}</span>
           </span>
           <span className={s.metaLine}>

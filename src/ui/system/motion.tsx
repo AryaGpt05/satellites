@@ -110,23 +110,28 @@ export function Reveal({
   style?: CSSProperties
 }) {
   const reduced = prefersReducedMotion()
-  const [on, setOn] = useState(reduced)
+  // hidden → wiping → done. Once done the clip is released entirely, so nothing that legitimately
+  // reaches past the box (focus rings, italic overhangs, popovers) stays cut off after the entrance.
+  const [stage, setStage] = useState<'hidden' | 'wiping' | 'done'>(reduced ? 'done' : 'hidden')
   useEffect(() => {
     if (reduced) return
-    const id = window.setTimeout(() => setOn(true), delay)
-    return () => window.clearTimeout(id)
-  }, [delay, reduced])
+    const start = window.setTimeout(() => setStage('wiping'), delay)
+    const end = window.setTimeout(() => setStage('done'), delay + duration + 32)
+    return () => {
+      window.clearTimeout(start)
+      window.clearTimeout(end)
+    }
+  }, [delay, duration, reduced])
   const hidden = axis === 'y' ? 'inset(0 0 100% 0)' : 'inset(0 100% 0 0)'
   return (
     <As
       className={className}
       style={{
         ...style,
-        clipPath: on ? 'inset(0 0 0 0)' : hidden,
-        transform: on || axis === 'x' ? 'none' : 'translateY(0.25em)',
-        transition: reduced
-          ? 'opacity 200ms'
-          : `clip-path ${duration}ms var(--ease-out), transform ${duration}ms var(--ease-out)`,
+        clipPath: stage === 'hidden' ? hidden : stage === 'wiping' ? 'inset(0 0 0 0)' : undefined,
+        transform: stage === 'hidden' && axis === 'y' ? 'translateY(0.25em)' : undefined,
+        transition:
+          stage === 'done' ? undefined : `clip-path ${duration}ms var(--ease-out), transform ${duration}ms var(--ease-out)`,
         display: As === 'span' ? 'inline-block' : undefined,
       }}
     >

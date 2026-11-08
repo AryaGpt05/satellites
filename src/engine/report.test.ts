@@ -99,6 +99,32 @@ describe('computeReport', () => {
     expect(Math.abs(added!.tClosest - night!.tClosest)).toBeLessThan(1000)
   })
 
+  it('matches a scene whose datatake started up to an hour before the overflight', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const target = s2c[0]
+    const scene = capture({ id: 'S2C_LONG', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: target.tClosest - 55 * 60_000 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [scene], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const report = await computeReport(waterloo, { now })
+    const imaged = report.passes.filter((p) => p.captureId === 'S2C_LONG')
+    expect(imaged).toHaveLength(1)
+    expect(imaged[0].id).toBe(target.id)
+  })
+
+  it('never invents a pass for a scene with no overflight in its window', async () => {
+    // A Sentinel-2A "scene" stamped 30 min after a real Tokyo overflight: the window [+20, +90] min
+    // holds no approach (the next orbit is ~100 min later), so the minimum sits on the window edge.
+    const t = passTargetFor(getSatInfo(40697)!, getRow(40697)!)!
+    const any = findPassesForSat(satrecFor(40697)!, { ...t, category: 'radar' }, { place: TOKYO, t0: now - 7 * 86_400_000, t1: now })[0]
+    imagery.searchCapturesDetailed.mockResolvedValue({
+      captures: [capture({ id: 'S2A_GHOST', platform: 'sentinel-2a', collection: 'sentinel-2-l2a', datetime: any.tClosest + 30 * 60_000 })],
+      degraded: [],
+    })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const report = await computeReport(tokyo, { now })
+    expect(report.passes.find((p) => p.captureId === 'S2A_GHOST')).toBeUndefined()
+  })
+
   it('matches a GIBS daily mosaic to its weather pass', async () => {
     const noaa = passesOf(43013, WATERLOO).filter((p) => p.sunElevationDeg > 5)
     expect(noaa.length).toBeGreaterThan(0)
@@ -107,7 +133,7 @@ describe('computeReport', () => {
     const calls: number[][] = []
     imagery.weatherCaptures.mockImplementation(async (_place: LatLon, passes: Pass[]) => {
       calls.push([...new Set(passes.map((x) => x.norad))])
-      if (!passes.some((x) => x.norad === 43013)) return []
+      if (!passes.some((x) => x.id === p.id)) return []
       return [capture({ id: 'VIIRS@day', provider: 'gibs', platform: 'noaa-20', collection: 'gibs-viirs-noaa20', norad: 43013, datetime: p.tClosest, gsdM: 375 })]
     })
     const report = await computeReport(waterloo, { now })
@@ -116,9 +142,91 @@ describe('computeReport', () => {
     expect(imaged[0].norad).toBe(43013)
     expect(imaged[0].captureId).toBe('VIIRS@day')
     expect(report.captures.map((c) => c.id)).toEqual(['VIIRS@day'])
-    // One call per GIBS satellite (NOAA-20, NOAA-21, Suomi NPP, Terra, Aqua), each with only its passes.
-    expect(calls.length).toBe(5)
+    // One call per (GIBS satellite, UTC day): NOAA-20, NOAA-21, Suomi NPP, Terra, Aqua over 7–8 days.
     for (const c of calls) expect(c).toHaveLength(1)
+    expect(new Set(calls.flat())).toEqual(new Set([43013, 54234, 37849, 25994, 27424]))
+    expect(calls.length).toBeGreaterThanOrEqual(35)
+    expect(calls.length).toBeLessThanOrEqual(40)
+    expect(report.notes).toEqual([])
+  })
+
+  it('keeps what GIBS verified within the budget and drops the stragglers', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    const aborted: number[] = []
+    imagery.weatherCaptures.mockImplementation((_place: LatLon, passes: Pass[], signal?: AbortSignal) => {
+      const p = passes.find((x) => x.inSwath && x.sunElevationDeg > 5)
+      if (!p) return Promise.resolve([])
+      // NOAA-20's probes hang until aborted; everyone else answers at once.
+      if (p.norad === 43013) {
+        return new Promise((_, reject) =>
+          signal?.addEventListener('abort', () => {
+            aborted.push(p.norad)
+            reject(new DOMException('Aborted', 'AbortError'))
+          }),
+        )
+      }
+      return Promise.resolve([capture({ id: `G@${p.id}`, provider: 'gibs', platform: 'x', collection: 'gibs-modis-terra', norad: p.norad, datetime: p.tClosest, gsdM: 250 })])
+    })
+    const t0 = performance.now()
+    const report = await computeReport(waterloo, { now, budgetMs: 200 })
+    const elapsed = performance.now() - t0
+    const imagedSats = new Set(report.passes.filter((p) => p.verdict === 'imaged').map((p) => p.norad))
+    expect(imagedSats.has(43013)).toBe(false)
+    expect(imagedSats.size).toBe(4)
+    expect(aborted.length).toBeGreaterThan(0)
+    expect(report.notes).toHaveLength(1)
+    expect(report.notes[0]).toMatch(new RegExp(`did not return ${aborted.length} of \\d+ weather-satellite images in time`))
+    // Never sooner than 1.2 s after the first probe, and not much later.
+    expect(elapsed).toBeLessThan(report.timings.passesMs + 2500)
+    expect(report.counts.imaged).toBe(report.passes.filter((p) => p.verdict === 'imaged').length)
+  })
+
+  for (const stage of ['propagate', 'archive'] as const) it(`aborts cleanly during the ${stage} stage (no unhandled rejections)`, async () => {
+    // Node's process (vitest runs in node; the app tsconfig has no node types).
+    const proc = (globalThis as unknown as { process: { on(e: string, f: (r: unknown) => void): void; off(e: string, f: (r: unknown) => void): void } }).process
+    const unhandled: unknown[] = []
+    const onUnhandled = (e: unknown) => unhandled.push(e)
+    proc.on('unhandledRejection', onUnhandled)
+    const pendingUntilAbort = (_a: unknown, _b: unknown, _c: unknown, signal?: AbortSignal) =>
+      new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))
+    imagery.searchCapturesDetailed.mockImplementation((place: unknown, a: unknown, b: unknown, signal?: AbortSignal) => pendingUntilAbort(place, a, b, signal))
+    imagery.weatherCaptures.mockImplementation((place: unknown, passes: unknown, signal?: AbortSignal) => pendingUntilAbort(place, passes, null, signal))
+    const ctl = new AbortController()
+    const p = computeReport(waterloo, {
+      now,
+      signal: ctl.signal,
+      onProgress: (e) => {
+        if (e.stage === stage) setTimeout(() => ctl.abort(), 0)
+      },
+    })
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' })
+    await new Promise((r) => setTimeout(r, 50))
+    proc.off('unhandledRejection', onUnhandled)
+    expect(unhandled).toEqual([])
+  })
+
+  it('survives a throwing callback', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+      return []
+    })
+    const err = console.error
+    console.error = () => undefined
+    try {
+      const report = await computeReport(waterloo, {
+        now,
+        onProgress: () => {
+          throw new Error('ui bug')
+        },
+        onPartial: () => {
+          throw new Error('ui bug')
+        },
+      })
+      expect(report.passes.length).toBeGreaterThan(50)
+    } finally {
+      console.error = err
+    }
   })
 
   it('delivers a partial report before the GIBS mosaics are verified', async () => {
@@ -132,7 +240,7 @@ describe('computeReport', () => {
     })
     imagery.weatherCaptures.mockImplementation(async (_place: LatLon, passes: Pass[]) => {
       await gate
-      if (!passes.some((x) => x.norad === 43013)) return []
+      if (!passes.some((x) => x.id === p.id)) return []
       return [capture({ id: 'VIIRS@slow', provider: 'gibs', platform: 'noaa-20', collection: 'gibs-viirs-noaa20', norad: 43013, datetime: p.tClosest, gsdM: 375 })]
     })
     const partials: { imaged: number; partial: boolean; firstResultMs: number }[] = []
@@ -159,6 +267,7 @@ describe('computeReport', () => {
     expect(report.counts.imaged).toBe(0)
     expect(report.captures).toEqual([])
     expect(report.notes.length).toBe(2)
+    expect(report.notes[1]).toMatch(/^NASA GIBS could not be reached/)
   })
 
   it('lists geostationary watchers with their real longitudes', async () => {

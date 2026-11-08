@@ -124,21 +124,38 @@ export function ingestCatalog(file: CatalogFile): LoadedCatalog {
   return loaded
 }
 
-/** Fetch and ingest the catalog once; concurrent and later calls share the same promise. */
+/**
+ * Fetch and ingest the catalog once; concurrent and later calls share the same download.
+ * `signal` only stops this caller's wait (rejecting with AbortError): the shared download carries on
+ * for everyone else (the globe, the HUD, the next report), so one cancelled report can't break them.
+ */
 export function loadCatalog(url = '/data/catalog.json', signal?: AbortSignal): Promise<LoadedCatalog> {
-  if (pending) return pending
-  pending = (async () => {
-    const res = await fetch(url, { signal })
-    if (!res.ok) throw new Error(`Catalog request failed: HTTP ${res.status}`)
-    const file = (await res.json()) as CatalogFile
-    if (!file || !Array.isArray(file.rows)) throw new Error('Catalog file is malformed')
-    return ingestCatalog(file)
-  })()
-  // A failed load must not poison the cache: the next call retries.
-  pending.catch(() => {
-    pending = undefined
+  if (!pending) {
+    const p = (async () => {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`Catalog request failed: HTTP ${res.status}`)
+      const file = (await res.json()) as CatalogFile
+      if (!file || !Array.isArray(file.rows)) throw new Error('Catalog file is malformed')
+      return ingestCatalog(file)
+    })()
+    pending = p
+    // A failed load must not poison the cache: the next call retries.
+    p.catch(() => {
+      if (pending === p) pending = undefined
+    })
+  }
+  if (!signal) return pending
+  if (signal.aborted) return Promise.reject(abortError())
+  const shared = pending
+  return new Promise<LoadedCatalog>((resolve, reject) => {
+    const onAbort = () => reject(abortError())
+    signal.addEventListener('abort', onAbort, { once: true })
+    shared.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
   })
-  return pending
+}
+
+function abortError(): Error {
+  return new DOMException('Aborted', 'AbortError')
 }
 
 /** The loaded catalog, if any (synchronous). */

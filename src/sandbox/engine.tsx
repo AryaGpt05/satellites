@@ -3,12 +3,17 @@
  *
  * Runs the real computeReport (real catalog, real SGP4 in workers, real STAC + GIBS archives) for
  * Waterloo and Tokyo, and shows timings, counts, geostationary watchers and every pass.
- * Never imported by production code.
+ * It boots like the app does (src/app/controller.ts): catalog, GPU element buffer and warm pass workers
+ * first, then the report, so the run timings are the ones a user experiences. Boot costs are shown in
+ * the footer. Never imported by production code.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { buildElementBuffer, computeReport, ELEMENT_STRIDE, getSatInfo, loadCatalog, type EngineReport } from '@/engine'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { buildElementBuffer, computeReport, ELEMENT_STRIDE, getSatInfo, loadCatalog, warmPassWorkers, type EngineReport } from '@/engine'
 import type { Capture, Pass, Place, ProgressEvent } from '@/types'
 import { Button, Glyph, Label, Readout, Rule, Tag, fmtInt, fmtLat, fmtLon, fmtNorad, fmtNum, fmtUtc, glyphForCategory } from '@/ui/system'
+
+/** `?budget=<ms>` overrides the report's GIBS time budget, to exercise the degraded path on demand. */
+const BUDGET_MS = Number(new URLSearchParams(location.search).get('budget')) || undefined
 
 const PLACES: Place[] = [
   { label: 'Waterloo', sublabel: 'Ontario, Canada', lat: 43.4723, lon: -80.5449, countryCode: 'ca', source: 'demo' },
@@ -37,8 +42,17 @@ interface RunLog {
   imaged: number
 }
 
+interface BootInfo {
+  catalogMs: number
+  objects: number
+  epoch: string
+  source: string
+  bufferCount: number
+  bufferMs: number
+}
+
 interface RunState {
-  status: 'running' | 'done' | 'error'
+  status: 'booting' | 'running' | 'done' | 'error'
   place: Place
   progress?: ProgressEvent
   /** The partial report (before GIBS verification) while running, then the final one. */
@@ -50,7 +64,12 @@ const ms = (v: number) => (v < 1000 ? `${Math.round(v)}` : fmtNum(v / 1000, 2))
 const msUnit = (v: number) => (v < 1000 ? 'MS' : 'S')
 
 export default function EngineSandbox() {
-  const [run, setRun] = useState<RunState>({ status: 'running', place: PLACES[0] })
+  const [run, setRun] = useState<RunState>({
+    status: 'booting',
+    place: PLACES[0],
+    progress: { stage: 'catalog', message: 'BOOT · LOADING ORBITAL CATALOG' },
+  })
+  const [boot, setBoot] = useState<BootInfo | null>(null)
   const [log, setLog] = useState<RunLog[]>([])
   const [filter, setFilter] = useState<'all' | Verdict>('all')
   const ctrl = useRef<AbortController | null>(null)
@@ -62,6 +81,7 @@ export default function EngineSandbox() {
     setRun({ status: 'running', place })
     computeReport(place, {
       signal: c.signal,
+      budgetMs: BUDGET_MS,
       onProgress: (progress) => {
         if (!c.signal.aborted) setRun((r) => ({ ...r, progress }))
       },
@@ -98,13 +118,37 @@ export default function EngineSandbox() {
     )
   }, [])
 
+  // Boot like the app: catalog → GPU element buffer (the globe builds it) → warm workers → first report.
   useEffect(() => {
-    start(PLACES[0])
-    return () => ctrl.current?.abort()
+    let alive = true
+    const t0 = performance.now()
+    warmPassWorkers()
+    loadCatalog().then(
+      (c) => {
+        if (!alive) return
+        const catalogMs = performance.now() - t0
+        const t1 = performance.now()
+        const buf = buildElementBuffer(c)
+        setBoot({
+          catalogMs,
+          objects: c.sats.length,
+          epoch: c.fetchedAt,
+          source: c.source,
+          bufferCount: buf.count,
+          bufferMs: performance.now() - t1,
+        })
+        start(PLACES[0])
+      },
+      () => alive && setRun({ status: 'error', place: PLACES[0], message: 'Could not load the orbit catalog. Check the connection and reload.' }),
+    )
+    return () => {
+      alive = false
+      ctrl.current?.abort()
+    }
   }, [start])
 
   const report = run.report
-  const busy = run.status === 'running'
+  const busy = run.status === 'running' || run.status === 'booting'
 
   return (
     <div className="esb">
@@ -185,7 +229,7 @@ export default function EngineSandbox() {
 
       <Rule index="06">Run log</Rule>
       <RunLogTable log={log} />
-      <CatalogFooter />
+      <BootFooter boot={boot} failed={run.status === 'error' && !boot} />
     </div>
   )
 }
@@ -315,7 +359,12 @@ function CaptureCard({ capture, pass }: { capture: Capture; pass?: Pass }) {
         </span>
         <span className="dim">{fmtUtc(pass?.tClosest ?? capture.datetime, false)}Z</span>
         <span className="dim">
-          {capture.cloudCoverPct === undefined ? '—' : `${Math.round(capture.cloudCoverPct)}% CLOUD`} · {capture.gsdM} M
+          {capture.provider === 'gibs'
+            ? 'DAILY MOSAIC'
+            : capture.cloudCoverPct === undefined
+              ? '—'
+              : `${Math.round(capture.cloudCoverPct)}% CLOUD`}{' '}
+          · {capture.gsdM} M
         </span>
       </figcaption>
     </figure>
@@ -438,31 +487,48 @@ function RunLogTable({ log }: { log: RunLog[] }) {
   )
 }
 
-function CatalogFooter() {
-  const [line, setLine] = useState('—')
-  const [gpu, setGpu] = useState('—')
-  useEffect(() => {
-    loadCatalog().then(
-      (c) => {
-        setLine(`${fmtInt(c.sats.length)} OBJECTS · TLE EPOCH ${fmtUtc(Date.parse(c.fetchedAt), false)}Z · ${c.source.toUpperCase()}`)
-        const t0 = performance.now()
-        const buf = buildElementBuffer(c)
-        setGpu(`${fmtInt(buf.count)} × ${ELEMENT_STRIDE} FLOATS · BUILT IN ${Math.round(performance.now() - t0)} MS`)
-      },
-      () => setLine('CATALOG UNAVAILABLE'),
-    )
-  }, [])
+function BootFooter({ boot, failed }: { boot: BootInfo | null; failed: boolean }) {
+  const pending = failed ? 'CATALOG UNAVAILABLE' : '—'
   return (
     <footer className="esb-footer">
       <span className="esb-footer-row">
         <Tag>Catalog</Tag>
-        <span className="t-label">{line}</span>
+        <span className="t-label">
+          {boot ? (
+            <Segments
+              parts={[
+                `${fmtInt(boot.objects)} OBJECTS`,
+                `TLE EPOCH ${fmtUtc(Date.parse(boot.epoch), false)}Z`,
+                boot.source.toUpperCase(),
+                `LOADED IN ${fmtInt(boot.catalogMs)} MS`,
+              ]}
+            />
+          ) : (
+            pending
+          )}
+        </span>
       </span>
       <span className="esb-footer-row">
         <Tag>GPU buffer</Tag>
-        <span className="t-label">{gpu}</span>
+        <span className="t-label">
+          {boot ? <Segments parts={[`${fmtInt(boot.bufferCount)} × ${ELEMENT_STRIDE} FLOATS`, `BUILT IN ${fmtInt(boot.bufferMs)} MS`]} /> : pending}
+        </span>
       </span>
     </footer>
+  )
+}
+
+/** Mono label parts joined by " · ", each kept on one line (dates must never break at a hyphen). */
+function Segments({ parts }: { parts: string[] }) {
+  return (
+    <>
+      {parts.map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 ? ' · ' : null}
+          <span className="esb-seg">{p}</span>
+        </Fragment>
+      ))}
+    </>
   )
 }
 
@@ -498,7 +564,7 @@ const CSS = `
 .esb-bar { height: 1px; background: var(--line); overflow: hidden; }
 .esb-bar-fill { height: 1px; background: var(--signal); transform-origin: left; transition: transform var(--d-sm) var(--ease-out); }
 .esb-error { color: var(--warn); display: flex; gap: var(--s-3); }
-.esb-notes { margin: 0; padding: 0; list-style: none; color: var(--bone-3); font-size: 11px; display: grid; gap: var(--s-1); }
+.esb-notes { margin-block: 0; padding: 0; list-style: none; color: var(--bone-3); font-size: 11px; display: grid; gap: var(--s-1); }
 .esb-notes li::before { content: '※ '; color: var(--warn); }
 .esb-empty { color: var(--bone-3); margin: 0; }
 .esb-scroll { overflow-x: auto; border-top: 1px solid var(--line); -webkit-overflow-scrolling: touch; }
@@ -533,6 +599,7 @@ const CSS = `
 .esb-footer { display: flex; gap: var(--s-3) var(--s-6); padding: var(--s-5) 0 var(--s-6); border-top: 1px solid var(--line); flex-wrap: wrap; }
 .esb-footer-row { display: flex; gap: var(--s-3); align-items: center; min-width: 0; }
 .esb-footer .t-label { white-space: normal; }
+.esb-seg { white-space: nowrap; }
 @media (max-width: 760px) {
   .esb { gap: var(--s-4); }
   .esb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

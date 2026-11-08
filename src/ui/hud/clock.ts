@@ -48,6 +48,3 @@ export function useSecondClock(): number {
     () => now,
   )
 }
-
-/** Negative animation-delay that phase-locks a 1 s CSS animation to the wall-clock second. */
-export const secondPhaseDelay = () => `${-(Date.now() % 1000)}ms`

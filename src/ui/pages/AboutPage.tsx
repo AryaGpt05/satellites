@@ -48,15 +48,27 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
-  // Esc closes; Tab stays inside the dialog.
+  // A modal owns the keyboard. Listening on window in the capture phase, before anything else:
+  //  - Esc and "?" close it (the app's own "?" toggle never sees the key);
+  //  - Tab stays inside the dialog;
+  //  - every other key stops here, so the app's shortcuts behind it (←/→ step passes, Space plays a
+  //    replay, "/" searches) don't act on a screen you can't see. Default actions are untouched:
+  //    Space, arrows and Page keys still scroll the page, Enter still presses a focused button.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      const typing = (e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]')
+      if (e.key === 'Escape' || (e.key === '?' && !typing)) {
         e.preventDefault()
+        e.stopPropagation()
         onCloseRef.current()
         return
       }
-      if (e.key !== 'Tab' || !rootRef.current) return
+      if (e.key !== 'Tab') {
+        e.stopPropagation()
+        return
+      }
+      e.stopPropagation()
+      if (!rootRef.current) return
       const focusables = [...rootRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
         (el) => el.offsetParent !== null,
       )
@@ -74,8 +86,8 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
         first.focus()
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
   // Track which section is being read (the one crossing the upper third of the viewport).
@@ -193,8 +205,9 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 ]}
               />
               <p>
-                Finally we search the archives — Microsoft Planetary Computer and Element 84 Earth Search for Sentinel-2 and
-                Landsat, NASA GIBS for weather imagery — and match real scenes to passes by platform and time. When we show a
+                Finally we search the archives — Microsoft Planetary Computer for Sentinel-2 and Landsat (with Element 84 Earth
+                Search as a second source for Sentinel-2), NASA GIBS for weather imagery — and match real scenes to passes by
+                platform and time. When we show a
                 picture, it is that scene, cropped around the place.
               </p>
             </Section>
@@ -226,9 +239,15 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
               <Facts
                 rows={[
                   ['Computation', 'Orbits and passes are computed in your browser.'],
-                  ['What we store', 'To show how many places have been checked, we store a coarse grid cell — about 10 km across — and a count. Never your exact location.'],
+                  [
+                    'What we store',
+                    'To count how many places have been checked, each search stores a coarse grid cell about 10 km across, with its country and the nearest town’s name. Never your exact location.',
+                  ],
                   ['Who else sees it', 'Place searches, and your position if you choose “Use my location”, go to the Photon geocoder (komoot) to find a name. Image requests go straight from your browser to the archives and include the area being shown.'],
-                  ['Shares', 'A share link contains what you choose to share: the place label and the pass.'],
+                  [
+                    'Shares',
+                    'Only when you make one. A share link is public to anyone who has it: it holds the place name, its position rounded to about 1 km, and the pass you chose.',
+                  ],
                 ]}
               />
             </Section>
@@ -240,7 +259,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 <Credit who="NASA GIBS / EOSDIS">VIIRS and MODIS imagery from NASA’s Global Imagery Browse Services, part of EOSDIS. GOES GeoColor via NOAA and CIRA; Himawari imagery via JMA.</Credit>
                 <Credit who="Orbital data">General Perturbations element sets from CelesTrak. Propagation with satellite.js (SGP4).</Credit>
                 <Credit who="Geocoding">Photon by komoot. Map data © OpenStreetMap contributors, available under the ODbL.</Credit>
-                <Credit who="Earth textures">Solar System Scope (CC BY 4.0); NASA Blue Marble and Black Marble, NASA Earth Observatory.</Credit>
+                <Credit who="Earth textures">Day, night and cloud maps by Solar System Scope (CC BY 4.0), based on NASA Blue Marble and Black Marble imagery.</Credit>
                 <Credit who="Type">Instrument Sans and Instrument Serif by Instrument; Martian Mono by Evil Martians. SIL Open Font License.</Credit>
               </ul>
             </Section>

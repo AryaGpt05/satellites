@@ -13,6 +13,7 @@
  *   slow=1           delay catalog / textures by 2.4 s / 4.2 s to watch the boot log
  *   globe=0          force the stand-in            chrome=0  hide the sandbox toolbar
  *   q=<text>         prefill + run a search (for screenshots of the suggestion list)
+ *   scene=1          put the store on a replay clock 3 days back (the HUD shows the scene time)
  */
 import { Component, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { loadCatalog } from '@/engine'
@@ -78,6 +79,14 @@ export default function ShellSandbox() {
     return () => {
       alive = false
     }
+  }, [])
+
+  // Scene time (replay) for the HUD's scene readout.
+  useEffect(() => {
+    if (params.get('scene') !== '1') return
+    const app = useApp.getState()
+    app.setTimeMode('replay')
+    app.setSimTime(Date.now() - 3 * 86_400_000)
   }, [])
 
   // Global keys like the app: "?" toggles About.

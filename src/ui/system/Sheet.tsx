@@ -54,6 +54,11 @@ export interface SheetProps {
 }
 
 const DEFAULT_SNAPS = [0.3, 0.6, 0.92]
+/**
+ * Mobile: the tallest snap stops this far below the top of the viewport, so the two lines of the top
+ * corner readouts (bezel inset 10 + 12 + 2 × 15 + 3) and a breath of space stay visible above it.
+ */
+const TOP_CLEAR_PX = 64
 /** Movement before a press on the header becomes a drag (so header buttons still click). */
 const DRAG_SLOP_PX = 5
 const DISMISS_PX = 72
@@ -80,7 +85,8 @@ export function Sheet({
   const vh = useViewportHeight()
   const snapKey = snaps.join(',')
   // Leave room above the tallest snap for the top corner readouts.
-  const heights = useMemo(() => snapHeightsPx(snaps, vh, vh - 8), [snapKey, vh])
+  // `snapKey` stands in for `snaps`, which callers often pass as a fresh inline array.
+  const heights = useMemo(() => snapHeightsPx(snaps, vh, vh - TOP_CLEAR_PX), [snapKey, vh])
   const max = heights[heights.length - 1]
 
   const [own, setOwn] = useState(() => defaultSnap ?? Math.floor((snaps.length - 1) / 2))

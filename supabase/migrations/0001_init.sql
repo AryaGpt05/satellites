@@ -15,6 +15,11 @@
 --   * Shares are public by intent, but coordinates are rounded to 0.01° (~1 km) and the pass
 --     geometry is rounded to the same order, so the exact spot cannot be back-solved from it.
 --   * Labelled "popular places" require at least 3 lookups in the cell (k-anonymity floor).
+--   * The share's place label is stored as given (the sharer chose it), so a street-address label
+--     is as precise as the label itself; callers should pass a city-level label.
+--
+-- Tables: lookups (one row per report), lookup_cells (all-time count per cell), lookup_days
+-- (per-day count per cell + label, the 7-day window get_stats ranks from), shares, stats_cache.
 --
 -- Idempotent: safe to run repeatedly (create … if not exists / create or replace).
 -- ════════════════════════════════════════════════════════════════════════════════════════════
@@ -61,12 +66,26 @@ create table if not exists public.shares (
   views         int not null default 0
 );
 
+-- Per-day rollup per cell and label, maintained by record_lookup. get_stats ranks "popular places"
+-- from this (O(cell-days), not O(lookups)), so it stays well inside anon's 3 s statement timeout
+-- however many lookups a week brings. Rows older than the 7-day window are pruned by get_stats.
+create table if not exists public.lookup_days (
+  day           date not null,                   -- UTC
+  cell          text not null,
+  label         text not null default '',        -- '' = no label
+  country_code  text not null default '',        -- '' = unknown
+  n             int  not null default 0,
+  primary key (day, cell, label, country_code)
+);
+
 -- Single-row cache for get_stats (recomputed at most once a minute).
 create table if not exists public.stats_cache (
   id            smallint primary key check (id = 1),
   computed_at   timestamptz not null,
   data          jsonb not null
 );
+-- Last recompute attempt, so a failing recompute backs off instead of retrying on every call.
+alter table public.stats_cache add column if not exists attempted_at timestamptz;
 
 create index if not exists lookups_created_at_idx      on public.lookups (created_at);
 create index if not exists lookups_cell_created_at_idx on public.lookups (cell, created_at);
@@ -77,10 +96,11 @@ create index if not exists shares_created_at_idx       on public.shares (created
 
 alter table public.lookups      enable row level security;
 alter table public.lookup_cells enable row level security;
+alter table public.lookup_days  enable row level security;
 alter table public.shares       enable row level security;
 alter table public.stats_cache  enable row level security;
 
-revoke all on table public.lookups, public.lookup_cells, public.shares, public.stats_cache
+revoke all on table public.lookups, public.lookup_cells, public.lookup_days, public.shares, public.stats_cache
   from public, anon, authenticated;
 revoke all on sequence public.lookups_id_seq from public, anon, authenticated;
 
@@ -95,7 +115,19 @@ as $$
   select case when jsonb_typeof(j -> k) = 'number' then (j ->> k)::numeric end
 $$;
 
--- Trim, drop control characters, collapse whitespace. Empty → null. Longer than max → null.
+-- A JSON number at key k within [lo, hi], or null. Out-of-range values are dropped, not clamped:
+-- a share must never print a number the pass didn't have (1e2000 km, heading 99999°, …).
+create or replace function overflight_private.num_in(j jsonb, k text, lo numeric, hi numeric)
+returns numeric
+language sql immutable
+set search_path = public
+as $$
+  select case when x.n between lo and hi then x.n end from (select overflight_private.num(j, k) as n) x
+$$;
+
+-- Trim, drop control characters and invisible bidi / zero-width format characters (which could
+-- reorder or hide text on the card and share page), collapse whitespace. Empty → null. Longer
+-- than max → null.
 create or replace function overflight_private.clean_text(s text, max_len int)
 returns text
 language sql immutable
@@ -105,7 +137,11 @@ as $$
     when t is null or t = '' or char_length(t) > max_len then null
     else t
   end
-  from (select btrim(regexp_replace(regexp_replace(s, '[[:cntrl:]]', '', 'g'), '\s+', ' ', 'g')) as t) x
+  from (
+    select btrim(regexp_replace(
+             regexp_replace(regexp_replace(s, '[[:cntrl:]]', '', 'g'), '[​-‏‪-‮⁠-⁩﻿]', '', 'g'),
+             '[\s  ]+', ' ', 'g')) as t
+  ) x
 $$;
 
 -- 8-char id from a 32-symbol alphabet (no 1/i/l/o). 32 divides 256, so `byte & 31` is unbiased.
@@ -184,6 +220,23 @@ begin
   insert into public.lookup_cells as c (cell, lat, lon, n, last_at)
   values (v_cell, v_lat, v_lon, 1, now())
   on conflict (cell) do update set n = c.n + 1, last_at = excluded.last_at;
+
+  insert into public.lookup_days as d (day, cell, label, country_code, n)
+  values ((now() at time zone 'utc')::date, v_cell, coalesce(v_label, ''), coalesce(v_country, ''), 1)
+  on conflict (day, cell, label, country_code) do update set n = d.n + 1;
+end
+$$;
+
+-- One-time backfill of the rollup from lookups recorded before it existed (no-op afterwards).
+do $$
+begin
+  if not exists (select 1 from public.lookup_days) then
+    insert into public.lookup_days (day, cell, label, country_code, n)
+    select (created_at at time zone 'utc')::date, cell, coalesce(place_label, ''), coalesce(country_code, ''), count(*)
+    from public.lookups
+    where created_at > now() - interval '8 days'
+    group by 1, 2, 3, 4;
+  end if;
 end
 $$;
 
@@ -258,21 +311,22 @@ begin
 
   -- Rebuild the pass from an allow-list, coarsened (times to the second, distances to ~1 km).
   -- `track` is dropped: it is large, and it is re-derived from the catalog when the link opens.
+  -- Every number must be physically plausible, or it is dropped (never clamped into a fake value).
   v_pass := jsonb_strip_nulls(jsonb_build_object(
     'id',               overflight_private.clean_text(p ->> 'id', 40),
     'norad',            v_norad::int,
     'tClosest',         round(v_tc / 1000) * 1000,
-    'tStart',           round(overflight_private.num(p, 'tStart') / 1000) * 1000,
-    'tEnd',             round(overflight_private.num(p, 'tEnd') / 1000) * 1000,
-    'groundDistanceKm', round(overflight_private.num(p, 'groundDistanceKm'), 0),
-    'offNadirDeg',      round(overflight_private.num(p, 'offNadirDeg'), 1),
-    'elevationDeg',     round(overflight_private.num(p, 'elevationDeg'), 0),
-    'azimuthDeg',       round(overflight_private.num(p, 'azimuthDeg'), 0),
-    'altitudeKm',       round(overflight_private.num(p, 'altitudeKm'), 0),
-    'groundSpeedKmS',   round(overflight_private.num(p, 'groundSpeedKmS'), 2),
-    'headingDeg',       round(overflight_private.num(p, 'headingDeg'), 0),
+    'tStart',           round(overflight_private.num_in(p, 'tStart', v_tc - 86400000, v_tc) / 1000) * 1000,
+    'tEnd',             round(overflight_private.num_in(p, 'tEnd', v_tc, v_tc + 86400000) / 1000) * 1000,
+    'groundDistanceKm', round(overflight_private.num_in(p, 'groundDistanceKm', 0, 20100), 0),
+    'offNadirDeg',      round(overflight_private.num_in(p, 'offNadirDeg', 0, 90), 1),
+    'elevationDeg',     round(overflight_private.num_in(p, 'elevationDeg', -90, 90), 0),
+    'azimuthDeg',       round(overflight_private.num_in(p, 'azimuthDeg', 0, 360), 0),
+    'altitudeKm',       round(overflight_private.num_in(p, 'altitudeKm', 100, 400000), 0),
+    'groundSpeedKmS',   round(overflight_private.num_in(p, 'groundSpeedKmS', 0, 12), 2),
+    'headingDeg',       round(overflight_private.num_in(p, 'headingDeg', 0, 360), 0),
     'node',             case when p ->> 'node' in ('ascending', 'descending') then p ->> 'node' end,
-    'sunElevationDeg',  round(overflight_private.num(p, 'sunElevationDeg'), 0),
+    'sunElevationDeg',  round(overflight_private.num_in(p, 'sunElevationDeg', -90, 90), 0),
     'inSwath',          case when jsonb_typeof(p -> 'inSwath') = 'boolean' then p -> 'inSwath' end,
     'inFieldOfRegard',  case when jsonb_typeof(p -> 'inFieldOfRegard') = 'boolean' then p -> 'inFieldOfRegard' end,
     'verdict',          v_verdict,
@@ -293,14 +347,19 @@ begin
         'itemId',        v_item,
         'provider',      case when c ->> 'provider' in ('earth-search', 'planetary-computer', 'gibs') then c ->> 'provider' end,
         'platform',      overflight_private.clean_text(c ->> 'platform', 40),
-        'datetime',      round(overflight_private.num(c, 'datetime') / 1000) * 1000,
-        'cloudCoverPct', round(least(100, greatest(0, overflight_private.num(c, 'cloudCoverPct'))), 1),
-        'gsdM',          round(overflight_private.num(c, 'gsdM'), 1)
+        -- Acquired within a day of closest approach (GIBS daily mosaics are dated at 00:00 UTC).
+        'datetime',      round(overflight_private.num_in(c, 'datetime', v_tc - 2 * 86400000, v_tc + 2 * 86400000) / 1000) * 1000,
+        -- Missing stays missing. (least/greatest skip NULLs, so clamping here once turned an
+        -- unknown cloud cover into a fabricated 0%.)
+        'cloudCoverPct', round(overflight_private.num_in(c, 'cloudCoverPct', 0, 100), 1),
+        'gsdM',          round(overflight_private.num_in(c, 'gsdM', 0.1, 100000), 1)
       ));
     end if;
   end if;
 
-  -- Abuse limits: 10 / minute from one 0.1° cell, 300 / minute overall.
+  -- Abuse limits: 10 / minute from one 0.1° cell, 300 / minute overall. The per-cell advisory
+  -- lock serialises concurrent creates from one cell so a parallel burst can't race the count.
+  perform pg_advisory_xact_lock(hashtext('overflight.share:' || round(v_lat, 1)::text || ',' || round(v_lon, 1)::text));
   if (select count(*) from public.shares
        where created_at > now() - interval '1 minute'
          and round(lat, 1) = round(v_lat, 1) and round(lon, 1) = round(v_lon, 1)) >= 10
@@ -366,9 +425,52 @@ end
 $$;
 
 -- ── get_stats ───────────────────────────────────────────────────────────────────────────────
--- { total, last24h, places: top 12 cells of the last 7 days (≥ 3 lookups), cells: up to 2000
+-- { total, last24h, places: top 12 cells of the last 7 UTC days (≥ 3 lookups), cells: up to 2000
 --   [lat, lon, count] all-time for a heatmap, computedAt }. Cached for 60 s; concurrent callers
 -- during a recompute get the previous value instead of piling on.
+
+-- The recompute itself. Cost is O(cells + cell-days in the window + lookups in the last 24 h).
+create or replace function overflight_private.compute_stats()
+returns jsonb
+language sql stable
+set search_path = public
+as $$
+  with win as (
+    select d.cell, d.label, d.country_code, sum(d.n)::bigint as n
+    from public.lookup_days d
+    where d.day > (now() at time zone 'utc')::date - 7
+    group by d.cell, d.label, d.country_code
+  ), top as (
+    select w.cell, sum(w.n)::bigint as n
+    from win w
+    group by w.cell
+    having sum(w.n) >= 3                           -- k-anonymity floor
+    order by n desc, w.cell
+    limit 12
+  )
+  select jsonb_build_object(
+    'total',   (select coalesce(sum(n), 0) from public.lookup_cells),
+    'last24h', (select count(*) from public.lookups where created_at > now() - interval '24 hours'),
+    'places',  (
+      select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+               'cell', t.cell,
+               'lat', split_part(t.cell, ',', 1)::numeric,
+               'lon', split_part(t.cell, ',', 2)::numeric,
+               -- the most common label / country recorded for the cell this week
+               'label', (select w.label from win w where w.cell = t.cell and w.label <> ''
+                          group by w.label order by sum(w.n) desc, w.label limit 1),
+               'countryCode', (select w.country_code from win w where w.cell = t.cell and w.country_code <> ''
+                               group by w.country_code order by sum(w.n) desc, w.country_code limit 1),
+               'count', t.n)) order by t.n desc, t.cell), '[]'::jsonb)
+      from top t
+    ),
+    'cells',   (
+      select coalesce(jsonb_agg(jsonb_build_array(c.lat, c.lon, c.n) order by c.n desc, c.cell), '[]'::jsonb)
+      from (select lc.cell, lc.lat, lc.lon, lc.n from public.lookup_cells lc order by lc.n desc, lc.cell limit 2000) c
+    ),
+    'computedAt', floor(extract(epoch from now()) * 1000)
+  )
+$$;
 
 create or replace function public.get_stats()
 returns jsonb
@@ -377,64 +479,61 @@ security definer
 set search_path = public
 as $$
 declare
-  v_cached jsonb;
-  v_at     timestamptz;
-  v_data   jsonb;
+  v_cached  jsonb;
+  v_at      timestamptz;
+  v_tried   timestamptz;
+  v_data    jsonb;
 begin
-  select data, computed_at into v_cached, v_at from public.stats_cache where id = 1;
-  if v_cached is not null and v_at > now() - interval '60 seconds' then
+  select data, computed_at, attempted_at into v_cached, v_at, v_tried from public.stats_cache where id = 1;
+  if v_cached is not null
+     and (v_at > now() - interval '60 seconds' or v_tried > now() - interval '60 seconds') then
     return v_cached;
   end if;
   if not pg_try_advisory_xact_lock(hashtext('overflight.get_stats')) and v_cached is not null then
     return v_cached;
   end if;
 
-  select jsonb_build_object(
-    'total',   (select coalesce(sum(n), 0) from public.lookup_cells),
-    'last24h', (select count(*) from public.lookups where created_at > now() - interval '24 hours'),
-    'places',  (
-      select coalesce(jsonb_agg(jsonb_build_object(
-               'cell', t.cell, 'lat', t.lat, 'lon', t.lon, 'label', t.label,
-               'countryCode', t.cc, 'count', t.n) order by t.n desc, t.cell), '[]'::jsonb)
-      from (
-        select l.cell,
-               split_part(l.cell, ',', 1)::numeric as lat,
-               split_part(l.cell, ',', 2)::numeric as lon,
-               mode() within group (order by l.place_label) as label,
-               mode() within group (order by l.country_code) as cc,
-               count(*) as n
-        from public.lookups l
-        where l.created_at > now() - interval '7 days'
-        group by l.cell
-        having count(*) >= 3
-        order by n desc, l.cell
-        limit 12
-      ) t
-    ),
-    'cells',   (
-      select coalesce(jsonb_agg(jsonb_build_array(c.lat, c.lon, c.n) order by c.n desc, c.cell), '[]'::jsonb)
-      from (select cell, lat, lon, n from public.lookup_cells order by n desc, cell limit 2000) c
-    ),
-    'computedAt', floor(extract(epoch from now()) * 1000)
-  ) into v_data;
+  if v_cached is null then
+    -- First ever call: nothing to fall back to.
+    v_data := overflight_private.compute_stats();
+    insert into public.stats_cache (id, computed_at, attempted_at, data) values (1, now(), now(), v_data)
+    on conflict (id) do update set computed_at = excluded.computed_at, attempted_at = excluded.attempted_at, data = excluded.data;
+    return v_data;
+  end if;
 
-  insert into public.stats_cache (id, computed_at, data) values (1, now(), v_data)
-  on conflict (id) do update set computed_at = excluded.computed_at, data = excluded.data;
-  return v_data;
+  -- Note the attempt first: it commits even if the recompute below fails, so a slow or failing
+  -- recompute is retried at most once a minute while everyone else gets the last good value.
+  update public.stats_cache set attempted_at = now() where id = 1;
+  begin
+    v_data := overflight_private.compute_stats();
+    update public.stats_cache set computed_at = now(), data = v_data where id = 1;
+    -- Keep the rollup bounded: only the 7-day window is ever read.
+    delete from public.lookup_days where day < (now() at time zone 'utc')::date - 8;
+    return v_data;
+  exception
+    when query_canceled then return v_cached;     -- statement timeout
+    when others then return v_cached;
+  end;
 end
 $$;
 
 -- ── Grants ──────────────────────────────────────────────────────────────────────────────────
 
-revoke all on function public.record_lookup(float8, float8, text, text) from public;
-revoke all on function public.create_share(jsonb) from public;
-revoke all on function public.get_share(text, boolean) from public;
-revoke all on function public.get_stats() from public;
+-- Only `anon` (the publishable key) may call them. The app has no sign-in, so `authenticated` gets
+-- nothing; the Supabase advisor's "security definer executable by anon" warnings are this design.
+revoke all on function public.record_lookup(float8, float8, text, text) from public, anon, authenticated;
+revoke all on function public.create_share(jsonb) from public, anon, authenticated;
+revoke all on function public.get_share(text, boolean) from public, anon, authenticated;
+revoke all on function public.get_stats() from public, anon, authenticated;
 
-grant execute on function public.record_lookup(float8, float8, text, text) to anon, authenticated;
-grant execute on function public.create_share(jsonb) to anon, authenticated;
-grant execute on function public.get_share(text, boolean) to anon, authenticated;
-grant execute on function public.get_stats() to anon, authenticated;
+grant execute on function public.record_lookup(float8, float8, text, text) to anon;
+grant execute on function public.create_share(jsonb) to anon;
+grant execute on function public.get_share(text, boolean) to anon;
+grant execute on function public.get_stats() to anon;
+
+-- Helpers defined after the first revoke (compute_stats) get Postgres' default PUBLIC execute;
+-- take it away again. Only the owner (via the SECURITY DEFINER functions above) calls them.
+revoke all on all functions in schema overflight_private from public, anon, authenticated;
 
 -- PostgREST: pick up the new functions now.
 notify pgrst, 'reload schema';

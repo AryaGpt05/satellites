@@ -9,6 +9,7 @@ export const PC_STAC_SEARCH = 'https://planetarycomputer.microsoft.com/api/stac/
 export const PC_DATA = 'https://planetarycomputer.microsoft.com/api/data/v1'
 export const ES_STAC_SEARCH = 'https://earth-search.aws.element84.com/v1/search'
 export const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
+export const GIBS_WMTS = 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0'
 export const WORLDVIEW = 'https://worldview.earthdata.nasa.gov/'
 export const PHOTON = 'https://photon.komoot.io'
 
@@ -84,6 +85,16 @@ export function gibsWmsUrl(layer: string, time: string, place: LatLon, opts: Cro
     `&FORMAT=${encodeURIComponent(format)}&CRS=EPSG:4326` +
     `&BBOX=${lat(s)},${lon(w)},${lat(n)},${lon(e)}&WIDTH=${px}&HEIGHT=${px}&TIME=${encodeURIComponent(time)}`
   )
+}
+
+/**
+ * GIBS WMTS DescribeDomains: the exact time domain GIBS publishes for a layer within [start, end],
+ * e.g. `2026-11-08T02:50:00Z/2026-11-08T05:20:00Z/PT10M` (comma-separated, gaps left out).
+ * CORS `*`, ~0.2 s. The tile matrix set only has to be one GIBS accepts; it doesn't change the
+ * answer. Times are ISO instants without milliseconds.
+ */
+export function gibsDomainsUrl(layer: string, tileMatrixSet: string, startIso: string, endIso: string): string {
+  return `${GIBS_WMTS}/${encodeURIComponent(layer)}/default/${encodeURIComponent(tileMatrixSet)}/all/${startIso}--${endIso}.xml`
 }
 
 /** NASA Worldview deep link: the same layer, day and region, in a human map viewer. */

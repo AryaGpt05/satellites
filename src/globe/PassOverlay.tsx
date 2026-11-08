@@ -56,10 +56,12 @@ interface Look {
 
 function lookFor(pass: Pass, category: SatCategory, mode: 'swath' | 'regard' | 'none'): Look {
   const kind: Look['kind'] = mode === 'none' || pass.verdict === 'overhead' ? 2 : mode === 'regard' ? 1 : 0
-  if (pass.verdict === 'imaged') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.16 }
-  if (pass.verdict === 'likely') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.08 }
+  // Fill alphas are linear-light values on the day side, where they read close to --signal-2 (22%) over land;
+  // the ribbon shader halves them over unlit ground. 'likely' and 'could' are quieter: no image exists.
+  if (pass.verdict === 'imaged') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.12 }
+  if (pass.verdict === 'likely') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.07 }
   const tone: MarkTone = category === 'radar' ? 'ice' : 'bone'
-  return { tone, color: lin(tone === 'ice' ? palette.ice : palette.bone), kind, fill: kind === 1 ? 0.05 : 0.08 }
+  return { tone, color: lin(tone === 'ice' ? palette.ice : palette.bone), kind, fill: kind === 1 ? 0.04 : 0.06 }
 }
 
 function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: number } }) {
@@ -99,6 +101,7 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
           uColor: { value: look.color },
           uFill: { value: look.fill },
           uOpacity: { value: 0 },
+          uSunDir: rt.uniforms.uSunDir,
         },
       }),
     [rt, look],
@@ -220,7 +223,7 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
       <mesh ref={trailMesh} geometry={lines.trail.geometry} material={lines.trail.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={nadirMesh} geometry={lines.nadir.geometry} material={lines.nadir.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={viewMesh} geometry={lines.view.geometry} material={lines.view.material} frustumCulled={false} renderOrder={4} />
-      <SatGlyph category={category} filled={pass.verdict === 'imaged'} tone={look.tone} track={track} />
+      <SatGlyph category={category} imaged={pass.verdict === 'imaged'} tone={look.tone} track={track} />
     </>
   )
 }

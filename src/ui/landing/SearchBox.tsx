@@ -14,7 +14,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { isAbortError, searchPlaces } from '@/imagery'
 import type { Place } from '@/types'
 import { Field, Glyph, Kbd, cx, fmtLat, fmtLon, useIsMobile } from '@/ui/system'
-import { clampActive, enterTarget, isTypingTarget, stepActive } from './listNav'
+import { canSubmitQuery, clampActive, enterTarget, isTypingTarget, stepActive } from './listNav'
 import s from './SearchBox.module.css'
 
 const DEBOUNCE_MS = 220
@@ -169,19 +169,21 @@ export function SearchBox({
   }
 
   const statusText =
-    status === 'searching'
-      ? 'Searching'
-      : status === 'error' && fresh
-        ? 'Search unavailable'
-        : fresh
-          ? places.length
-            ? `${places.length} ${places.length === 1 ? 'match' : 'matches'}`
-            : 'No match'
-          : focused && !query
-            ? 'Name, address or lat, lon'
-            : !query && !mobile
-              ? <Kbd>/</Kbd>
-              : undefined
+    status === 'searching' ? (
+      'Searching'
+    ) : status === 'error' && fresh ? (
+      'Search unavailable'
+    ) : fresh ? (
+      places.length ? (
+        `${places.length} ${places.length === 1 ? 'match' : 'matches'}`
+      ) : (
+        'No match'
+      )
+    ) : focused && !query ? (
+      'Name, address or lat, lon'
+    ) : !query && !mobile ? (
+      <Kbd>/</Kbd>
+    ) : undefined
 
   const showList = open && focused && fresh
   const activeId = showList && active >= 0 ? `${listId}-${active}` : undefined
@@ -201,7 +203,8 @@ export function SearchBox({
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [showList])
-  const canSubmit = query.trim().length >= MIN_QUERY
+  // The primary action only shows when it can do something: never next to "No match" or "unavailable".
+  const canSubmit = canSubmitQuery(query, MIN_QUERY, result && { q: result.q, count: result.places.length })
 
   return (
     <div ref={wrapRef} className={s.search}>
@@ -209,9 +212,14 @@ export function SearchBox({
         ref={inputRef}
         id={inputId}
         size="lg"
+        className={s.field}
         label={
           <>
-            <span className={s.idx}>01</span> / Place
+            {/* the index is decoration: the accessible name is just "Place" */}
+            <span aria-hidden>
+              <span className={s.idx}>01</span> /{' '}
+            </span>
+            Place
           </>
         }
         status={statusOverride ?? statusText}
@@ -292,38 +300,41 @@ export function SearchBox({
         }}
       />
 
-      <div className={cx(s.list, showList && s.listOpen)} id={listId} role="listbox" aria-label="Places" style={maxH ? { maxHeight: maxH } : undefined}>
+      <div className={cx(s.list, showList && s.listOpen)} style={maxH ? { maxHeight: maxH } : undefined}>
+        {/* Messages sit outside the listbox: only options belong in it. The field's status announces them. */}
         {showList && status === 'error' ? (
           <p className={s.empty}>The place search isn’t answering. Coordinates such as 43.47, −80.54 still work.</p>
         ) : null}
         {showList && status !== 'error' && !places.length ? (
           <p className={s.empty}>Nothing matches “{result?.q}”. Try a city, a landmark, or coordinates.</p>
         ) : null}
-        {showList
-          ? places.map((p, i) => (
-              <div
-                key={`${p.lat},${p.lon},${p.label}`}
-                id={`${listId}-${i}`}
-                role="option"
-                aria-selected={i === active}
-                className={cx(s.option, i === active && s.active)}
-                onPointerDown={(e) => e.preventDefault()}
-                onPointerMove={() => i !== active && setActive(i)}
-                onClick={() => choose(p)}
-              >
-                <span className={s.optText}>
-                  <span className={s.optLabel}>{p.label}</span>
-                  {p.sublabel ? <span className={s.optSub}>{p.sublabel}</span> : null}
-                </span>
-                {/* a place named by its own coordinates (open sea, geocoder offline) doesn't repeat them */}
-                {p.label.includes('°') ? null : (
-                  <span className={s.optCoord}>
-                    {fmtLat(p.lat, 2)} {fmtLon(p.lon, 2)}
+        <div id={listId} role="listbox" aria-label="Places">
+          {showList
+            ? places.map((p, i) => (
+                <div
+                  key={`${p.lat},${p.lon},${p.label}`}
+                  id={`${listId}-${i}`}
+                  role="option"
+                  aria-selected={i === active}
+                  className={cx(s.option, i === active && s.active)}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onPointerMove={() => i !== active && setActive(i)}
+                  onClick={() => choose(p)}
+                >
+                  <span className={s.optText}>
+                    <span className={s.optLabel}>{p.label}</span>
+                    {p.sublabel ? <span className={s.optSub}>{p.sublabel}</span> : null}
                   </span>
-                )}
-              </div>
-            ))
-          : null}
+                  {/* a place named by its own coordinates (open sea, geocoder offline) doesn't repeat them */}
+                  {p.label.includes('°') ? null : (
+                    <span className={s.optCoord}>
+                      {fmtLat(p.lat, 2)} {fmtLon(p.lon, 2)}
+                    </span>
+                  )}
+                </div>
+              ))
+            : null}
+        </div>
       </div>
     </div>
   )

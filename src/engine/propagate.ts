@@ -82,11 +82,18 @@ export function stateAt(satrec: SatRec, ms: number): SatState | null {
   }
 }
 
-/** Sampled geodetic track over [t0, t1] (inclusive of both ends). Points where SGP4 fails are skipped. */
+/**
+ * Sampled geodetic track at t0, t0 + step, … ≤ t1 (both ends included when (t1 − t0) is a whole number
+ * of steps). Times are computed as t0 + k·step, never accumulated, so they are exact for integer
+ * inputs. Points where SGP4 fails are skipped.
+ */
 export function trackFor(satrec: SatRec, t0: number, t1: number, stepS = 20): TrackPoint[] {
   const out: TrackPoint[] = []
+  if (!(t1 >= t0)) return out
   const step = Math.max(1, stepS) * 1000
-  for (let t = t0; t <= t1 + 1e-6; t += step) {
+  const n = Math.floor((t1 - t0) / step + 1e-9)
+  for (let k = 0; k <= n; k++) {
+    const t = t0 + k * step
     const p = subPointAt(satrec, t)
     if (p) out.push({ t, lat: p.lat, lon: p.lon, altKm: p.altKm })
   }

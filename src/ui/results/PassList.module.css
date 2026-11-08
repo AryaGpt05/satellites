@@ -279,3 +279,10 @@
 .down {
   transform: rotate(90deg);
 }
+
+/* Narrow phones: the word "Latest" is what gives way, so the relative time ("10 h ago") still fits. */
+@media (max-width: 420px) {
+  .latestWord {
+    display: none;
+  }
+}

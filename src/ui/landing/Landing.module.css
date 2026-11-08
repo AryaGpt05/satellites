@@ -1,16 +1,27 @@
 /*
  * Landing layout on the 12-column grid inside the bezel (DESIGN §4):
- *   desktop ≥ 1200px  text column spans 6 columns, left; globe owns the right half
- *   761–1199px        text column spans 8 columns
+ *   desktop ≥ 1200px  text column spans 6 columns, left (search and copy 5); globe owns the right half
+ *   761–1199px        text column spans 7 columns
  *   phones            stacked under the globe, anchored to the bottom
+ *
+ * Vertical rhythm scales with the viewport height (clamped), so the column fits between the top and
+ * bottom corner readouts from 1440 × 900 down to 1280 × 720 and shorter laptop windows.
  */
 .landing {
   --content-w: calc(100vw - 2 * (var(--bezel-inset) + var(--margin)));
   --col: calc((var(--content-w) - 11 * var(--gutter)) / 12);
+  --span-7: calc(var(--col) * 7 + var(--gutter) * 6);
   --span-6: calc(var(--col) * 6 + var(--gutter) * 5);
   --span-5: calc(var(--col) * 5 + var(--gutter) * 4);
-  --span-4: calc(var(--col) * 4 + var(--gutter) * 3);
-  --span-3: calc(var(--col) * 3 + var(--gutter) * 2);
+  /* the search line, the rows that align with its right edge, and notes under it */
+  --search-w: min(var(--span-5), 640px);
+  /* clear of the two-line corner readouts (bezel + 14 px + 2 lines) with a 12 px breath */
+  --clear-y: 64px;
+  --gap-kicker: clamp(16px, 3.4vh, 30px);
+  --gap-sub: clamp(16px, 3.4vh, 30px);
+  --gap-search: clamp(24px, 5.4vh, 48px);
+  --gap-examples: clamp(20px, 4.4vh, 40px);
+  --gap-stats: clamp(14px, 3vh, 28px);
   position: absolute;
   inset: 0;
 }
@@ -23,15 +34,22 @@
 .column {
   position: absolute;
   left: calc(var(--bezel-inset) + var(--margin));
-  top: calc(var(--bezel-inset) + 72px);
-  bottom: calc(var(--bezel-inset) + 72px);
+  top: calc(var(--bezel-inset) + var(--clear-y));
+  bottom: calc(var(--bezel-inset) + var(--clear-y));
   width: var(--span-6);
   display: flex;
   flex-direction: column;
   justify-content: center;
+  /* if it ever doesn't fit, overflow downward, never up into the top readouts */
+  justify-content: safe center;
   pointer-events: none;
 }
-.column > * {
+.content {
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+.content > * {
   pointer-events: auto;
 }
 
@@ -40,7 +58,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 30px;
+  margin-bottom: var(--gap-kicker);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-size: var(--fs-label);
@@ -73,16 +91,17 @@
   font-stretch: 75%;
   font-weight: 560;
   /* never taller than the viewport allows */
-  font-size: min(var(--fs-display), 12.2vh);
+  font-size: min(var(--fs-display), 11.4vh);
   line-height: 0.92;
   letter-spacing: var(--track-display);
   color: var(--bone);
   font-kerning: normal;
 }
-/* Each line is a mask; pad the box so descenders and the italic overhang are inside the clip. */
+/* Each line is a mask; pad the box so descenders and the italic's overhangs (the swash of the "y"
+   hangs left of the margin) are inside the clip while it wipes. */
 .hl {
-  padding: 0.05em 0.08em 0.16em 0;
-  margin: -0.05em -0.08em -0.16em 0;
+  padding: 0.05em 0.08em 0.16em 0.14em;
+  margin: -0.05em -0.08em -0.16em -0.14em;
 }
 .serif {
   font-family: var(--font-serif);
@@ -97,8 +116,8 @@
 
 /* ── sub copy ─────────────────────────────────────────────────── */
 .sub {
-  margin: 30px 0 0;
-  max-width: min(var(--span-5), 34em);
+  margin: var(--gap-sub) 0 0;
+  max-width: min(var(--search-w), 34em);
   font-size: clamp(15px, 1.22vw, 18px);
   line-height: 1.45;
   color: var(--bone-2);
@@ -107,9 +126,8 @@
 
 /* ── search + locate ──────────────────────────────────────────── */
 .searchBlock {
-  width: var(--span-5);
-  max-width: 640px;
-  margin-top: 48px;
+  width: var(--search-w);
+  margin-top: var(--gap-search);
 }
 /* Mask rise for blocks that must not stay clipped afterwards (the suggestion list overflows). */
 .rise {
@@ -146,6 +164,10 @@
 .locateInline:hover {
   color: var(--bone);
 }
+/* the ring hugs the button (its left edge is the divider) instead of floating over the line */
+.locateInline:focus-visible {
+  outline-offset: 0;
+}
 .locStatus {
   display: inline-flex;
   align-items: center;
@@ -174,6 +196,11 @@
     opacity: 0;
   }
 }
+/* Notes under the field. flow-root keeps the first note's margin inside, so its measured height is
+   its real footprint (see useBalance). */
+.notes {
+  display: flow-root;
+}
 /* honesty footnote: mono, bone-3 (DESIGN §7) */
 .footnote {
   margin: 14px 0 0;
@@ -186,27 +213,43 @@
   line-height: 1.6;
   color: var(--bone-3);
 }
+/* A plain fault line in the panel language: flat ink, hairline frame, mono label. Not --warn, which
+   DESIGN reserves for data caveats. */
 .error {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  align-items: baseline;
+  gap: 14px;
   margin: 14px 0 0;
-  padding: 10px 12px 10px 14px;
-  max-width: var(--span-5);
-  border-left: 2px solid var(--warn);
+  padding: 10px 10px 11px 14px;
+  border: 1px solid var(--line-strong);
   background: var(--ink-1);
   font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--bone-2);
 }
+.errorLabel {
+  flex: none;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone);
+}
+.errorText {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
 .errorClose {
   flex: none;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  margin: -4px 0;
   color: var(--bone-3);
 }
 .errorClose:hover {
@@ -215,8 +258,21 @@
 
 /* ── examples ─────────────────────────────────────────────────── */
 .examples {
-  margin-top: 40px;
+  margin-top: var(--gap-examples);
   width: var(--span-6);
+}
+/* While suggestions are open they cover this block; where the chip row is wider than the list, a
+   stray chip would peek out beside it. */
+.landing:has([role='option']) .examples {
+  visibility: hidden;
+}
+/* "02 / Or try" left, the hovered place right: the same row as the field's label + status */
+.examplesHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  width: var(--search-w);
 }
 .examplesHead,
 .exHint,
@@ -270,7 +326,7 @@
   cursor: default;
 }
 .exHint {
-  margin: 12px 0 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -283,20 +339,52 @@
 }
 
 .stats {
-  margin: 28px 0 0;
+  margin: var(--gap-stats) 0 0;
 }
 .statNum {
   color: var(--bone-2);
 }
 
+/* "Use my location" in full on wide screens; the short form on phones */
+.locateLabelShort {
+  display: none;
+}
+
+/* ── short desktop windows (≈ 1280 × 720 and below) ────────────── */
+@media (min-width: 761px) and (max-height: 760px) {
+  .headline {
+    font-size: min(var(--fs-display), 10.6vh);
+  }
+}
+@media (min-width: 761px) and (max-height: 800px) {
+  /* the stats footnote is a nicety: below 800 px it would crowd the bottom corner readouts */
+  .stats {
+    display: none;
+  }
+}
+@media (min-width: 761px) and (max-height: 900px) {
+  /* Not enough height for both: a locate note takes the chips' place until it is dismissed (the
+     chips are disabled while locating anyway), so the hero never moves and stays clear of the
+     corner readouts from 1440 × 900 down to 1280 × 720. Taller screens keep both. */
+  .landing[data-note] .examples {
+    display: none;
+  }
+}
+@media (min-width: 761px) and (max-height: 620px) {
+  /* the kicker is the first thing to go; the window is still in the sub copy */
+  .kicker {
+    display: none;
+  }
+}
+
 /* ── tablet ───────────────────────────────────────────────────── */
 @media (max-width: 1199px) {
+  .landing {
+    --search-w: var(--span-6);
+  }
   .column,
   .examples {
-    width: calc(var(--col) * 7 + var(--gutter) * 6);
-  }
-  .searchBlock {
-    width: var(--span-6);
+    width: var(--span-7);
   }
 }
 
@@ -339,6 +427,9 @@
     max-width: 30em;
     font-size: 15px;
   }
+  .landing {
+    --search-w: 100%;
+  }
   .searchBlock,
   .examples {
     width: 100%;
@@ -349,9 +440,12 @@
   .locateLabel {
     display: none;
   }
+  .locateLabelShort {
+    display: inline;
+  }
   .locateInline {
     height: 40px;
-    padding: 0 4px 0 14px;
+    padding: 0 2px 0 14px;
   }
   .examples {
     margin-top: 22px;
@@ -373,6 +467,9 @@
   }
   .stats {
     margin-top: 16px;
+    /* real counts grow ("12,345 places checked…"): wrap rather than run past the bezel */
+    white-space: normal;
+    text-wrap: balance;
   }
 
   /* Search mode: the field rises to the top, clear of the on-screen keyboard. */
@@ -397,9 +494,11 @@
   }
 }
 
-/* short phones (e.g. 375 × 667): drop the kicker and tighten, so the globe keeps the top third */
+/* short phones (e.g. 375 × 667): drop the kicker and the stats, and tighten, so the globe keeps the
+   top third */
 @media (max-width: 760px) and (max-height: 720px) {
-  .kicker {
+  .kicker,
+  .stats {
     display: none;
   }
   .headline {

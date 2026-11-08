@@ -205,10 +205,14 @@ export function PushbroomReveal({ src, headingDeg, lines, alt, overlay, caption,
           </div>
         ) : null}
         {overlay ? <div className={s.overlay}>{overlay({ centreLocked, phase })}</div> : null}
+        {/* The counter rides on the image while it scans (the caption below may be off-screen). */}
+        <span className={cx(s.scanChip, phase === 'revealing' && s.scanChipOn)} aria-hidden>
+          <LiveDot className={s.dot} />
+          Line <b>{lineLabel(line)}</b> → {lineLabel(lines)}
+        </span>
       </div>
       <figcaption className={s.caption}>
         <span className={s.counter} aria-hidden>
-          {phase === 'revealing' ? <LiveDot className={s.dot} /> : null}
           Line <b>{lineLabel(phase === 'loading' || phase === 'error' ? 0 : line)}</b> → {lineLabel(lines)}
         </span>
         {caption ? <span className={s.captionRest}>{caption}</span> : null}

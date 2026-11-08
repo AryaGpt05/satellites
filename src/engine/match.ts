@@ -7,14 +7,15 @@
  *                         minutes (measured: 16:14:21 archive vs 16:21:14 SGP4 over Waterloo).
  *  - GIBS daily mosaics:  the imagery module stamps them with the pass they were derived from.
  * So a scene matches the pass of the same satellite whose closest approach lies in
- * [datetime − 10 min, datetime + 50 min]. One satellite cannot pass the same place twice inside an hour
- * (orbits are ~95–100 min apart), so the window is unambiguous.
+ * [datetime − 10 min, datetime + 60 min]. Sentinel-2 only images on the sunlit half of its 100-minute
+ * orbit, so a datatake cannot start much more than 50 min before it reaches any place; and one satellite
+ * cannot pass the same place twice within ~95 min (one orbit), so the window is unambiguous.
  */
 import type { Capture, Pass } from '@/types'
 import { noradForGibsCollection, noradForPlatform } from './profiles'
 
 export const MATCH_BEFORE_MS = 10 * 60_000
-export const MATCH_AFTER_MS = 50 * 60_000
+export const MATCH_AFTER_MS = 60 * 60_000
 
 export function captureNorad(c: Capture): number | undefined {
   return c.norad ?? noradForPlatform(c.platform) ?? noradForGibsCollection(c.collection)
@@ -77,9 +78,12 @@ export function utcDay(ms: number): string {
  */
 export function attachDailyCaptures(passes: Pass[], captures: readonly Capture[]): Capture[] {
   const matched: Capture[] = []
+  const seen = new Set<string>()
   for (const c of captures) {
     const norad = captureNorad(c)
-    if (norad === undefined) continue
+    // A capture id is one image: it may illustrate one pass only, even if a source repeats it.
+    if (norad === undefined || seen.has(c.id)) continue
+    seen.add(c.id)
     const day = utcDay(c.datetime)
     let best: Pass | undefined
     for (const p of passes) {

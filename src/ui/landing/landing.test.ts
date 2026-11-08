@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { clampActive, enterTarget, isTypingTarget, stepActive } from './listNav'
+import { balancePad } from './balance'
+import { canSubmitQuery, clampActive, enterTarget, isTypingTarget, stepActive } from './listNav'
 import { EXAMPLE_PLACES } from './places'
 import { validStats } from './stats'
 import { windowLabel } from './windowLabel'
@@ -64,5 +65,38 @@ describe('lookup stats guard', () => {
     expect(validStats({ total: 10, last24h: 11 })).toBe(false)
     expect(validStats({ total: NaN, last24h: 1 })).toBe(false)
     expect(validStats({ total: '12', last24h: 1 })).toBe(false)
+  })
+})
+
+describe('primary action availability', () => {
+  it('needs a query of the minimum length', () => {
+    expect(canSubmitQuery('', 2, null)).toBe(false)
+    expect(canSubmitQuery(' a ', 2, null)).toBe(false)
+    expect(canSubmitQuery('Wa', 2, null)).toBe(true)
+  })
+  it('is withheld only when the answer for exactly this query was empty', () => {
+    expect(canSubmitQuery('qqqzzxv', 2, { q: 'qqqzzxv', count: 0 })).toBe(false)
+    expect(canSubmitQuery('qqqzzxv ', 2, { q: 'qqqzzxv', count: 0 })).toBe(false)
+    expect(canSubmitQuery('Waterloo', 2, { q: 'Waterloo', count: 6 })).toBe(true)
+    // typing on after an empty answer: offer it again (Enter searches the new text)
+    expect(canSubmitQuery('qqqzzxva', 2, { q: 'qqqzzxv', count: 0 })).toBe(true)
+  })
+})
+
+describe('hero balance', () => {
+  // column 740 px tall, idle content 640 px
+  it('absorbs a note that fits by padding the top by its height', () => {
+    expect(balancePad(740, 688, 640, 48)).toBe(48)
+  })
+  it('absorbs only as much as the free space below allows', () => {
+    expect(balancePad(740, 715, 640, 75)).toBe(25)
+    expect(balancePad(560, 600, 525, 75)).toBe(0)
+  })
+  it('pads the bottom when the note replaces something taller (content shrank)', () => {
+    expect(balancePad(560, 510, 525, 75)).toBe(-15)
+  })
+  it('does nothing without a note, and assumes pure growth before the first idle measurement', () => {
+    expect(balancePad(740, 640, 640, 0)).toBe(0)
+    expect(balancePad(740, 688, null, 48)).toBe(48)
   })
 })

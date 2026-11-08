@@ -21,20 +21,25 @@ export type MarkTone = 'signal' | 'bone' | 'ice'
 
 const toneColor = (tone: MarkTone) => lin(tone === 'signal' ? palette.signal : tone === 'ice' ? palette.ice : palette.bone)
 
+/**
+ * Form follows DESIGN.md §2 (and Glyph.tsx glyphForCategory): only open-optical has a filled form (◆, "a real
+ * image exists"); every other category keeps its outline form when it imaged the place and says so by colour.
+ */
 export function SatGlyph({
   category,
-  filled,
+  imaged,
   tone,
   track,
   size = 13,
 }: {
   category: SatCategory
-  filled: boolean
+  imaged: boolean
   tone: MarkTone
   track: SatTrackFn
   size?: number
 }) {
   const rt = useRuntime()
+  const filled = imaged && category === 'open-optical'
   const points = useRef<Points>(null)
   const geometry = useMemo(() => {
     const g = new BufferGeometry()

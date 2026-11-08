@@ -8,23 +8,46 @@
  * are hidden and the two essentials (sun, clock) condense into the top-right block.
  * When the scene is not showing live time (replay / scrub), the TR block adds the scene time.
  */
-import { useState } from 'react'
+import { useRef } from 'react'
 import { subsolarPoint } from '@/lib/geo'
 import { useApp } from '@/state/store'
-import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc } from '@/ui/system'
+import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync } from '@/ui/system'
 import { useCatalogStatus } from './catalogStatus'
-import { secondPhaseDelay, useSecondClock } from './clock'
+import { useSecondClock } from './clock'
 import { fmtAge, fmtGmst, fmtObjects, fmtSource, fmtStampZ, fmtSun, isStale } from './readouts'
 import s from './Hud.module.css'
 
 export const VERSION = 'v0.1'
 
+/**
+ * The scene clock, when the globe isn't on live time (replay / scrub). Its own subscriber: a replay at
+ * 60× changes the scene second every frame, and only this line should re-render for it.
+ * Phones get the compact form ("11-05 06:54:20") so it clears the top-left readout.
+ */
+function SceneTime() {
+  const sceneSecond = useApp((st) => Math.floor(st.simTime / 1000))
+  const [date, time] = fmtUtc(sceneSecond * 1000).split(' ')
+  return (
+    <span className={cx(s.line, s.dim)}>
+      Scene
+      <span className={s.sceneValue}>
+        <span className={s.desk}>{date} </span>
+        <span className={s.mobInline}>{date.slice(5)} </span>
+        {time}
+        <span className={s.desk}> UTC</span>
+      </span>
+    </span>
+  )
+}
+
 export function Hud({ onAbout }: { onAbout?: () => void }) {
   const now = useSecondClock()
-  // Re-render on scene-time changes at 1 s resolution only, and only when not live.
-  const sceneSecond = useApp((st) => (st.timeMode === 'live' ? 0 : Math.floor(st.simTime / 1000)))
+  const live = useApp((st) => st.timeMode === 'live')
   const catalog = useCatalogStatus()
-  const [dotDelay] = useState(secondPhaseDelay)
+  // Every blink in the chrome (the live dot, the pending cursor) is on for the first half of each UTC
+  // second, the same frame the clock digits change.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useWallSecondSync(rootRef)
 
   const utc = fmtUtc(now)
   const [date, time] = utc.split(' ')
@@ -32,7 +55,7 @@ export function Hud({ onAbout }: { onAbout?: () => void }) {
   const stale = catalog.state === 'ready' && isStale(catalog.fetchedAt, now)
 
   return (
-    <div className={s.hud}>
+    <div ref={rootRef} className={s.hud}>
       <Bezel />
 
       <CornerReadout corner="tl" label="Overflight">
@@ -43,7 +66,7 @@ export function Hud({ onAbout }: { onAbout?: () => void }) {
         {onAbout ? (
           <Reveal axis="x" duration={480} delay={60} as="div" className={s.line}>
             <button type="button" className={s.about} onClick={onAbout} aria-keyshortcuts="?">
-              How this works
+              <span className={s.aboutText}>How this works</span>
               <Kbd className={s.desk}>?</Kbd>
             </button>
           </Reveal>
@@ -52,18 +75,15 @@ export function Hud({ onAbout }: { onAbout?: () => void }) {
 
       <CornerReadout corner="tr" label="Time">
         <Reveal axis="x" duration={480} delay={80} as="div" className={s.line}>
-          <span className={s.dot} style={{ animationDelay: dotDelay }} aria-hidden />
+          <span className={s.dot} aria-hidden />
           <time dateTime={new Date(now).toISOString()} className={s.clock}>
             <span className={cx(s.dim, s.desk)}>{date} </span>
             {time} UTC
           </time>
         </Reveal>
-        {sceneSecond ? (
-          <span className={cx(s.line, s.dim)}>
-            Scene <span className={s.value}>{fmtUtc(sceneSecond * 1000)}</span>
-          </span>
-        ) : null}
-        <span className={cx(s.line, s.mob)}>{sun}</span>
+        {live ? null : <SceneTime />}
+        {/* phones: the sun joins the clock (bottom corners are hidden); a replay's scene time takes its place */}
+        {live ? <span className={cx(s.line, s.mob)}>{sun}</span> : null}
       </CornerReadout>
 
       <CornerReadout corner="bl" label="Orbit catalog" className={s.desk}>

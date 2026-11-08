@@ -18,9 +18,11 @@
     --timeline-h: 112px;
   }
 }
-/* Raise the dock so the timeline fits beneath it (doubled selector beats Sheet's .dock). */
-.panel.panel {
-  bottom: calc(var(--bezel-inset) + var(--timeline-clear));
+/* Desktop: raise the dock so the timeline fits beneath it (doubled selector beats Sheet's .dock). */
+@media (min-width: 761px) {
+  .panel.panel {
+    bottom: calc(var(--bezel-inset) + var(--timeline-clear));
+  }
 }
 
 .timelineDock {
@@ -30,7 +32,8 @@
   right: calc(var(--bezel-inset) + var(--margin));
   bottom: calc(var(--bezel-inset) + var(--timeline-bottom));
   height: var(--timeline-h);
-  animation: rise var(--d-md) var(--ease-out) both;
+  /* backwards, not both: a retained clip-path would clip the hover tooltip above the strip */
+  animation: rise var(--d-md) var(--ease-out) backwards;
   animation-delay: 120ms;
 }
 @keyframes rise {
@@ -45,7 +48,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .timelineDock {
-    animation: fade var(--d-md) linear both;
+    animation: fade var(--d-md) linear backwards;
   }
 }
 @keyframes fade {
@@ -194,7 +197,8 @@
 /* ── verdict readouts ─────────────────────────────────────────── */
 .verdicts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* auto: the 4-digit "could" count takes the room it needs */
+  grid-template-columns: repeat(4, auto);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -228,9 +232,9 @@
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 300;
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 .verdictLabel {
@@ -381,4 +385,8 @@
 
 .empty {
   padding: 32px 0;
+}
+
+.coordsText {
+  color: var(--bone-2);
 }

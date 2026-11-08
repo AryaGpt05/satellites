@@ -73,12 +73,22 @@ check 'create_share label > 120 → 400' '400' "$STATUS" "$BODY"
 rpc create_share '{"payload":{"placeLabel":"x","lat":1,"lon":1,"pass":{"norad":1,"verdict":"pwned","tClosest":1}}}'
 check 'create_share bad verdict → 400' '400' "$STATUS" "$BODY"
 
+# Implausible numbers are dropped (never stored, never clamped); missing cloud cover stays missing;
+# invisible bidi / zero-width characters are stripped from labels.
+rpc create_share '{"payload":{"placeLabel":"Overflight‮ verify​","lat":43.47,"lon":-80.54,"pass":{"norad":60989,"verdict":"imaged","tClosest":'"$NOW_MS"',"altitudeKm":1e2000,"headingDeg":99999,"offNadirDeg":-5,"tStart":-1e300,"groundDistanceKm":12},"capture":{"collection":"gibs-viirs-noaa20","itemId":"VIIRS_NOAA20_CorrectedReflectance_TrueColor@2026-11-01","platform":"noaa-20","datetime":'"$NOW_MS"'}}}'
+check 'create_share with junk numbers → id' '200' "$STATUS" "$BODY"
+JID=$(echo "$BODY" | tr -d '"')
+rpc get_share "{\"p_id\":\"$JID\",\"p_view\":false}"
+if echo "$BODY" | grep -Eq '"(altitudeKm|headingDeg|offNadirDeg|tStart|cloudCoverPct)"'; then check 'implausible numbers + missing cloud dropped' 'x' leaked "$BODY"
+else check 'implausible numbers + missing cloud dropped' '.*' ok "$(echo "$BODY" | head -c 120)"; fi
+echo "$BODY" | grep -q '"placeLabel": "Overflight verify"' && check 'bidi / zero-width stripped from label' '.*' ok '' || check 'bidi / zero-width stripped' 'x' bad "$BODY"
+
 rpc get_stats '{}'
 check 'get_stats → json' '200' "$STATUS" "$BODY"
 echo "$BODY" | grep -q '"total"' && echo "$BODY" | grep -q '"cells"' && check 'get_stats has total + cells' '.*' ok '' || check 'get_stats shape' 'x' bad "$BODY"
 
 echo "Direct table access (must be denied)"
-for t in shares lookups lookup_cells stats_cache; do
+for t in shares lookups lookup_cells lookup_days stats_cache; do
   get "/rest/v1/$t?select=*&limit=1"
   check "GET /rest/v1/$t denied" '401|403|404' "$STATUS" "$BODY"
 done
@@ -93,6 +103,7 @@ CLEAN="delete from public.shares where place_label = 'Overflight verify';
 with d as (delete from public.lookups where place_label = 'Overflight verify' returning cell)
 update public.lookup_cells c set n = c.n - x.k from (select cell, count(*) k from d group by cell) x where c.cell = x.cell;
 delete from public.lookup_cells where n <= 0;
+delete from public.lookup_days where label = 'Overflight verify';
 delete from public.stats_cache;"
 AUTH=()
 if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]]; then AUTH=(-H "authorization: Bearer ${SUPABASE_ACCESS_TOKEN}"); fi

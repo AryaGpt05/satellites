@@ -28,3 +28,13 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   const e = el as HTMLElement
   return !!e.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')
 }
+
+/**
+ * Whether the primary "go" action should be offered: there is a query to act on, and the latest
+ * answer for exactly this query isn't empty ("No match" / "Search unavailable" offer no action).
+ */
+export function canSubmitQuery(query: string, minLength: number, answer: { q: string; count: number } | null): boolean {
+  const q = query.trim()
+  if (q.length < minLength) return false
+  return !(answer && answer.q === q && answer.count === 0)
+}

@@ -68,7 +68,7 @@
   display: inline-block;
   width: 14px;
   height: 8px;
-  background: rgb(236 232 224 / 0.09);
+  background: color-mix(in srgb, var(--bone) 9%, transparent);
   border: 1px solid var(--line);
 }
 @media (max-width: 1180px) {
@@ -227,6 +227,10 @@
   padding-left: 5px;
   border-left: 1px solid var(--bone-4);
   line-height: 1;
+}
+.dayStart {
+  border-left-color: transparent;
+  padding-left: 0;
 }
 .compact .day {
   top: 4px;

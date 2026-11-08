@@ -27,11 +27,11 @@
  * Pure functions only: this module runs inside the pass workers and in tests.
  */
 import { sgp4, type SatRec } from 'satellite.js'
-import { bearingDeg, DEG, EARTH_EQ_RADIUS_KM, EARTH_RADIUS_KM, gmst, haversineKm, MU_KM3_S2, sunElevationDeg } from '@/lib/geo'
+import { bearingDeg, DEG, EARTH_EQ_RADIUS_KM, EARTH_RADIUS_KM, gmst, haversineKm, MU_KM3_S2 } from '@/lib/geo'
 import type { CatalogRow, LatLon, Pass, SatInfo } from '@/types'
 import { isPassCategory, type PassCategory } from './categories'
 import { ROW, satrecFromRow } from './catalog'
-import { elevationDeg, groundRangeAtElevationKm, groundRangeAtOffNadirKm, offNadirDeg } from './geometry'
+import { elevationDeg, groundRangeAtElevationKm, groundRangeAtOffNadirKm, offNadirDeg, sunElevationAtDeg } from './geometry'
 import { subPointAt, trackFor, tsinceMin, type SubPoint } from './propagate'
 
 export type FieldMode = 'swath' | 'regard' | 'elevation'
@@ -239,7 +239,7 @@ function geometryAt(satrec: SatRec, target: PassTarget, place: LatLon, t: number
     headingDeg: bearingDeg(before, after),
     groundSpeedKmS: haversineKm(before, after) / 2,
     node: after.lat >= before.lat ? 'ascending' : 'descending',
-    sunElevationDeg: sunElevationDeg(place.lat, place.lon, t),
+    sunElevationDeg: sunElevationAtDeg(place.lat, place.lon, t),
     inSwath,
     inFieldOfRegard,
     fieldKm,
@@ -270,7 +270,7 @@ function assemblePass(
   g: Geometry,
   verdict: Pass['verdict'],
 ): Pass {
-  const [tStart, tEnd] = fieldEdges(satrec, place, tClosest, g.fieldKm)
+  const [tStart, tEnd] = fieldEdges(satrec, place, tClosest, g.fieldKm).map(Math.round)
   return {
     id: passId(target.norad, tClosest),
     norad: target.norad,
@@ -371,7 +371,9 @@ export function findApproaches(satrec: SatRec, target: PassTarget, query: PassQu
   const out: Approach[] = []
   const f = (t: number) => distanceKm(satrec, place, t)
   for (const [a, b] of coarseClusters(satrec, target, query)) {
-    const tMin = goldenMin(f, a, b)
+    // Integer milliseconds: the refinement is good to ±0.1 s, and whole-ms times keep the track
+    // samples (tClosest ± k·20 s) and pass ids exact.
+    const tMin = Math.round(goldenMin(f, a, b))
     if (tMin < t0 || tMin > t1) continue
     if (out.length && Math.abs(out[out.length - 1].tClosest - tMin) < 60_000) continue
     const g = geometryAt(satrec, target, place, tMin)
@@ -416,7 +418,7 @@ export function passNear(
     }
   }
   if (!Number.isFinite(bestD)) return null
-  const tMin = goldenMin(f, best - step, best + step)
+  const tMin = Math.round(goldenMin(f, best - step, best + step))
   const g = geometryAt(satrec, target, place, tMin)
   return g ? assemblePass(satrec, target, place, tMin, g, verdict) : null
 }
@@ -426,9 +428,12 @@ export function findPasses(targets: PassTarget[], query: PassQuery, onSat?: (don
   const out: Pass[] = []
   let done = 0
   for (const target of targets) {
-    const satrec = satrecFromRow(target.row)
-    if (satrec) {
-      for (const p of findPassesForSat(satrec, target, query)) out.push(p)
+    try {
+      const satrec = satrecFromRow(target.row)
+      if (satrec) for (const p of findPassesForSat(satrec, target, query)) out.push(p)
+    } catch (err) {
+      // One pathological element set must never cost every other satellite in the chunk its passes.
+      console.warn(`Pass search skipped NORAD ${target.norad}:`, err)
     }
     onSat?.(++done)
   }

@@ -29,11 +29,12 @@ describe('corner readout formatters', () => {
     expect(fmtStampZ('2026-11-08T03:34:02.063Z')).toBe('2026-11-08 03:34Z')
     expect(fmtStampZ('nope')).toBe('—')
     const t = Date.UTC(2026, 10, 8, 3, 34)
-    expect(fmtAge(t, t + 30_000)).toBe('1 MIN')
+    expect(fmtAge(t, t + 30_000)).toBe('<1 MIN')
+    expect(fmtAge(t, t + 75_000)).toBe('1 MIN')
     expect(fmtAge(t, t + 42 * 60_000)).toBe('42 MIN')
     expect(fmtAge(t, t + 5 * 3_600_000)).toBe('5 H')
     expect(fmtAge(t, t + 3 * 86_400_000)).toBe('3 D')
-    expect(fmtAge(t, t - 1000)).toBe('1 MIN')
+    expect(fmtAge(t, t - 1000)).toBe('<1 MIN')
   })
 
   it('flags element sets older than two days', () => {

@@ -1,0 +1,307 @@
+/**
+ * Shares on the server: fetch one through the `get_share` RPC, or build one from explicit query
+ * parameters, and turn it into the copy the card and share page print.
+ *
+ * Everything that arrives here is untrusted (the RPC output was user input once; query params
+ * are anyone's). Each field is re-validated and clamped before it reaches a renderer.
+ */
+import { supabaseConfig } from './env.js'
+
+export type Verdict = 'imaged' | 'likely' | 'could' | 'overhead'
+
+export const CAPTURE_COLLECTIONS = [
+  'sentinel-2-l2a',
+  'landsat-c2-l2',
+  'gibs-viirs-noaa20',
+  'gibs-viirs-noaa21',
+  'gibs-viirs-snpp',
+  'gibs-modis-terra',
+  'gibs-modis-aqua',
+  'gibs-goes-east',
+  'gibs-goes-west',
+  'gibs-himawari',
+] as const
+export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number]
+
+export interface ShareCapture {
+  collection: CaptureCollection
+  itemId: string
+  provider?: 'earth-search' | 'planetary-computer' | 'gibs'
+  platform?: string
+  datetime?: number
+  cloudCoverPct?: number
+  gsdM?: number
+}
+
+/** The subset of a Pass the card uses (the stored pass has a few more fields). Ranges match create_share. */
+export interface SharePass {
+  norad?: number
+  tClosest?: number
+  groundDistanceKm?: number
+  offNadirDeg?: number
+  elevationDeg?: number
+  azimuthDeg?: number
+  altitudeKm?: number
+  groundSpeedKmS?: number
+  headingDeg?: number
+  node?: 'ascending' | 'descending'
+  sunElevationDeg?: number
+  inSwath?: boolean
+  verdict?: Verdict
+}
+
+/** A share, normalised. Times are epoch ms. */
+export interface ShareRecord {
+  id?: string
+  placeLabel: string
+  lat: number
+  lon: number
+  norad?: number
+  satName?: string
+  verdict: Verdict
+  tClosest?: number
+  capture?: ShareCapture
+  pass: SharePass
+}
+
+export const SHARE_ID_RE = /^[0-9a-z]{8}$/
+const ITEM_ID_RE = /^[A-Za-z0-9_.:@-]{1,160}$/
+const VERDICTS: readonly Verdict[] = ['imaged', 'likely', 'could', 'overhead']
+
+// ── Validation primitives ───────────────────────────────────────────────────────────────────
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** A finite number within [min, max], or undefined. Accepts numeric strings (query params). */
+export function num(v: unknown, min = -Infinity, max = Infinity): number | undefined {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v
+  return typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max ? n : undefined
+}
+
+/**
+ * Trimmed single-line text, at most `max` characters (code points, so a surrogate pair is never
+ * split), or undefined. Drops control characters and the invisible bidi / zero-width format
+ * characters that could reorder or hide text on the card and share page (as clean_text in SQL).
+ */
+export function text(v: unknown, max: number): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const t = v
+    .replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁩﻿]/g, '')
+    .replace(/\s+/g, ' ') // \s includes U+2028 / U+2029
+    .trim()
+  if (!t) return undefined
+  const cps = Array.from(t)
+  return cps.length > max ? `${cps.slice(0, max - 1).join('').trimEnd()}…` : t
+}
+
+const verdictOf = (v: unknown): Verdict | undefined => (VERDICTS as readonly unknown[]).includes(v) ? (v as Verdict) : undefined
+
+export function captureOf(v: unknown): ShareCapture | undefined {
+  if (!isObj(v)) return undefined
+  const collection = (CAPTURE_COLLECTIONS as readonly unknown[]).includes(v.collection) ? (v.collection as CaptureCollection) : undefined
+  const itemId = typeof v.itemId === 'string' && ITEM_ID_RE.test(v.itemId) ? v.itemId : undefined
+  if (!collection || !itemId) return undefined
+  const provider = v.provider === 'earth-search' || v.provider === 'planetary-computer' || v.provider === 'gibs' ? v.provider : undefined
+  return {
+    collection,
+    itemId,
+    provider,
+    platform: text(v.platform, 40),
+    datetime: num(v.datetime, 0, 8.64e15),
+    cloudCoverPct: num(v.cloudCoverPct, 0, 100),
+    gsdM: num(v.gsdM, 0.1, 100_000),
+  }
+}
+
+function passOf(v: unknown): SharePass {
+  if (!isObj(v)) return {}
+  return {
+    norad: num(v.norad, 1, 999_999_999),
+    tClosest: num(v.tClosest, 0, 8.64e15),
+    groundDistanceKm: num(v.groundDistanceKm, 0, 20_100),
+    offNadirDeg: num(v.offNadirDeg, 0, 90),
+    elevationDeg: num(v.elevationDeg, -90, 90),
+    azimuthDeg: num(v.azimuthDeg, 0, 360),
+    altitudeKm: num(v.altitudeKm, 100, 400_000),
+    groundSpeedKmS: num(v.groundSpeedKmS, 0, 12),
+    headingDeg: num(v.headingDeg, 0, 360),
+    node: v.node === 'ascending' || v.node === 'descending' ? v.node : undefined,
+    sunElevationDeg: num(v.sunElevationDeg, -90, 90),
+    inSwath: typeof v.inSwath === 'boolean' ? v.inSwath : undefined,
+    verdict: verdictOf(v.verdict),
+  }
+}
+
+/** Normalise the `get_share` RPC's JSON. Null if it isn't a usable share. */
+export function shareFromRpc(v: unknown): ShareRecord | null {
+  if (!isObj(v)) return null
+  const placeLabel = text(v.placeLabel, 120)
+  const lat = num(v.lat, -90, 90)
+  const lon = num(v.lon, -180, 180)
+  const pass = passOf(v.pass)
+  const verdict = verdictOf(v.verdict) ?? pass.verdict
+  if (!placeLabel || lat === undefined || lon === undefined || !verdict) return null
+  return {
+    id: typeof v.id === 'string' && SHARE_ID_RE.test(v.id) ? v.id : undefined,
+    placeLabel,
+    lat,
+    lon,
+    norad: num(v.norad, 1, 999_999_999) ?? pass.norad,
+    satName: text(v.satName, 80),
+    verdict,
+    tClosest: num(v.tClosest, 0, 8.64e15) ?? pass.tClosest,
+    capture: captureOf(v.capture),
+    pass,
+  }
+}
+
+/**
+ * Explicit-parameter fallback, for a card without a stored share:
+ *   /api/og?sat=Sentinel-2C&norad=60989&place=Waterloo&lat=43.47&lon=-80.54&t=<ms|ISO>
+ *          &verdict=imaged&alt=786&off=0.9&cloud=25&dist=12&az=271&hdg=194
+ *          &collection=sentinel-2-l2a&item=<STAC item id>&gsd=10
+ * Null unless at least place, lat, lon and verdict are valid.
+ */
+export function shareFromParams(q: URLSearchParams): ShareRecord | null {
+  const placeLabel = text(q.get('place'), 120)
+  const lat = num(q.get('lat'), -90, 90)
+  const lon = num(q.get('lon'), -180, 180)
+  const verdict = verdictOf(q.get('verdict')) ?? (q.get('item') ? 'imaged' : undefined)
+  if (!placeLabel || lat === undefined || lon === undefined || !verdict) return null
+  const tRaw = q.get('t')
+  const tClosest = tRaw ? (num(tRaw, 0, 8.64e15) ?? (Number.isFinite(Date.parse(tRaw)) ? Date.parse(tRaw) : undefined)) : undefined
+  const norad = num(q.get('norad'), 1, 999_999_999)
+  const capture = captureOf({
+    collection: q.get('collection') ?? (q.get('item') ? 'sentinel-2-l2a' : undefined),
+    itemId: q.get('item'),
+    datetime: tClosest,
+    cloudCoverPct: q.get('cloud'),
+    gsdM: q.get('gsd'),
+  })
+  return {
+    placeLabel,
+    // Same coarsening as create_share, so a hand-built URL can't carry a more precise spot.
+    lat: Math.round(lat * 100) / 100,
+    lon: Math.round(lon * 100) / 100,
+    norad: norad !== undefined ? Math.trunc(norad) : undefined,
+    satName: text(q.get('sat'), 80),
+    verdict,
+    tClosest,
+    capture,
+    pass: {
+      norad,
+      tClosest,
+      altitudeKm: num(q.get('alt'), 100, 400_000),
+      offNadirDeg: num(q.get('off'), 0, 90),
+      groundDistanceKm: num(q.get('dist'), 0, 20_100),
+      azimuthDeg: num(q.get('az'), 0, 360),
+      headingDeg: num(q.get('hdg'), 0, 360),
+      elevationDeg: num(q.get('el'), -90, 90),
+      verdict,
+    },
+  }
+}
+
+// ── Fetch ───────────────────────────────────────────────────────────────────────────────────
+
+export type FetchShareResult = { status: 'found'; share: ShareRecord } | { status: 'missing' } | { status: 'unavailable' }
+
+/**
+ * Read a share without counting a view (crawlers and the OG renderer aren't readers).
+ * 'missing' = the database answered and there is no such share; 'unavailable' = we couldn't ask.
+ */
+export async function fetchShare(id: string, timeoutMs = 4000): Promise<FetchShareResult> {
+  if (!SHARE_ID_RE.test(id)) return { status: 'missing' }
+  const cfg = supabaseConfig()
+  if (!cfg) return { status: 'unavailable' }
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/rpc/get_share`, {
+      method: 'POST',
+      headers: { apikey: cfg.key, authorization: `Bearer ${cfg.key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ p_id: id, p_view: false }),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!res.ok) return { status: 'unavailable' }
+    const share = shareFromRpc(await res.json())
+    return share ? { status: 'found', share } : { status: 'missing' }
+  } catch {
+    return { status: 'unavailable' }
+  }
+}
+
+// ── Copy ────────────────────────────────────────────────────────────────────────────────────
+
+/** "Sentinel-2C", or "NORAD 60989" when the share didn't carry a name. */
+export function satLabel(s: ShareRecord): string {
+  return s.satName ?? (s.norad ? `NORAD ${s.norad}` : 'A satellite')
+}
+
+/**
+ * The headline, split so the renderer can set the place in the accent face:
+ *   imaged   → "Sentinel-2C photographed | Waterloo | ."
+ *   likely   → "Sentinel-2C swept over | Waterloo | ."
+ *   could    → "WorldView Legion 4 passed within view of | Waterloo | ."
+ *   overhead → "ISS (ZARYA) passed over | Waterloo | ."
+ */
+export function headlineParts(s: ShareRecord): { lead: string; place: string; tail: string } {
+  const sat = satLabel(s)
+  const verb = { imaged: 'photographed', likely: 'swept over', could: 'passed within view of', overhead: 'passed over' }[s.verdict]
+  // A place already cut short with an ellipsis takes no full stop ("…" not "….").
+  return { lead: `${sat} ${verb}`, place: s.placeLabel, tail: s.placeLabel.endsWith('…') ? '' : '.' }
+}
+
+export function headline(s: ShareRecord): string {
+  const h = headlineParts(s)
+  return `${h.lead} ${h.place}${h.tail}`
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** "2026-11-01 16:14:21 UTC" */
+export function fmtUtc(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
+}
+
+/** "1 Nov 2026" */
+export function fmtDate(ms: number): string {
+  const d = new Date(ms)
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]
+  return `${d.getUTCDate()} ${m} ${d.getUTCFullYear()}`
+}
+
+/** When the moment happened: the image's acquisition time if there is one, else closest approach. */
+export function momentOf(s: ShareRecord): number | undefined {
+  return (s.verdict === 'imaged' ? s.capture?.datetime : undefined) ?? s.tClosest ?? s.pass.tClosest
+}
+
+const COMPASS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']
+/** 194.6° → "south" (8-point compass, for prose). */
+export function compass(deg: number): string {
+  return COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]
+}
+
+/**
+ * og:description in the product voice (DESIGN §7), using only known numbers:
+ * "Sentinel-2C crossed 795 km above Waterloo at 16:14 UTC on 1 Nov 2026, moving south.
+ *  It was looking 5.3° off nadir. Cloud cover: 26%."
+ */
+export function description(s: ShareRecord): string {
+  const sat = satLabel(s)
+  const p = s.pass
+  const t = momentOf(s)
+  const alt = p.altitudeKm !== undefined ? ` ${Math.round(p.altitudeKm)} km above` : ' over'
+  const when = t !== undefined ? ` at ${fmtUtc(t).slice(11, 16)} UTC on ${fmtDate(t)}` : ''
+  const moving = p.headingDeg !== undefined ? `, moving ${compass(p.headingDeg)}` : ''
+  const parts: string[] = []
+  if (s.verdict === 'could') {
+    parts.push(`${sat} passed within view of ${s.placeLabel}${when}${moving}.`, "It could have pointed here. We can't know whether it did.")
+  } else {
+    parts.push(`${sat} ${s.verdict === 'overhead' ? 'passed' : 'crossed'}${alt} ${s.placeLabel}${when}${moving}.`)
+    if (s.verdict === 'imaged' && p.offNadirDeg !== undefined) parts.push(p.offNadirDeg < 2 ? 'It was looking straight down.' : `It was looking ${p.offNadirDeg.toFixed(1)}° off nadir.`)
+    if (s.verdict === 'imaged' && s.capture?.cloudCoverPct !== undefined) parts.push(`Cloud cover: ${Math.round(s.capture.cloudCoverPct)}%.`)
+    if (s.verdict === 'likely') parts.push(`${s.placeLabel} was inside its swath.`)
+  }
+  parts.push('See every satellite that passed over any place this week.')
+  return parts.join(' ')
+}

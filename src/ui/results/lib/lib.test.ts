@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Capture, Pass, Report } from '@/types'
+import type { Capture, Pass } from '@/types'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
 import { compassAbbr, compassWord, geoSentence, headline, passSentences, plain, shareHeadline } from './copy'
 import { groupPasses, visibleCount } from './groups'
@@ -314,5 +314,95 @@ describe('pushbroom', () => {
     expect(b.y).toBeCloseTo(40)
     expect(revealProgress(800)).toBe(0.5)
     expect(revealProgress(5000)).toBe(1)
+  })
+})
+
+describe('copy: fixed-swath commercial', () => {
+  it('says the place was inside the swath and that the archive is private', () => {
+    const dove: SatMeta = { norad: 1, name: 'Flock 4Q-13', category: 'commercial-optical', profile: { operator: 'Planet', category: 'commercial-optical', swathKm: 32, blurb: '' } }
+    const text = plain(passSentences({ pass: pass({ norad: 1, verdict: 'could', inSwath: true }), meta: dove, timeZone: TZ, placeLabel: 'Waterloo' }))
+    expect(text).toContain('Waterloo was inside its 32 km swath.')
+    expect(text).toContain('we can’t know whether it did')
+  })
+})
+
+// ── reviewer additions ──────────────────────────────────────────────────────────────────────
+
+describe('timeline: day/night is the real sun at the place, in its own time zone', () => {
+  /** Local clock time of the first sample in [a, b) where the sun crosses 0° in the given direction. */
+  const crossing = (a: number, b: number, rising: boolean) => {
+    const s = sunSamples(WATERLOO.lat, WATERLOO.lon, a, b)
+    for (let i = 1; i < s.length; i++) if (rising ? s[i - 1] < 0 && s[i] >= 0 : s[i - 1] >= 0 && s[i] < 0) return fmtLocalTime(a + i * 600_000, TZ)
+    return undefined
+  }
+  it('Waterloo, Sun 1 Nov 2026 (first day of EST): sunrise ≈ 06:59, sunset ≈ 17:13 local', () => {
+    const day = Date.parse('2026-11-01T05:00:00Z') // 00:00 EST
+    const rise = crossing(day, day + 86_400_000, true)!
+    const set = crossing(day, day + 86_400_000, false)!
+    expect(rise >= '06:50' && rise <= '07:10').toBe(true)
+    expect(set >= '17:05' && set <= '17:25').toBe(true)
+  })
+  it('Waterloo, Tue 27 Oct 2026 (EDT): sunrise ≈ 07:53, sunset ≈ 18:20 local', () => {
+    const day = Date.parse('2026-10-27T04:00:00Z') // 00:00 EDT
+    const rise = crossing(day, day + 86_400_000, true)!
+    const set = crossing(day, day + 86_400_000, false)!
+    expect(rise >= '07:45' && rise <= '08:05').toBe(true)
+    expect(set >= '18:10' && set <= '18:30').toBe(true)
+  })
+  it('shades local noon fully and local midnight not at all', () => {
+    const noon = Date.parse('2026-11-01T17:00:00Z') // 12:00 EST
+    const midnight = Date.parse('2026-11-02T05:00:00Z') // 00:00 EST
+    const s = sunSamples(WATERLOO.lat, WATERLOO.lon, noon, midnight)
+    expect(daylight(s[0])).toBe(1)
+    expect(daylight(s[s.length - 1])).toBe(0)
+  })
+})
+
+describe('pushbroom: a descending Sentinel-2 pass (heading 194.6°, SSW)', () => {
+  const d = motionVector(194.6)
+  const W = 400
+  const H = 400
+  it('starts at the top-right (NNE) corner and finishes at the bottom-left', () => {
+    const corners = { tl: 0, tr: W * d.x, bl: H * d.y, br: W * d.x + H * d.y }
+    const [a, b] = sweepRange(W, H, d)
+    expect(a).toBeCloseTo(corners.tr) // the first line the satellite records is the one furthest north-north-east
+    expect(b).toBeCloseTo(corners.bl)
+  })
+  it('sweeps top to bottom with the front tilted ~14.6° (right side ahead)', () => {
+    const [a, b] = sweepRange(W, H, d)
+    const front = a + (b - a) * 0.5
+    // y of the front at the left and right edges: p·d = s → y = (s − x·dx) / dy
+    const yAt = (x: number) => (front - x * d.x) / d.y
+    expect(yAt(W)).toBeGreaterThan(yAt(0))
+    expect((Math.atan2(yAt(W) - yAt(0), W) * 180) / Math.PI).toBeCloseTo(14.6, 1)
+    expect(yAt(W / 2)).toBeCloseTo(H / 2) // the centre (the place) is reached exactly halfway
+  })
+})
+
+describe('copy: degenerate geometry reads like a person wrote it', () => {
+  it('a commercial pass straight over the place says "directly overhead", not "0 km to the west"', () => {
+    const text = plain(passSentences({ pass: pass({ norad: 59625, verdict: 'could', inSwath: false, groundDistanceKm: 0.4, offNadirDeg: 0.04 }), meta: meta(59625), timeZone: TZ, placeLabel: 'Waterloo' }))
+    expect(text).toContain('passed within view at 11:21 EST, directly overhead.')
+    expect(text).toContain('Looking straight down, it could have photographed Waterloo.')
+    expect(text).not.toMatch(/\b0 km|0\.0°/)
+  })
+  it('radar at nadir drops the 0.0° pointing clause', () => {
+    const text = plain(passSentences({ pass: pass({ norad: 40697, verdict: 'could', inSwath: false, groundDistanceKm: 3, offNadirDeg: 0.3 }), meta: meta(40697), timeZone: TZ, placeLabel: 'Waterloo' }))
+    expect(text).toContain('Radar sees through cloud and darkness. It could have mapped Waterloo.')
+    expect(text).not.toContain('0.3°')
+  })
+  it('a crewed pass near the zenith gives no meaningless bearing', () => {
+    const text = plain(passSentences({ pass: pass({ norad: 25544, verdict: 'overhead', elevationDeg: 89.2, azimuthDeg: 41, altitudeKm: 428 }), meta: meta(25544), timeZone: TZ, placeLabel: 'Waterloo' }))
+    expect(text).toContain('89° above your horizon, almost straight up.')
+    expect(text).not.toContain('northeast')
+  })
+  it('only an imaged pass is ever "photographed" (geostationary aside, per DESIGN §7)', () => {
+    for (const verdict of ['likely', 'could', 'overhead'] as const) {
+      for (const n of [60989, 43013, 59625, 40697, 25544]) {
+        const text = plain(passSentences({ pass: pass({ norad: n, verdict, captureId: undefined }), meta: meta(n), timeZone: TZ, placeLabel: 'Waterloo' }))
+        expect(text).not.toMatch(/photographed(?! Waterloo\. We can)/)
+      }
+      expect(shareHeadline(verdict, 'X', 'Waterloo').lead).not.toContain('photographed')
+    }
   })
 })

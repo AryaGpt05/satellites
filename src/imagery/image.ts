@@ -13,11 +13,51 @@
  * reveal) or uploaded as WebGL textures. Consumers rendering `<img>` should set the same
  * `crossOrigin` so the browser reuses the decoded image instead of fetching it again.
  */
+import { GIBS_WMS } from './endpoints'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
 
 const IMAGE_TIMEOUT_MS = 45_000 // PC renders crops on demand: 1–3 s typical, much longer on a cold cache
 const imageCache = new Lru<string, Promise<HTMLImageElement>>(96)
+
+/**
+ * NASA GIBS answered with an all-black image: "no data" in GIBS's dialect (not processed yet, a
+ * swath gap, a missing frame, or a young frame on a lagging backend). Not retried: Chromium keeps
+ * a loaded image for its URL for the life of the document, `no-store` or not (measured: a second
+ * `new Image()` or `<img>` with the same URL made no request), so a retry would only see the same
+ * black pixels. Callers should move on (e.g. to an older frame), as `latestGeoImage` does.
+ */
+export class EmptyImageError extends Error {
+  constructor(url: string) {
+    super(`NASA GIBS returned an empty frame for ${url.slice(0, 120)}…`)
+    this.name = 'EmptyImageError'
+  }
+}
+
+/** Share of no-data pixels at which a GIBS image counts as empty (a real frame is never this black). */
+const EMPTY_NO_DATA = 0.98
+/** Side of the thumbnail the emptiness check reads back; averaging keeps it honest, 32² keeps it cheap. */
+const CHECK_PX = 32
+
+const isGibsUrl = (url: string) => url.startsWith(GIBS_WMS)
+
+/** No-data share of a decoded image, or undefined if its pixels can't be read (never blocks a load). */
+function noDataOf(img: HTMLImageElement): number | undefined {
+  try {
+    let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null
+    if (typeof OffscreenCanvas !== 'undefined') ctx = new OffscreenCanvas(CHECK_PX, CHECK_PX).getContext('2d', { willReadFrequently: true })
+    else {
+      const c = document.createElement('canvas')
+      c.width = c.height = CHECK_PX
+      ctx = c.getContext('2d', { willReadFrequently: true })
+    }
+    if (!ctx) return undefined
+    ctx.drawImage(img, 0, 0, CHECK_PX, CHECK_PX)
+    return measureNoData(ctx.getImageData(0, 0, CHECK_PX, CHECK_PX).data).noDataFraction
+  } catch {
+    return undefined // tainted canvas or no 2D context: trust the load
+  }
+}
 
 function loadOnce(url: string, timeoutMs: number): Promise<HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -50,15 +90,26 @@ function loadOnce(url: string, timeoutMs: number): Promise<HTMLImageElement> {
 /**
  * Load and decode an image, with one retry for transient failures (PC's tiler occasionally
  * 5xxs on a cold scene). Cached by URL; failures are not cached.
+ *
+ * NASA GIBS images are also read back: an all-black response is GIBS saying "no data" with a 200,
+ * so it rejects with `EmptyImageError` (no retry, see there) rather than resolving a black square.
+ * Once this resolves, an `<img crossOrigin="anonymous">` with the same URL shows these very pixels
+ * without a new request (Chromium reuses the document's loaded image), as does drawing the element.
  */
 export function preloadImage(url: string, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<HTMLImageElement> {
   const timeoutMs = opts.timeoutMs ?? IMAGE_TIMEOUT_MS
+  const load = async () => {
+    const img = await loadOnce(url, timeoutMs)
+    if (isGibsUrl(url) && (noDataOf(img) ?? 0) >= EMPTY_NO_DATA) throw new EmptyImageError(url)
+    return img
+  }
   const p = memoAsync(imageCache, url, async () => {
     try {
-      return await loadOnce(url, timeoutMs)
-    } catch {
+      return await load()
+    } catch (err) {
+      if (err instanceof EmptyImageError) throw err
       await sleep(700 + Math.random() * 500)
-      return loadOnce(url, timeoutMs)
+      return load()
     }
   })
   return raceAbort(p, opts.signal)
@@ -100,7 +151,14 @@ export function measureNoData(rgba: Uint8ClampedArray | Uint8Array): { noDataFra
   return { noDataFraction: empty / n, meanLuma: full ? luma / full : 0 }
 }
 
-const probeCache = new Lru<string, Promise<ImageProbe>>(256)
+/**
+ * When each mostly-empty probe was measured. Those expire: today's daily mosaic fills in over the
+ * day, and a young geostationary frame can be empty on one GIBS backend and complete on the next.
+ * Probes that found data are kept (archived pixels don't disappear).
+ */
+const emptyProbeAt = new Map<string, number>()
+const EMPTY_PROBE_TTL_MS = 5 * 60_000
+const probeCache = new Lru<string, Promise<ImageProbe>>(256, (url) => emptyProbeAt.delete(url))
 
 /** Decode an image blob to RGBA. Worker-safe: OffscreenCanvas when available, DOM canvas otherwise. */
 async function decodePixels(blob: Blob): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
@@ -130,9 +188,14 @@ async function decodePixels(blob: Blob): Promise<{ data: Uint8ClampedArray; widt
  * (WMS reports errors as 200 + XML) counts as fully empty. Rejects on network/HTTP failure.
  */
 export function probeImage(url: string, signal?: AbortSignal): Promise<ImageProbe> {
-  const p = memoAsync(probeCache, url, () =>
-    withRetry(
-      async (s) => {
+  const emptyAt = emptyProbeAt.get(url)
+  if (emptyAt !== undefined && Date.now() - emptyAt > EMPTY_PROBE_TTL_MS) {
+    emptyProbeAt.delete(url)
+    probeCache.delete(url)
+  }
+  const p = memoAsync(probeCache, url, async () => {
+    const probe = await withRetry(
+      async (s): Promise<ImageProbe> => {
         const res = await fetch(url, { signal: s })
         if (!res.ok) throw new HttpError(res.status, url)
         if (!(res.headers.get('content-type') ?? '').startsWith('image/')) return { noDataFraction: 1, meanLuma: 0, width: 0, height: 0 }
@@ -140,7 +203,9 @@ export function probeImage(url: string, signal?: AbortSignal): Promise<ImageProb
         return { ...measureNoData(data), width, height }
       },
       { timeoutMs: 15_000, retries: 1, label: url },
-    ),
-  )
+    )
+    if (probe.noDataFraction > 0.5) emptyProbeAt.set(url, Date.now())
+    return probe
+  })
   return raceAbort(p, signal)
 }

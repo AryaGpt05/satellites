@@ -1,0 +1,202 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.play {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line-strong);
+  color: var(--bone);
+  transition:
+    border-color var(--d-hover) var(--ease-out),
+    color var(--d-hover) var(--ease-out),
+    background-color var(--d-hover) var(--ease-out);
+}
+.play:hover {
+  border-color: var(--bone-3);
+  background: var(--ink-2);
+}
+.playing {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+.rates {
+  display: flex;
+  border: 1px solid var(--line-strong);
+}
+.rate {
+  height: 34px;
+  min-width: 40px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  transition:
+    color var(--d-hover) var(--ease-out),
+    background-color var(--d-hover) var(--ease-out);
+}
+.rate + .rate {
+  border-left: 1px solid var(--line);
+}
+.rate:hover {
+  color: var(--bone);
+}
+.rateOn {
+  color: var(--ink-0);
+  background: var(--bone);
+}
+.rateOn:hover {
+  color: var(--ink-0);
+}
+.clock {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tminus {
+  font-size: 15px;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--bone);
+}
+.utc {
+  font-size: 9.5px;
+  letter-spacing: var(--track-label);
+  color: var(--bone-3);
+}
+
+/* ── scrubber ─────────────────────────────────────────────────── */
+.scrub {
+  position: relative;
+  height: 24px;
+}
+.track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 11px;
+  height: 1px;
+  background: var(--line-strong);
+}
+.field {
+  position: absolute;
+  top: -4px;
+  height: 9px;
+  background: var(--signal-2);
+}
+.closest {
+  position: absolute;
+  top: -7px;
+  width: 1px;
+  height: 15px;
+  background: var(--bone-2);
+}
+.progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 1px;
+  background: var(--bone);
+}
+.head {
+  position: absolute;
+  top: -8px;
+  width: 1px;
+  height: 17px;
+  margin-left: -0.5px;
+  background: var(--signal);
+}
+.head::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -3px;
+  width: 7px;
+  height: 4px;
+  background: var(--signal);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+}
+.range:focus-visible + * {
+  outline: none;
+}
+.scrub:has(.range:focus-visible) .track {
+  outline: 1px solid var(--signal);
+  outline-offset: 10px;
+}
+
+.legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.legendMid {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fieldKey {
+  display: inline-block;
+  width: 12px;
+  height: 7px;
+  background: var(--signal-2);
+}
+.closestKey {
+  display: inline-block;
+  width: 1px;
+  height: 9px;
+  margin-left: 8px;
+  background: var(--bone-2);
+}
+
+.keys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.keysGap {
+  width: 10px;
+}

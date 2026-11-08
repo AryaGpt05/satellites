@@ -44,9 +44,10 @@ export function fmtStampZ(iso: string): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1, 2)}-${pad(d.getUTCDate(), 2)} ${pad(d.getUTCHours(), 2)}:${pad(d.getUTCMinutes(), 2)}Z`
 }
 
-/** Compact age: "42 MIN", "5 H", "3 D". Never negative. */
+/** Compact age: "<1 MIN", "42 MIN", "5 H", "3 D". Never negative. */
 export function fmtAge(fromMs: number, nowMs: number): string {
   const s = Math.max(0, (nowMs - fromMs) / 1000)
+  if (s < 60) return '<1 MIN'
   if (s < 90) return '1 MIN'
   const m = Math.round(s / 60)
   if (m < 90) return `${m} MIN`

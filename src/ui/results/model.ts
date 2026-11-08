@@ -23,7 +23,7 @@ export interface ResultsModel {
   days: DayMark[]
   hours: { t: number; hour: number }[]
   /** window length in days (usually 7) */
-  days_n: number
+  windowDays: number
 }
 
 export function useResultsModel(report: Report | undefined): ResultsModel | undefined {
@@ -42,7 +42,7 @@ export function useResultsModel(report: Report | undefined): ResultsModel | unde
       sun: sunSamples(place.lat, place.lon, t0, t1),
       days: dayBoundaries(t0, t1, tz),
       hours: hourMarks(t0, t1, tz, 6),
-      days_n: (t1 - t0) / 86_400_000,
+      windowDays: (t1 - t0) / 86_400_000,
     }
   }, [report])
 }

@@ -92,7 +92,8 @@ function Picture({ src, alt, caption }: { src: string; alt: string; caption?: Re
       </div>
       <figcaption className="imx-cap t-label">
         {caption}
-        {st === 'ready' ? <span className="imx-cap-r">{fmtInt(ms)} MS</span> : null}
+        {/* Already decoded (e.g. verified by latestGeoImage): say so rather than "0 MS". */}
+        {st === 'ready' ? <span className="imx-cap-r">{ms < 2 ? 'CACHED' : `${fmtInt(ms)} MS`}</span> : null}
       </figcaption>
     </figure>
   )
@@ -436,10 +437,24 @@ function GeoFrame({ collection, place, now }: { collection: GibsCollection; plac
   const opts = { halfSizeKm: 700, px: 768 }
   const job = useJob((s) => latestGeoImage(collection, place, opts, { signal: s, now }), [collection, place.lat, place.lon, now])
   const found = job.state === 'ready' ? job.value : null
-  const src = found?.url ?? (job.state !== 'loading' ? geoImageUrl(collection, place, now, opts) : null)
+  // ready + null: nothing qualifies (a visible-only band at night). error: unexpected, so fall back
+  // to the synchronous, unverified URL.
+  const src = found?.url ?? (job.state === 'error' ? geoImageUrl(collection, place, now, opts) : null)
+  const none = job.state === 'ready' && !found
   return (
     <div>
-      {src ? (
+      {none ? (
+        <figure className="imx-pic">
+          <div className="imx-frame imx-frame-empty">
+            <div className="imx-wait">
+              <span className="t-label">No daylit frame in the last 2 h</span>
+            </div>
+          </div>
+          <figcaption className="imx-cap t-label">
+            <span>{GEO_NAME[collection]} · visible band is black at night</span>
+          </figcaption>
+        </figure>
+      ) : src ? (
         <Picture
           src={src}
           alt={`${GEO_NAME[collection]} frame around ${place.label}`}
@@ -472,7 +487,9 @@ function Geostationary({ place, now }: { place: Place; now: number }) {
         {geo ? <GeoFrame collection={geo} place={place} now={now} /> : <p className="imx-note t-mono">No GIBS geostationary layer covers {fmtLon(place.lon, 1)}.</p>}
         {geo !== 'gibs-himawari' ? <GeoFrame collection="gibs-himawari" place={tokyo} now={now} /> : null}
       </div>
-      <p className="imx-foot t-label">Frames younger than 70 min are not reliably served by GIBS; the newest verified frame is shown</p>
+      <p className="imx-foot t-label">
+        Newest frame GIBS lists that is at least 70 min old (younger ones flicker between servers), loaded and checked for pixels before it is shown
+      </p>
     </section>
   )
 }

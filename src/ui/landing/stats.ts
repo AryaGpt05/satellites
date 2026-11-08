@@ -1,27 +1,17 @@
 /**
- * Live usage stats for the landing footnote, from the backend module's `getStats()`
- * (contract: `getStats(): Promise<{ total: number; last24h: number } | null>`, no-op → null when the
- * database isn't configured).
- *
- * Loaded lazily through import.meta.glob: the Supabase client stays out of the first paint, and the
- * landing keeps building if src/lib/backend.ts isn't there (the glob is simply empty). Anything
- * missing, slow, malformed or zero renders nothing — never a placeholder number.
+ * Live usage stats for the landing footnote, from the backend's `getStats()`. That call never throws:
+ * it resolves `null` when the database isn't configured, unreachable or slow. Anything missing,
+ * malformed or zero renders nothing — never a placeholder number.
  */
 import { useEffect, useState } from 'react'
+import { getStats } from '@/lib/backend'
 
 export interface LookupStats {
   total: number
   last24h: number
 }
 
-interface BackendModule {
-  getStats?: () => Promise<LookupStats | null>
-}
-
-const loaders = import.meta.glob<BackendModule>('../../lib/backend.ts')
-const loadBackend = Object.values(loaders)[0]
-
-/** Give up quietly after this; the line is a nicety. */
+/** Give up quietly after this; the line is a nicety (the backend has its own, similar timeout). */
 const STATS_TIMEOUT_MS = 6000
 
 export function validStats(v: unknown): v is LookupStats {
@@ -41,16 +31,17 @@ export function validStats(v: unknown): v is LookupStats {
 export function useLookupStats(): LookupStats | null {
   const [stats, setStats] = useState<LookupStats | null>(null)
   useEffect(() => {
-    if (!loadBackend) return
     let alive = true
-    const timeout = new Promise<null>((r) => setTimeout(() => r(null), STATS_TIMEOUT_MS))
-    Promise.race([loadBackend().then((m) => (m.getStats ? m.getStats() : null)), timeout])
+    let timer = 0
+    const timeout = new Promise<null>((r) => (timer = window.setTimeout(() => r(null), STATS_TIMEOUT_MS)))
+    Promise.race([getStats(), timeout])
       .then((v) => {
         if (alive && validStats(v)) setStats({ total: v.total, last24h: v.last24h })
       })
       .catch(() => undefined)
     return () => {
       alive = false
+      window.clearTimeout(timer)
     }
   }, [])
   return stats

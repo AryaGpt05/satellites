@@ -14,11 +14,13 @@ export const ribbonVertex = glsl`
   varying float vAlong;
   varying float vSide;
   varying float vU;
+  varying vec3 vPos;        // world (the ribbon mesh has an identity transform; it lies on the surface)
   void main() {
     vAlong = aAlong;
     vSide = aSide;
     vU = aU;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vPos = (modelMatrix * vec4(position, 1.0)).xyz;
+    gl_Position = projectionMatrix * viewMatrix * vec4(vPos, 1.0);
   }
 `
 
@@ -37,9 +39,11 @@ export const ribbonFragment = glsl`
   uniform vec3 uColor;
   uniform float uFill;
   uniform float uOpacity;
+  uniform vec3 uSunDir;
   varying float vAlong;
   varying float vSide;
   varying float vU;
+  varying vec3 vPos;
 
   float line(float d, float fw, float widthPx) {
     // d in the same units as fw (per-pixel derivative); widthPx in device px
@@ -74,7 +78,11 @@ export const ribbonFragment = glsl`
       float trackA = track * mix(0.0, 0.42, swept) * (uKind == 1 ? 1.0 : dash);
       // Fill: densest just behind the leading edge (the freshest lines, ~1 min of track), settling to a
       // lighter persistent tint so the swept corridor stays legible without becoming a slab.
-      float fillA = uFill * swept * (0.5 + 0.5 * exp(-max(lead, 0.0) / 60.0));
+      // uFill is tuned for the day side. Blending happens in linear light, where a fixed alpha reads far
+      // stronger over dark ground (night side: ~2× the design's --signal-2), so the tint gives back alpha
+      // where the surface under it is unlit.
+      float daylight = smoothstep(-0.08, 0.2, dot(normalize(vPos), normalize(uSunDir)));
+      float fillA = uFill * swept * (0.6 + 0.4 * exp(-max(lead, 0.0) / 60.0)) * mix(0.5, 1.0, daylight);
       // Leading edge: a 1.5 px line across the swath, with a short glow trailing it (~8 px).
       float leading = line(lead, fwA, 1.5 * w);
       float glow = swept * exp(-max(leadPx, 0.0) / 8.0) * 0.32;

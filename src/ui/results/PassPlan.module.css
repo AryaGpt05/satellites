@@ -1,0 +1,109 @@
+.plan {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--ink-0);
+  border: 1px solid var(--line-strong);
+  overflow: hidden;
+}
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.svg * {
+  vector-effect: non-scaling-stroke;
+}
+.grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.band {
+  fill: color-mix(in srgb, var(--bone) 4.5%, transparent);
+  stroke: none;
+}
+.bandEdge {
+  stroke: var(--bone-4);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.track {
+  fill: none;
+  stroke: var(--bone-2);
+  stroke-width: 1;
+}
+.closest {
+  stroke: var(--bone-3);
+  stroke-width: 1;
+  stroke-dasharray: 1 3;
+}
+.place circle {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 1;
+}
+.place line {
+  stroke: var(--signal);
+  stroke-width: 1;
+}
+.placeDot {
+  fill: var(--signal);
+}
+.sat {
+  fill: var(--bone);
+}
+
+.label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
+}
+.tl {
+  top: 8px;
+  left: 8px;
+}
+.tr {
+  top: 8px;
+  right: 8px;
+}
+.br {
+  bottom: 8px;
+  right: 8px;
+}
+.scale {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bar {
+  display: block;
+  height: 5px;
+  border: 1px solid var(--bone-2);
+  border-top: 0;
+}
+.scaleText {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
+}

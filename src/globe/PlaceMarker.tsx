@@ -10,7 +10,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import { Matrix4, Mesh, PerspectiveCamera, PlaneGeometry, ShaderMaterial, Vector3 } from 'three'
-import { DEG, latLonToWorld } from '@/lib/geo'
+import { clamp, DEG, latLonToWorld } from '@/lib/geo'
 import { useApp } from '@/state/store'
 import { palette } from '@/ui/system/palette'
 import { easeOut } from './cameraMath'
@@ -24,6 +24,11 @@ const HALF_PX = 56
 const LOCK_MS = 500
 const FLASH_MS = 1100
 const LIFT = 1.0004
+
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = clamp((x - a) / (b - a), 0, 1)
+  return t * t * (3 - 2 * t)
+}
 
 export function PlaceMarker() {
   const place = useApp((st) => st.report?.place ?? st.place)
@@ -80,7 +85,7 @@ function Reticle({ lat, lon }: { lat: number; lon: number }) {
     return { d, basis, pos: d.clone().multiplyScalar(LIFT) }
   }, [lat, lon])
 
-  const anim = useRef({ born: performance.now(), lockFrom: -1 })
+  const anim = useRef({ born: performance.now(), lockFrom: -1, opacity: 0 })
   const tmp = useMemo(() => ({ v: new Vector3(), ndc: new Vector3() }), [])
 
   useEffect(() => {
@@ -115,7 +120,12 @@ function Reticle({ lat, lon }: { lat: number; lon: number }) {
 
     // Visibility: fade in on creation; dim while the camera is still on its way.
     const target = rt.camera.flying ? 0.55 : 1
-    u.uOpacity.value += (target - u.uOpacity.value) * Math.min(1, dt / 0.25)
+    a.opacity += (target - a.opacity) * Math.min(1, dt / 0.25)
+    // Grazing angles: the quad is flat and a constant ~110 px wide, so near the limb its outer ring rises off
+    // the curved surface and would poke past the horizon. Fade it out as the place turns edge-on (the same
+    // threshold hides the coordinate label below).
+    const facing = tmp.v.copy(cam.position).sub(frame.pos).normalize().dot(frame.d)
+    u.uOpacity.value = a.opacity * smoothstep(0.06, 0.2, facing)
 
     // Flash when the swath sweeps over the place.
     const since = now - rt.flashAt
@@ -131,7 +141,6 @@ function Reticle({ lat, lon }: { lat: number; lon: number }) {
     // Coordinate label anchor: shown once locked, hidden when the place turns away from the camera.
     const anchor = rt.anchors.get('place')
     if (anchor) {
-      const facing = tmp.v.copy(cam.position).sub(frame.pos).normalize().dot(frame.d)
       anchor.visible = facing > 0.15 && t >= 1
       if (anchor.visible) {
         tmp.ndc.copy(frame.pos).project(cam)

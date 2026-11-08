@@ -19,7 +19,7 @@ import { Glyph, cx, palette } from '@/ui/system'
 import { int } from './lib/copy'
 import { glyphForPass, VERDICT_GLYPH, type Verdict } from './lib/meta'
 import { daylight, hitTest, LANES, SUN_SAMPLE_MS } from './lib/timeline'
-import { fmtLocalDay, fmtLocalStamp, fmtLocalTime, zoneAbbr } from './lib/time'
+import { fmtLocalDay, fmtLocalTime, zoneAbbr } from './lib/time'
 import { isDailyMosaic } from './lib/captures'
 import type { ResultsModel } from './model'
 import s from './Timeline.module.css'
@@ -80,8 +80,9 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [hover, setHover] = useState<{ pass: Pass; x: number } | null>(null)
-  const timeMode = useApp((st) => st.timeMode)
-  const simTime = useApp((st) => st.simTime)
+  // The globe writes simTime at 10 Hz even in live mode; only the playhead needs it, and only while
+  // replaying or scrubbing, so live time never re-renders the strip.
+  const head = useApp((st) => (st.timeMode === 'live' ? undefined : st.simTime))
   const hasGeo = report.geo.length > 0
   const L = useMemo(() => layoutFor(size.w, size.h, compact, hasGeo), [size.w, size.h, compact, hasGeo])
   const xOf = useCallback((t: number) => ((t - t0) / span) * size.w, [t0, span, size.w])
@@ -120,7 +121,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
       const b = X(Math.min(t1, t0 + (i + 1) * SUN_SAMPLE_MS))
       const d = daylight((sun[i] + sun[i + 1]) / 2)
       if (d <= 0.001) continue
-      ctx.fillStyle = `rgba(236,232,224,${(0.075 * d).toFixed(4)})`
+      ctx.fillStyle = `rgba(236,232,224,${((compact ? 0.055 : 0.07) * d).toFixed(4)})`
       ctx.fillRect(a, 0, b - a + 0.5, L.h)
     }
 
@@ -168,15 +169,15 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
     }
 
     // ── marks ──
-    const bone = 'rgba(236,232,224,0.86)'
-    const ice = palette.ice
+    const bone = 'rgba(236,232,224,0.52)'
+    const ice = 'rgba(169,199,211,0.75)'
     // could: barcode ticks
     const could = lanes.could.passes
     const cy = L.laneY('could')
     const tickH = Math.min(9, L.laneH * 0.62)
     for (const p of could) {
       const radar = meta(p.norad).category === 'radar'
-      ctx.strokeStyle = radar ? 'rgba(169,199,211,0.55)' : 'rgba(236,232,224,0.34)'
+      ctx.strokeStyle = radar ? 'rgba(169,199,211,0.42)' : 'rgba(236,232,224,0.2)'
       const x = snap(X(p.tClosest))
       ctx.beginPath()
       ctx.moveTo(x, cy - tickH / 2)
@@ -184,7 +185,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
       ctx.stroke()
     }
     // likely + overhead: small glyphs
-    const g = compact ? 2.4 : 3.2
+    const g = compact ? 2 : 2.7
     for (const v of ['likely', 'overhead'] as const) {
       const y = L.laneY(v)
       for (const p of lanes[v].passes) {
@@ -256,8 +257,9 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
   const onMove = (e: React.PointerEvent) => {
     if (e.pointerType !== 'mouse') return
     const h = pick(e.clientX, e.clientY, 7)
-    setHover(h)
-    useApp.getState().setHoveredNorad(h?.pass.norad)
+    setHover((prev) => (prev?.pass.id === h?.pass.id ? prev : h))
+    const st = useApp.getState()
+    if (st.hoveredNorad !== h?.pass.norad) st.setHoveredNorad(h?.pass.norad)
   }
   const onLeave = () => {
     setHover(null)
@@ -270,7 +272,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
 
   // ── overlay positions ────────────────────────────────────────────────────────────
   const selected = selectedId ? model.passById.get(selectedId) : undefined
-  const showHead = timeMode !== 'live' && simTime >= t0 && simTime <= t1
+  const showHead = head !== undefined && head >= t0 && head <= t1
   const pct = (t: number) => `${(((t - t0) / span) * 100).toFixed(3)}%`
   const nowish = Math.abs(Date.now() - t1) < 3_600_000
   const zoneA = zoneAbbr(t0, tz)
@@ -280,6 +282,11 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
   const daysN = Math.round(span / 86_400_000)
 
   const laneCount = (v: Verdict) => lanes[v].passes.length
+  // The window's first (partial) day gets a label at the left edge too.
+  const startDay = { t: t0, label: fmtLocalDay(t0, tz), day: Number(fmtLocalDay(t0, tz).split(' ')[1]), weekday: fmtLocalDay(t0, tz).slice(0, 3) }
+  const axisDays = days.length && ((days[0].t - t0) / span) * size.w < 40 ? days : [startDay, ...days]
+  const endLabel = nowish ? 'Now' : compact ? '' : `${fmtLocalTime(t1, tz)} ${zoneAbbr(t1, tz)}`
+  const endRoom = endLabel ? endLabel.length * (compact ? 5.6 : 6.6) + 12 : 0
 
   return (
     <div
@@ -370,7 +377,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
             ) : null}
 
             {showHead ? (
-              <div className={s.playhead} style={{ left: pct(simTime) }} aria-hidden>
+              <div className={s.playhead} style={{ left: pct(head) }} aria-hidden>
                 <span className={s.playheadCap} />
               </div>
             ) : null}
@@ -378,16 +385,22 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
 
           {/* Day labels at local midnights */}
           <div className={s.axis} aria-hidden>
-            {days.map((d, i) => {
-              const next = days[i + 1]?.t ?? t1
-              const narrow = ((next - d.t) / span) * size.w < (compact ? 26 : 60)
+            {axisDays.map((d, i) => {
+              const next = axisDays[i + 1]?.t ?? t1
+              // A label must fit its own day and stay clear of the end label ("Now").
+              const x = ((d.t - t0) / span) * size.w
+              const limit = Math.min(((next - t0) / span) * size.w, size.w - endRoom)
+              const charW = compact ? 5.6 : 6.6
+              const label = compact ? `${d.weekday.slice(0, 2)} ${d.day}` : d.label
+              const short = compact ? '' : String(d.day)
+              const text = x + label.length * charW + 8 <= limit ? label : x + short.length * charW + 8 <= limit ? short : ''
               return (
-                <span key={d.t} className={s.day} style={{ left: pct(d.t) }}>
-                  {compact ? (narrow ? '' : `${d.weekday.slice(0, 2)} ${d.day}`) : narrow ? d.day : d.label}
+                <span key={d.t} className={cx(s.day, d.t === t0 && s.dayStart)} style={{ left: pct(d.t) }}>
+                  {text}
                 </span>
               )
             })}
-            <span className={s.end}>{nowish ? 'Now' : compact ? fmtLocalDay(t1, tz).split(' ').slice(1).join(' ') : fmtLocalStamp(t1, tz)}</span>
+            {endLabel ? <span className={s.end}>{endLabel}</span> : null}
           </div>
 
           {hover ? <Tooltip pass={hover.pass} x={hover.x} w={size.w} model={model} /> : null}

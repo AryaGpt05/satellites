@@ -2,7 +2,7 @@
 import { gstime } from 'satellite.js'
 import { describe, expect, it } from 'vitest'
 import { gmst, julianDate, subsolarPoint, sunElevationDeg } from '@/lib/geo'
-import { elevationDeg, groundRangeAtElevationKm, groundRangeAtOffNadirKm, offNadirDeg } from './geometry'
+import { elevationDeg, groundRangeAtElevationKm, groundRangeAtOffNadirKm, offNadirDeg, sunElevationAtDeg } from './geometry'
 
 describe('geo.ts gmst', () => {
   it('matches satellite.js gstime to < 1e-6 rad across decades', () => {
@@ -22,6 +22,17 @@ describe('geo.ts sun', () => {
     expect(subsolarPoint(Date.UTC(2026, 5, 21, 12)).lat).toBeCloseTo(23.44, 0)
     expect(subsolarPoint(Date.UTC(2026, 11, 21, 12)).lat).toBeCloseTo(-23.44, 0)
     expect(Math.abs(subsolarPoint(Date.UTC(2026, 2, 20, 12)).lat)).toBeLessThan(0.5)
+  })
+
+  it('engine sunElevationAtDeg (no three.js) equals geo.ts sunElevationDeg', () => {
+    let worst = 0
+    for (let k = 0; k < 2000; k++) {
+      const lat = -90 + ((k * 37) % 181)
+      const lon = -180 + ((k * 97) % 361)
+      const ms = Date.UTC(2026, 0, 1) + k * 15_731_000
+      worst = Math.max(worst, Math.abs(sunElevationAtDeg(lat, lon, ms) - sunElevationDeg(lat, lon, ms)))
+    }
+    expect(worst).toBeLessThan(1e-9)
   })
 
   it('has the sun high at local noon and below the horizon at local midnight', () => {

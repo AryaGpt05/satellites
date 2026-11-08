@@ -7,6 +7,11 @@ import eiffel from './__fixtures__/photon-eiffel-tower.json'
 import revWaterloo from './__fixtures__/photon-reverse-waterloo.json'
 import revTokyo from './__fixtures__/photon-reverse-tokyo.json'
 import revOcean from './__fixtures__/photon-reverse-ocean.json'
+import saoPaulo from './__fixtures__/photon-sao-paulo.json'
+import moscow from './__fixtures__/photon-moscow.json'
+import ushuaia from './__fixtures__/photon-ushuaia.json'
+import cnTower from './__fixtures__/photon-cn-tower.json'
+import junk from './__fixtures__/photon-junk.json'
 import {
   coordinateLabel,
   dedupePlaces,
@@ -16,6 +21,7 @@ import {
   photonToPlace,
   reversePlace,
   searchPlaces,
+  sublabelOf,
   timeZoneAt,
   type PhotonResponse,
 } from './geocode'
@@ -40,12 +46,12 @@ describe('Photon forward labels', () => {
     expect(on.lon).toBeCloseTo(-80.5222961)
   })
 
-  it('Tokyo: accented duplicate merged; Japanese state kept as given', () => {
+  it('Tokyo: accented duplicate merged; a local-script state is dropped under a Latin label', () => {
     expect(labels(places(tokyo))).toEqual([
       ['Tokyo', 'Japan'],
       ['Tokyo International Airport', 'Tokyo, Japan'],
       ['Tokyo Bay', 'Chiba Prefecture, Japan'],
-      ['Tokyo Dome', 'Tokyo, 東京都, Japan'],
+      ['Tokyo Dome', 'Tokyo, Japan'],
       ['Tokyo Kanjo', 'Sagamihara, Kanagawa Prefecture, Japan'],
     ])
   })
@@ -73,9 +79,70 @@ describe('Photon forward labels', () => {
     expect(joinUnique([undefined])).toBeUndefined()
   })
 
+  it('keeps local-script parts when the label is in that script, or when nothing else is left', () => {
+    expect(sublabelOf('Москва', ['Tver Oblast', 'Russia'])).toBe('Tver Oblast, Russia')
+    expect(sublabelOf('北京师范大学', ['北京市', 'China'])).toBe('北京市, China')
+    expect(sublabelOf('Kyiv', ['Прибузька сільська громада', 'Mykolaiv Oblast', 'Ukraine'])).toBe('Mykolaiv Oblast, Ukraine')
+    expect(sublabelOf('Tokyo Dome', ['東京都'])).toBe('東京都')
+  })
+
+  it('drops OSM objects whose name has no letters or digits', () => {
+    const names = (junk as unknown as PhotonResponse).features.map((f) => photonToPlace(f)?.label)
+    expect(names.filter(Boolean)).toEqual(['Gárgyán-erdő', 'Irodasori iskola'])
+  })
+
   it('labels address hits by street', () => {
     const p = photonToPlace({ geometry: { type: 'Point', coordinates: [-80.54, 43.47] }, properties: { housenumber: '200', street: 'University Avenue West', city: 'Waterloo', state: 'Ontario', country: 'Canada', countrycode: 'CA' } })
     expect(p).toMatchObject({ label: '200 University Avenue West', sublabel: 'Waterloo, Ontario, Canada' })
+  })
+})
+
+describe('search ranking (real Photon responses, limit 10)', () => {
+  const run = async (fixture: unknown, q: string) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(fixture)))
+    try {
+      return await searchPlaces(q)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  }
+
+  it('São Paulo: the city, not the state centroid 250 km away, comes first', async () => {
+    const r = await run(saoPaulo, 'São Paulo ranking')
+    expect(r[0]).toMatchObject({ label: 'São Paulo', sublabel: 'Brazil' })
+    expect(r[0].lat).toBeCloseTo(-23.5507, 3)
+    expect(r.filter((p) => p.label === 'São Paulo' && p.sublabel === 'Brazil')).toHaveLength(1)
+    expect(r.length).toBeLessThanOrEqual(6)
+  })
+
+  it('Moscow: the city at the Kremlin, not the federal subject centroid', async () => {
+    const r = await run(moscow, 'Moscow ranking')
+    expect(r[0]).toMatchObject({ label: 'Moscow', sublabel: 'Russia', countryCode: 'ru' })
+    expect(r[0].lat).toBeCloseTo(55.7505, 3)
+    expect(r.filter((p) => p.countryCode === 'ru')).toHaveLength(1)
+  })
+
+  it('Ushuaia: the department merges into the town; look-alike rows get their county', async () => {
+    const r = await run(ushuaia, 'Ushuaia ranking')
+    expect(labels(r).slice(0, 2)).toEqual([
+      ['Ushuaia', 'Argentina'],
+      ['Ushuaia', 'Departamento Tolhuin, Argentina'],
+    ])
+    const rows = r.map((p) => `${p.label}|${p.sublabel}`)
+    expect(new Set(rows).size).toBe(rows.length)
+  })
+
+  it('CN Tower: tickets and edge walk at the same spot collapse into one', async () => {
+    expect(labels(await run(cnTower, 'cn tower ranking'))).toEqual([['CN Tower', 'Toronto, Ontario, Canada']])
+  })
+
+  it('a query of only punctuation never reaches the network', async () => {
+    const f = vi.fn()
+    vi.stubGlobal('fetch', f)
+    expect(await searchPlaces('!!!')).toEqual([])
+    expect(await searchPlaces(' -- ')).toEqual([])
+    expect(f).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
   })
 })
 
@@ -133,14 +200,17 @@ describe('time zones', () => {
 describe('network', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('searchPlaces queries Photon in English, limit 6, and caches', async () => {
+  it('searchPlaces queries Photon in English (10 asked, ≤ 6 kept), URL-encoded, and caches', async () => {
     const f = vi.fn(async () => Response.json(waterloo))
     vi.stubGlobal('fetch', f)
     const r = await searchPlaces('  Waterloo ')
     expect(r).toHaveLength(4)
-    expect(String((f.mock.calls[0] as unknown[])[0])).toBe('https://photon.komoot.io/api/?q=Waterloo&limit=6&lang=en')
+    expect(String((f.mock.calls[0] as unknown[])[0])).toBe('https://photon.komoot.io/api/?q=Waterloo&limit=10&lang=en')
+    await searchPlaces('a&b=c/d?e#f 東京')
+    expect(String((f.mock.calls[1] as unknown[])[0])).toBe('https://photon.komoot.io/api/?q=a%26b%3Dc%2Fd%3Fe%23f%20%E6%9D%B1%E4%BA%AC&limit=10&lang=en')
+    f.mockClear()
     await searchPlaces('waterloo')
-    expect(f).toHaveBeenCalledTimes(1)
+    expect(f).toHaveBeenCalledTimes(0)
     expect(await searchPlaces('w')).toEqual([])
   })
 

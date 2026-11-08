@@ -27,6 +27,8 @@ const PLACES: Record<string, Place> = {
 
 const H = 3_600_000
 const params = new URLSearchParams(location.search)
+/** URL presets apply once per page load (StrictMode runs mount effects twice in development). */
+let presetsApplied = false
 
 /**
  * Best pass to show off the overlay: an imaged one (most recent), else likely, else could. `&cat=` prefers a
@@ -129,6 +131,8 @@ export default function GlobeSandbox() {
 
   // URL presets.
   useEffect(() => {
+    if (presetsApplied) return
+    presetsApplied = true
     const s = useApp.getState()
     loadCatalog().then(
       () => s.setCatalogReady(true),

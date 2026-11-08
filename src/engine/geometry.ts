@@ -12,7 +12,7 @@
  *   at off-nadir η:     γ = asin((r/R) sin η) − η     (clamped to the horizon, γ_h = acos(R/r))
  *   at elevation ε:     γ = acos((R/r) cos ε) − ε
  */
-import { DEG, EARTH_RADIUS_KM, RAD } from '@/lib/geo'
+import { DEG, EARTH_RADIUS_KM, eciToEcef, RAD, sunEci } from '@/lib/geo'
 
 const R = EARTH_RADIUS_KM
 
@@ -42,4 +42,20 @@ export function groundRangeAtElevationKm(minElevation: number, altKm: number): n
   const r = R + altKm
   const e = minElevation * DEG
   return (Math.acos((R / r) * Math.cos(e)) - e) * R
+}
+
+/**
+ * Sun elevation (degrees) at a place: exactly the maths of geo.ts `sunElevationDeg` (its low-precision
+ * solar ephemeris, rotated by GMST, against the spherical place vector), but in plain numbers. geo.ts
+ * goes through three.js Vector3, which would otherwise be bundled into the pass worker for this one
+ * call. Tested equal to geo.ts in geo.test.ts.
+ */
+export function sunElevationAtDeg(lat: number, lon: number, ms: number): number {
+  const [sx, sy, sz] = sunEci(ms)
+  const [x, y, z] = eciToEcef(sx, sy, sz, ms)
+  const la = lat * DEG
+  const lo = lon * DEG
+  const c = Math.cos(la)
+  const dot = (x * c * Math.cos(lo) + y * c * Math.sin(lo) + z * Math.sin(la)) / Math.hypot(x, y, z)
+  return Math.asin(Math.max(-1, Math.min(1, dot))) * RAD
 }

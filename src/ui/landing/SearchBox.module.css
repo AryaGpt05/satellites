@@ -1,6 +1,13 @@
 .search {
   position: relative;
 }
+/* Short desktop windows: a slightly smaller line so the hero fits between the corner readouts. */
+@media (min-width: 761px) and (max-height: 760px) {
+  .field.field {
+    --h: 52px;
+    --fs: 18px;
+  }
+}
 .idx {
   color: var(--bone-2);
 }

@@ -9,7 +9,17 @@
  */
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
-import { BufferAttribute, BufferGeometry, InterleavedBuffer, InterleavedBufferAttribute, ShaderMaterial, Vector2, Vector3 } from 'three'
+import {
+  BufferAttribute,
+  BufferGeometry,
+  InterleavedBuffer,
+  InterleavedBufferAttribute,
+  ShaderMaterial,
+  Vector2,
+  Vector3,
+  type PerspectiveCamera,
+} from 'three'
+import { DEG } from '@/lib/geo'
 import { useApp } from '@/state/store'
 import { palette } from '@/ui/system/palette'
 import { ELEMENT_STRIDE, FLAG_FEATURED, getSatInfo, keplerJ2World, propagate, type CatalogBuffers } from './data'
@@ -57,6 +67,7 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
           uShowAmbient: { value: 1 },
           uReveal: { value: 0 },
           uCamDist: { value: 5 },
+          uEarthPx: { value: 320 },
           uBone: { value: lin(palette.bone) },
           uSignal: { value: lin(palette.signal) },
           uIce: { value: lin(palette.ice) },
@@ -156,7 +167,12 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
     const st = useApp.getState()
     u.uTime.value = (rt.simTime - elements.refEpochMs) / 1000
     ;(u.uGmst.value as Vector2).set(Math.cos(rt.gmst), Math.sin(rt.gmst))
-    u.uCamDist.value = state.camera.position.length()
+    const camDist = state.camera.position.length()
+    u.uCamDist.value = camDist
+    // Apparent angular radius ρ of the unit sphere (sin ρ = 1/D), in CSS px of the vertical field of view.
+    const fov = (state.camera as PerspectiveCamera).fov ?? 30
+    const rho = Math.asin(Math.min(1, 1 / Math.max(camDist, 1.0001)))
+    u.uEarthPx.value = (Math.tan(rho) / Math.tan((fov * DEG) / 2)) * (state.size.height / 2)
     u.uShowAmbient.value = st.showAmbient ? 1 : 0
     u.uHideA.value = rt.overlayNorad >= 0 ? (indexOf.get(rt.overlayNorad) ?? -1) : -1
     u.uHideB.value = st.hoveredNorad !== undefined ? (indexOf.get(st.hoveredNorad) ?? -1) : -1
@@ -232,5 +248,5 @@ function HoveredSat({ norad, index, data, imaged }: { norad: number; index: numb
   const category = info?.category ?? 'other'
   const tone: MarkTone = imaged ? 'signal' : category === 'radar' ? 'ice' : 'bone'
   useSatAnchor('hover', track)
-  return <SatGlyph category={category} filled={imaged} tone={tone} track={track} />
+  return <SatGlyph category={category} imaged={imaged} tone={tone} track={track} />
 }

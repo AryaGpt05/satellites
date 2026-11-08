@@ -1,5 +1,6 @@
 /**
- * <GlobeCanvas/>: the full-bleed 3D scene. Reads the store; writes only `globeReady` and `hoveredNorad`.
+ * <GlobeCanvas/>: the full-bleed 3D scene. Reads the store; writes only `globeReady`, `hoveredNorad` and the
+ * throttled `simTime` of the clock it owns (see Clock.tsx).
  * See docs/ARCHITECTURE.md ("globe") and docs/DESIGN.md §6.
  *
  * Failure modes are handled here so the app never hangs on the globe:
@@ -40,6 +41,18 @@ export function GlobeCanvas({ className }: { className?: string }) {
   useEffect(() => {
     if (unavailable) useApp.getState().setGlobeReady(true)
   }, [unavailable])
+
+  // Follow the OS setting live: camera cuts, frozen cloud drift and instant reveals switch with it.
+  useEffect(() => {
+    const mql = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!mql) return
+    const sync = () => {
+      runtime.reducedMotion = mql.matches
+    }
+    sync()
+    mql.addEventListener('change', sync)
+    return () => mql.removeEventListener('change', sync)
+  }, [runtime])
 
   return (
     <div className={cx(s.root, className)}>

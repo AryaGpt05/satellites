@@ -1,4 +1,5 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { forwardRef, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useWallSecondSync } from './phase'
 import s from './primitives.module.css'
 
 const cx = (...c: (string | false | undefined | null)[]) => c.filter(Boolean).join(' ')
@@ -64,9 +65,11 @@ export function Tag({ children, signal, className }: { children: ReactNode; sign
   return <span className={cx(s.tag, signal && s.tagSignal, className)}>{children}</span>
 }
 
-/** 1Hz hard blink (no fade) — live indicator */
+/** 1Hz hard blink (no fade) — live indicator, phase-locked to the wall-clock second like the HUD clock */
 export function LiveDot({ className }: { className?: string }) {
-  return <span className={cx(s.live, className)} aria-hidden />
+  const ref = useRef<HTMLSpanElement>(null)
+  useWallSecondSync(ref, false)
+  return <span ref={ref} className={cx(s.live, className)} aria-hidden />
 }
 
 export { cx }

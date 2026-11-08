@@ -136,3 +136,32 @@
     animation: none;
   }
 }
+
+.scanChip {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--ink-0) 80%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--d-sm) var(--ease-out);
+  pointer-events: none;
+}
+.scanChip b {
+  font-weight: 400;
+  color: var(--bone);
+}
+.scanChipOn {
+  opacity: 1;
+}

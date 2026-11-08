@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Pass } from '@/types'
 import { gibsWmsUrl, worldviewUrl } from './endpoints'
-import { GEO_SAFE_LAG_MS, geoFrameTime, geoImageUrl, gibsTime, utcDate, weatherCandidates } from './gibs'
+import { GEO_SAFE_LAG_MS, geoFrameCandidates, geoFrames, geoFrameTime, geoImageUrl, gibsTime, parseIsoDuration, parseTimeDomain, utcDate, weatherCandidates } from './gibs'
 import { measureNoData } from './image'
 
 const WATERLOO = { lat: 43.4723, lon: -80.5449 }
@@ -111,6 +111,71 @@ describe('geostationary frame time', () => {
   it('formats UTC dates', () => {
     expect(utcDate(Date.parse('2026-01-02T23:59:59Z'))).toBe('2026-01-02')
     expect(utcDate(Date.parse('2026-01-03T00:00:00Z'))).toBe('2026-01-03')
+  })
+})
+
+describe('published time domains', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const T = (iso: string) => Date.parse(iso)
+  const hm = (ts: number[]) => ts.map((t) => new Date(t).toISOString().slice(11, 16))
+
+  it('parses ISO durations', () => {
+    expect(parseIsoDuration('PT10M')).toBe(600_000)
+    expect(parseIsoDuration('P1D')).toBe(86_400_000)
+    expect(parseIsoDuration('PT1H30M')).toBe(5_400_000)
+    expect(parseIsoDuration('P')).toBeUndefined()
+    expect(parseIsoDuration('10M')).toBeUndefined()
+  })
+
+  it('expands a real Himawari domain, gap included, within the window', () => {
+    // Verbatim from GIBS DescribeDomains, 2026-11-08 06:05Z
+    const d = '2026-11-08/2026-11-08T02:30:00Z/PT10M,2026-11-08T02:50:00Z/2026-11-08T05:20:00Z/PT10M'
+    const frames = parseTimeDomain(d, T('2026-11-08T02:00:00Z'), T('2026-11-08T03:05:00Z'))
+    expect(hm(frames)).toEqual(['02:00', '02:10', '02:20', '02:30', '02:50', '03:00'])
+    expect(parseTimeDomain('2026-11-08T05:00:00Z', 0, Infinity)).toEqual([T('2026-11-08T05:00:00Z')])
+    expect(parseTimeDomain('garbage,2026-11-08/nope/PT10M', 0, Infinity)).toEqual([])
+  })
+
+  it('fetches the domain once, then snaps geoImageUrl to listed frames (skipping gaps)', async () => {
+    const now = T('2026-11-08T06:05:00Z')
+    const xml = "<Domains><DimensionDomain><ows:Identifier>time</ows:Identifier><Domain>2026-11-08T00:00:00Z/2026-11-08T02:30:00Z/PT10M,2026-11-08T02:50:00Z/2026-11-08T05:20:00Z/PT10M</Domain></DimensionDomain></Domains>"
+    const f = vi.fn(async () => new Response(xml, { status: 200, headers: { 'content-type': 'text/xml' } }))
+    vi.stubGlobal('fetch', f)
+    const frames = await geoFrames('gibs-himawari', { now })
+    expect(hm(frames.slice(0, 2))).toEqual(['05:20', '05:10'])
+    expect(frames).not.toContain(T('2026-11-08T02:40:00Z'))
+    await geoFrames('gibs-himawari', { now: now + 60_000 })
+    expect(f).toHaveBeenCalledTimes(1)
+    const url = String((f.mock.calls[0] as unknown[])[0])
+    expect(url).toBe('https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0/Himawari_AHI_Band3_Red_Visible_1km/default/1km/all/2026-11-08T00:00:00Z--2026-11-08T07:00:00Z.xml')
+
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    const time = (ms: number) => new URL(geoImageUrl('gibs-himawari', TOKYO, ms, { halfSizeKm: 300, px: 256 })).searchParams.get('TIME')
+    expect(time(T('2026-11-08T02:45:00Z'))).toBe('2026-11-08T02:30:00Z') // 02:40 is a gap: never ask for it
+    expect(time(T('2026-11-08T03:07:00Z'))).toBe('2026-11-08T03:00:00Z')
+    expect(time(now)).toBe('2026-11-08T04:50:00Z') // held back 70 min, then a listed frame
+    expect(time(T('2026-11-07T12:00:00Z'))).toBe('2026-11-07T12:00:00Z') // older than the list: unchanged
+    vi.useRealTimers()
+  })
+
+  it('rejects a layer GIBS has no domain for, and daily layers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<ExceptionReport/>', { status: 400 })))
+    await expect(geoFrames('gibs-goes-west', { now: Date.parse('2026-11-08T06:05:00Z') })).rejects.toThrow()
+    await expect(geoFrames('gibs-modis-aqua')).rejects.toThrow(TypeError)
+  })
+
+  it('picks candidate frames: listed, ≥ 70 min old, newest first; dark frames skipped for visible-only bands', () => {
+    const now = T('2026-11-08T06:05:00Z')
+    const listed = [T('2026-11-08T05:20:00Z'), T('2026-11-08T05:00:00Z'), T('2026-11-08T04:50:00Z'), T('2026-11-08T04:30:00Z')]
+    expect(hm(geoFrameCandidates('gibs-goes-east', WATERLOO, now, listed))).toEqual(['04:50', '04:30'])
+    expect(hm(geoFrameCandidates('gibs-goes-east', WATERLOO, now, null, 3))).toEqual(['04:50', '04:40', '04:30'])
+    // Waterloo at ~05:00Z is midnight: GeoColor has a night layer, so it stays…
+    expect(geoFrameCandidates('gibs-goes-east', WATERLOO, now, null, 3)).toHaveLength(3)
+    // …but Himawari's red visible band over Waterloo at night would be black: nothing to try.
+    expect(geoFrameCandidates('gibs-himawari', WATERLOO, now, null, 3)).toEqual([])
+    // Tokyo at 14:00 JST: daylight, all kept.
+    expect(geoFrameCandidates('gibs-himawari', TOKYO, now, null, 3)).toHaveLength(3)
   })
 })
 

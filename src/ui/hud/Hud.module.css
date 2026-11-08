@@ -66,9 +66,23 @@
 .about:hover {
   color: var(--bone);
 }
+/* A box ring would collide with the wordmark line 3px above; a signal underline marks focus instead
+   (on the words only: the key cap beside them keeps its own frame). */
+.about:focus-visible {
+  outline: none;
+  color: var(--bone);
+}
+.about:focus-visible .aboutText {
+  text-decoration: underline 1px var(--signal);
+  text-underline-offset: 4px;
+}
 
 /* TR */
 .clock {
+  color: var(--bone);
+}
+.sceneValue {
+  margin-left: 0.7em;
   color: var(--bone);
 }
 .dot {
@@ -85,7 +99,8 @@
   }
 }
 
-.mob {
+.mob,
+.mobInline {
   display: none !important;
 }
 
@@ -96,6 +111,9 @@
   .mob {
     display: inline-flex !important;
     color: var(--bone-3);
+  }
+  .mobInline {
+    display: inline !important;
   }
 }
 

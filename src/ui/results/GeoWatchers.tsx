@@ -35,7 +35,7 @@ export function GeoWatchers({ watchers, place, days }: { watchers: GeoWatcher[];
                 {fmtLon(g.subLon, 1)} · {g.elevationDeg.toFixed(1)}° up · every {int(g.cadenceMin)} min
               </div>
               <div className={s.count}>
-                <span className={s.countNum}>{int(g.imagesInWindow)}</span> images this week
+                <span className={s.countNum}>{int(g.imagesInWindow)}</span> images {Math.round(days) === 7 ? 'this week' : `in ${int(days)} days`}
               </div>
             </div>
           </li>
