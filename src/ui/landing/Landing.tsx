@@ -223,10 +223,10 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
               Something
             </Reveal>
             <Reveal as="span" className={s.hl} delay={delay + 200} skip={!first}>
-              photographed
+              watched <em className={s.serif}>you</em>
             </Reveal>
             <Reveal as="span" className={s.hl} delay={delay + 260} skip={!first}>
-              <em className={s.serif}>you</em> this week.
+              this week.
             </Reveal>
           </h1>
 

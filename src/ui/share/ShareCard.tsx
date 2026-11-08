@@ -50,7 +50,7 @@ export function ShareCard({ spec }: { spec: CardSpec }) {
         <div className={s.divider} style={{ left: PLATE }} />
 
         <Row box={PANEL.top}>
-          <span className={s.lockup}>Overflight</span>
+          <span className={s.lockup}>Watched</span>
           {spec.stamp ? <span className={s.row} style={{ color: CARD_COLOR.bone2 }}>{spec.stamp}</span> : null}
         </Row>
         <Hair y={PANEL.rule1} />

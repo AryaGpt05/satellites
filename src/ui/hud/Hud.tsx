@@ -114,9 +114,9 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
     <div ref={rootRef} className={s.hud} data-scene={scene}>
       <Bezel />
 
-      <CornerReadout corner="tl" label="Overflight" ref={topLeft}>
+      <CornerReadout corner="tl" label="Watched" ref={topLeft}>
         <Reveal axis="x" duration={480} as="div" className={s.line}>
-          <span className={s.wordmark}>Overflight</span>
+          <span className={s.wordmark}>Watched</span>
           <span className={s.version}>{VERSION}</span>
         </Reveal>
         {onAbout ? (

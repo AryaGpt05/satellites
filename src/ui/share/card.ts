@@ -383,7 +383,7 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   // ── the panel ──
   const X = PANEL.x
   const R = PANEL.right
-  rowText(ctx, 'Overflight', X, PANEL.top, C.bone, monoFace(CARD_FS.lockup, CARD_FS.lockup * TRACK.lockup, 500))
+  rowText(ctx, 'Watched', X, PANEL.top, C.bone, monoFace(CARD_FS.lockup, CARD_FS.lockup * TRACK.lockup, 500))
   if (spec.stamp) rowText(ctx, spec.stamp, R, PANEL.top, C.bone2, monoFace(CARD_FS.row), 'right')
   ctx.fillStyle = C.line
   ctx.fillRect(X, PANEL.rule1, PANEL.w, 1)

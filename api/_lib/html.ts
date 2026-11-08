@@ -45,7 +45,7 @@ export function sharePageHtml(m: SharePageMeta): string {
 <meta name="theme-color" content="#07080A">
 <meta name="robots" content="noindex, follow">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Overflight">
+<meta property="og:site_name" content="Watched">
 <meta property="og:title" content="${t}">
 <meta property="og:description" content="${d}">
 <meta property="og:url" content="${esc(m.canonical)}">
@@ -68,7 +68,7 @@ a{color:#FF6A1A;text-decoration:none}
 </style>
 </head>
 <body>
-<p>Opening <a href="${href}">Overflight</a></p>
+<p>Opening <a href="${href}">Watched</a></p>
 <script>location.replace(${jsonForScript(m.redirect)})</script>
 </body>
 </html>

@@ -93,7 +93,7 @@ describe('share card spec', () => {
     expect(client.lead).toMatch(/^\d+ satellites photographed$/)
     expect(client.readouts.map((r) => r.label)).toEqual(['Photo', 'Likely', 'Could', 'Overhead'])
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, passes: 1800, best: { satName: 'Sentinel-2C', altitudeKm: 795 } })).toBe(
-      '7 satellites photographed Waterloo this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething photographed you this week too.',
+      '7 satellites photographed Waterloo this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething watched you this week too.',
     )
   })
 
@@ -102,7 +102,7 @@ describe('share card spec', () => {
     const s2 = report.passes.find((p) => p.captureId?.startsWith('S2C_MSIL2A_20261101'))!
     const spec = cardSpec(s2, report, metaFor(s2), 'America/Toronto', 'overflight.app')
     expect(spec.stamp).toBe(`${fmtLocalDay(s2.tClosest, 'America/Toronto')} 2026 · ${fmtLocalTime(s2.tClosest, 'America/Toronto')} EST`)
-    expect(spec.footLeft).toBe('See what photographed you')
+    expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind).toBe('image')
     if (spec.plate.kind === 'image') {
       expect(spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')

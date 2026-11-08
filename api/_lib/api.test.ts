@@ -90,12 +90,12 @@ describe('copy', () => {
     const s = shareFromRpc(ROW)!
     expect(headline(s)).toBe('Sentinel-2C photographed Waterloo.')
     expect(description(s)).toBe(
-      'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What photographed you this week?',
+      'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What watched you this week?',
     )
     expect(headline({ ...s, verdict: 'could', satName: 'SkySat-C3' })).toBe('SkySat-C3 passed within view of Waterloo.')
     expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 photographed Waterloo.')
     expect(description({ ...s, verdict: 'could', satName: 'SkySat-C3', pass: { ...s.pass, headingDeg: 192 } })).toContain(
-      "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What photographed you this week?",
+      "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What watched you this week?",
     )
   })
 })
@@ -106,7 +106,7 @@ describe('card spec', () => {
     const spec = buildCardSpec(cardInputFromShare(s, 'overflight.app'))
     expect(spec.stamp).toBe('Sun 1 Nov 2026 · 11:21 EST')
     expect(spec.verdictLabel).toBe('Photographed')
-    expect(spec.footLeft).toBe('See what photographed you')
+    expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind === 'image' && spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
     expect(spec.readouts.map((r) => `${r.label} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)).toEqual(['Altitude 795 km', 'Off-nadir 5.3°', 'Pixel 10 m'])
     const cloudy = buildCardSpec(cardInputFromShare({ ...s, capture: { ...s.capture!, cloudCoverPct: 86 } }, ''))

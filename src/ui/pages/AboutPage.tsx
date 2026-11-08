@@ -154,7 +154,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
     <div ref={rootRef} className={s.overlay} role="dialog" aria-modal="true" aria-labelledby="about-title">
       <header className={s.bar} data-about-content>
         <span className={s.barLabel}>
-          Overflight <span className={s.dim}>/ About</span>
+          Watched <span className={s.dim}>/ About</span>
         </span>
         <button ref={closeRef} type="button" className={s.close} onClick={onClose} aria-label="Close" aria-keyshortcuts="Escape">
           <span className={s.closeText}>Close</span>
@@ -194,7 +194,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 </Reveal>
               </h1>
               <Reveal as="p" className={s.lede} delay={500} duration={720}>
-                Overflight replays the last seven days of orbits over a single point on Earth, then asks the public archives for
+                Watched replays the last seven days of orbits over a single point on Earth, then asks the public archives for
                 the pictures. Every number is computed from public data, in your browser. Anything uncertain is labelled as such.
               </Reveal>
             </header>
@@ -293,7 +293,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
 
             <footer className={s.footer}>
               <span>
-                Overflight <span className={s.ver}>{VERSION}</span>
+                Watched <span className={s.ver}>{VERSION}</span>
               </span>
               <span className={s.dim}>Built on public data. Nothing here is a picture we took.</span>
             </footer>

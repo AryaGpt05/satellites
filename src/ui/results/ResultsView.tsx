@@ -504,7 +504,7 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
   ) : null
   const inviteBar = invite ? (
     <div className={s.invite}>
-      <p className={s.inviteText}>Something photographed you this week too.</p>
+      <p className={s.inviteText}>Something watched you this week too.</p>
       {onFindYours ? (
         <Button variant="primary" size="sm" onClick={onFindYours}>
           Find yours
