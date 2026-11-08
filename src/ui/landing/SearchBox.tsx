@@ -146,8 +146,10 @@ export function SearchBox({
     setQuery(place.label)
     setOpen(false)
     setActive(-1)
-    inputRef.current?.blur()
+    // Submit first, then let go of the field: the caller knows it is leaving when the blur arrives,
+    // and skips measuring a layout it will never animate.
     onSubmit(place)
+    inputRef.current?.blur()
   }
 
   const submit = () => {

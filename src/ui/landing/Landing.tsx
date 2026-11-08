@@ -118,7 +118,10 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
 
   useInsets(columnRef, contentRef, searchingRef, [stacked, shortLandscape, searching, locate.state.kind])
 
+  /** Set once a place is chosen: the landing is on its way out, so search mode ends without a FLIP. */
+  const leavingRef = useRef(false)
   const submit = (p: Place) => {
+    leavingRef.current = true
     if (locate.state.kind === 'locating') locate.cancel()
     locate.dismiss()
     onSubmit(p)
@@ -135,6 +138,7 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
   const liftRef = useRef(0)
   const listOpenRef = useRef(false)
   const enterSearch = () => {
+    leavingRef.current = false
     if (!liftable || searchingRef.current) return
     flipFrom.current = searchRef.current?.getBoundingClientRect().top ?? null
     const column = columnRef.current
@@ -168,7 +172,9 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
   }
   const leaveSearch = () => {
     if (!searchingRef.current) return
-    if (liftable) flipFrom.current = searchRef.current?.getBoundingClientRect().top ?? null
+    // Not when a place was just chosen: the landing is leaving, and the read would force a layout
+    // inside the submit.
+    if (liftable && !leavingRef.current) flipFrom.current = searchRef.current?.getBoundingClientRect().top ?? null
     searchingRef.current = false
     setSearching(false)
   }
@@ -393,8 +399,12 @@ function useInsets(
         set({ left: right > 0 ? right + TEXT_CLEAR : column.getBoundingClientRect().right + TEXT_CLEAR, right: 0, bottom: 0 })
       }
     }
-    publish()
-    if (typeof ResizeObserver === 'undefined') return
+    if (typeof ResizeObserver === 'undefined') {
+      publish()
+      return
+    }
+    // No direct call: the observer's first callback (after this frame's layout, before its paint)
+    // publishes, so mounting the landing never forces a layout of its own.
     const ro = new ResizeObserver(publish)
     ro.observe(column)
     ro.observe(content)
@@ -508,7 +518,7 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
   useLayoutEffect(() => {
     const ul = listRef.current
     if (!ul || typeof ResizeObserver === 'undefined') return
-    markEnd()
+    // The observer's first callback marks it, after layout and before the first paint: no forced layout.
     const ro = new ResizeObserver(markEnd)
     ro.observe(ul)
     return () => ro.disconnect()

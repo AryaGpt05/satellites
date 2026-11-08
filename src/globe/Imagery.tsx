@@ -2,7 +2,7 @@
  * Regional imagery painted onto the planet (owner request C3), through the Earth and cloud shaders (chunks.ts PAINT):
  *
  *  - CONTEXT: a sharp regional basemap around the searched place (NASA GIBS Blue Marble Next Generation, 500 m
- *    native, ±360 km at ~0.7 km/px), fetched once results are in and feathered into the global map. It keeps the
+ *    native, ±360 km at ~0.5 km/px on desktops), fetched once results are in and feathered into the global map. It keeps the
  *    close pass views (the chase and the acquired view, both below the global map's texture floor) crisp.
  *  - DECAL: the selected pass's REAL captured image (a Planetary Computer crop of the Sentinel-2 / Landsat item, or the
  *    GIBS daily mosaic), ±40–300 km around the place, developed exactly at the scan line during a live acquisition
@@ -72,12 +72,19 @@ interface Entry {
 function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
   const entries = new Map<string, Entry>()
   let alive = true
-  const load = (url: string, uv: Vector4, panelHalf: number): Entry => {
+  /** The entry for an image, starting its fetch + decode the first time (`uv` is built only then). */
+  const load = (url: string, uv: () => Vector4, panelHalf: number): Entry => {
     let e = entries.get(url)
     if (e) return e
-    e = { url, state: 'loading', uv, panelHalf, usedAt: performance.now() }
+    e = { url, state: 'loading', uv: uv(), panelHalf, usedAt: performance.now() }
     entries.set(url, e)
     const entry = e
+    const log = (what: string, extra?: unknown) => {
+      if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
+      const w = window as unknown as { __imageryLog?: unknown[] }
+      ;(w.__imageryLog ??= []).push({ t: Math.round(performance.now()), what, url: url.slice(0, 140), extra })
+    }
+    log('load')
     preloadImage(url)
       .then((img) => createImageBitmap(img, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))
       .then(
@@ -85,9 +92,11 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
           if (!alive) return bmp.close()
           entry.bitmap = bmp
           entry.state = 'decoded'
+          log('decoded', [bmp.width, bmp.height])
         },
-        () => {
+        (err: unknown) => {
           entry.state = 'error'
+          log('error', String(err))
         },
       )
     return e
@@ -110,7 +119,7 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     e.state = 'ready'
     if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
       const w = window as unknown as { __imageryLog?: unknown[] }
-      ;(w.__imageryLog ??= []).push({ t: Math.round(performance.now()), url: e.url.slice(0, 120), flying: rt.camera.flying, acq: rt.acq.armed })
+      ;(w.__imageryLog ??= []).push({ t: Math.round(performance.now()), what: 'upload', url: e.url.slice(0, 140), flying: rt.camera.flying, acq: rt.acq.armed })
     }
   }
   /** Keep at most `max` decals that are not in use; dispose the least recently used. */
@@ -123,6 +132,10 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
       entries.delete(e.url)
     }
   }
+  /** (Re)activate: StrictMode runs effect cleanups once on mount in development, and the store outlives them. */
+  const revive = () => {
+    alive = true
+  }
   const dispose = () => {
     alive = false
     for (const e of entries.values()) {
@@ -131,33 +144,43 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     }
     entries.clear()
   }
-  return { entries, load, upload, prune, dispose }
+  return { entries, load, upload, prune, revive, dispose }
 }
 
 export function Imagery() {
   const rt = useRuntime()
   const gl = useThree((s) => s.gl)
   const store = useMemo(() => createStore(gl, rt), [gl, rt])
-  useEffect(() => () => store.dispose(), [store])
+  useEffect(() => {
+    store.revive()
+    return () => store.dispose()
+  }, [store])
 
   const state = useMemo(
     () => ({
       ctx: null as Entry | null, // bound context patch
       ctxKey: '',
-      decal: null as Entry | null, // bound decal
+      decal: null as Entry | null, // bound decal (slot A, on top)
+      prev: null as Entry | null, // the previous one (slot B), held under A while A fades in
       wantDecal: null as Entry | null,
       prefetch: null as Entry | null,
       prefetchKey: '',
       resultsAt: -1,
       reportSeen: undefined as unknown,
       last: performance.now(),
+      // Per-frame lookups, recomputed only when their inputs change (no per-frame allocation).
+      placeRef: undefined as unknown,
+      placeKey: '',
+      ctxEntry: null as Entry | null,
+      passRef: undefined as unknown,
+      passEntry: null as Entry | null,
     }),
     [],
   )
 
   useFrame(() => {
     const now = performance.now()
-    const dt = Math.min(0.1, (now - state.last) / 1000)
+    const dt = Math.min(0.1, Math.max(0, (now - state.last) / 1000))
     state.last = now
     const st = useApp.getState()
     const p = rt.paint
@@ -174,12 +197,20 @@ export function Imagery() {
     if (st.phase !== 'results') state.resultsAt = -1
     const settledResults = state.resultsAt >= 0 && now - state.resultsAt > PREFETCH_DELAY_MS
 
+    if (place !== state.placeRef) {
+      state.placeRef = place
+      state.placeKey = place ? `${place.lat.toFixed(4)},${place.lon.toFixed(4)}` : ''
+      state.ctxEntry = null
+    }
     // ── context basemap: one per place, once results have settled (or a pass is open)
     if (place && (settledResults || st.selectedPassId)) {
-      const key = `${place.lat.toFixed(4)},${place.lon.toFixed(4)}`
+      const key = state.placeKey
       if (key !== state.ctxKey) {
-        const url = gibsWmsUrl(CTX_LAYER, CTX_TIME, place, { halfSizeKm: CTX_HALF_KM, px: mobile ? 768 : 1024 })
-        const e = store.load(url, patchUv(place.lat, place.lon, CTX_HALF_KM, new Vector4()), 0)
+        if (!state.ctxEntry) {
+          const url = gibsWmsUrl(CTX_LAYER, CTX_TIME, place, { halfSizeKm: CTX_HALF_KM, px: mobile ? 1024 : 1536 })
+          state.ctxEntry = store.load(url, () => patchUv(place.lat, place.lon, CTX_HALF_KM, new Vector4()), 0)
+        }
+        const e = state.ctxEntry
         if (e.state === 'decoded' && quiet) store.upload(e)
         // Bind once the old patch has faded out (below).
         if (e.state === 'ready' && p.uCtxOn.value <= 0) {
@@ -190,23 +221,31 @@ export function Imagery() {
         }
       }
     }
-    const ctxWanted = !!place && !!state.ctx && state.ctxKey === `${place.lat.toFixed(4)},${place.lon.toFixed(4)}`
+    const ctxWanted = !!place && !!state.ctx && state.ctxKey === state.placeKey
     if (ctxWanted) p.uCtxOn.value = rt.reducedMotion ? 1 : Math.min(1, p.uCtxOn.value + (dt * 1000) / CTX_FADE_IN)
     else if (p.uCtxOn.value > 0) p.uCtxOn.value = Math.max(0, p.uCtxOn.value - (dt * 1000) / CTX_FADE_OUT)
 
     // ── decal: the selected pass's capture
     const pass = st.selectedPassId && report ? selectSelectedPass(st) : undefined
-    let want: Entry | null = null
-    if (pass && place && acq.imaged && acq.passId === pass.id) {
-      const cap = captureOf(report, pass)
+    if (pass !== state.passRef) {
+      state.passRef = pass
+      state.passEntry = null
+      const cap = pass && place ? captureOf(report, pass) : undefined
       const spec = cap ? decalSpecFor(cap.collection, mobile) : null
-      if (cap && spec) {
-        const url = decalUrl(cap, spec)
-        want = store.load(url, patchUv(place.lat, place.lon, spec.halfSizeKm, new Vector4()), panelHalfKm(cap.collection) / (2 * spec.halfSizeKm))
-        want.usedAt = now
-        // The selected image uploads as soon as no flight is mid-way: its scan line may be seconds away.
-        if (want.state === 'decoded' && !midFlight) store.upload(want)
+      if (cap && spec && place) {
+        state.passEntry = store.load(
+          decalUrl(cap, spec),
+          () => patchUv(place.lat, place.lon, spec.halfSizeKm, new Vector4()),
+          panelHalfKm(cap.collection) / (2 * spec.halfSizeKm),
+        )
       }
+    }
+    let want: Entry | null = null
+    if (pass && acq.imaged && acq.passId === pass.id && state.passEntry) {
+      want = state.passEntry
+      want.usedAt = now
+      // The selected image uploads as soon as no flight is mid-way: its scan line may be seconds away.
+      if (want.state === 'decoded' && !midFlight) store.upload(want)
     }
     // Prefetch the hero's capture once results have settled (network + decode now, upload when quiet).
     if (settledResults && report) {
@@ -216,29 +255,49 @@ export function Imagery() {
         state.prefetchKey = key
         const cap = captureOf(report, hero)
         const spec = cap ? decalSpecFor(cap.collection, mobile) : null
-        if (cap && spec) state.prefetch = store.load(decalUrl(cap, spec), patchUv(place.lat, place.lon, spec.halfSizeKm, new Vector4()), panelHalfKm(cap.collection) / (2 * spec.halfSizeKm))
+        if (cap && spec)
+          state.prefetch = store.load(
+            decalUrl(cap, spec),
+            () => patchUv(place.lat, place.lon, spec.halfSizeKm, new Vector4()),
+            panelHalfKm(cap.collection) / (2 * spec.halfSizeKm),
+          )
       }
     }
     if (state.prefetch && state.prefetch.state === 'decoded' && quiet) store.upload(state.prefetch)
+    acq.decalReady = !!want && want.state === 'ready'
 
+    // Crossfade between passes: the bound image moves to slot B (fully developed, underneath) and the new one fades
+    // in on top; B leaves once A is in. With nothing to show, A fades out.
     const target = want && want.state === 'ready' ? want : null
-    const fadeOut = (ms: number) => (p.uDecalOn.value = Math.max(0, p.uDecalOn.value - (dt * 1000) / ms))
-    if (state.decal !== target) {
-      // Fade the bound image out first; then bind the new one (or nothing).
-      if (state.decal && p.uDecalOn.value > 0 && !rt.reducedMotion) fadeOut(DECAL_FADE_OUT)
-      else {
-        state.decal = target
-        p.uDecalOn.value = 0
-        if (target) {
-          p.uDecalMap.value = target.tex!
-          p.uDecalUv.value.copy(target.uv)
-          p.uPanelHalf.value = target.panelHalf
-        }
+    const step = (ms: number) => (rt.reducedMotion ? 1 : (dt * 1000) / ms)
+    if (target && state.decal !== target) {
+      if (state.decal && p.uDecalOn.value > 0.02) {
+        state.prev = state.decal
+        p.uDecal2Map.value = state.decal.tex!
+        p.uDecal2Uv.value.copy(state.decal.uv)
+        p.uDecal2On.value = p.uDecalOn.value * (1 - 0) // keeps its current weight
       }
-    } else if (target) {
-      p.uDecalOn.value = rt.reducedMotion ? 1 : Math.min(1, p.uDecalOn.value + (dt * 1000) / DECAL_FADE_IN)
-    } else if (p.uDecalOn.value > 0) fadeOut(DECAL_FADE_OUT)
-    if (p.uDecalOn.value <= 0 && !state.decal) p.uDecalMap.value = null
+      state.decal = target
+      p.uDecalOn.value = 0
+      p.uDecalMap.value = target.tex!
+      p.uDecalUv.value.copy(target.uv)
+      p.uPanelHalf.value = target.panelHalf
+    }
+    if (target) {
+      p.uDecalOn.value = Math.min(1, p.uDecalOn.value + step(DECAL_FADE_IN))
+      if (p.uDecalOn.value >= 1 && p.uDecal2On.value > 0) p.uDecal2On.value = Math.max(0, p.uDecal2On.value - step(DECAL_FADE_OUT))
+    } else {
+      p.uDecalOn.value = Math.max(0, p.uDecalOn.value - step(DECAL_FADE_OUT))
+      p.uDecal2On.value = Math.max(0, p.uDecal2On.value - step(DECAL_FADE_OUT))
+      if (p.uDecalOn.value <= 0) {
+        state.decal = null
+        p.uDecalMap.value = null
+      }
+    }
+    if (p.uDecal2On.value <= 0 && state.prev) {
+      state.prev = null
+      p.uDecal2Map.value = null
+    }
 
     // Scan line and development.
     p.uScanT0.value.copy(acq.t0)
@@ -253,7 +312,7 @@ export function Imagery() {
     // Keep a few decals around (the bound one, the wanted one, the hero's).
     if (store.entries.size > DECAL_CACHE + 2) {
       const keep = new Set<string>()
-      for (const e of [state.ctx, state.decal, want, state.prefetch]) if (e) keep.add(e.url)
+      for (const e of [state.ctx, state.ctxEntry, state.decal, state.prev, state.passEntry, state.prefetch]) if (e) keep.add(e.url)
       store.prune(keep, DECAL_CACHE)
     }
   }, FRAME.scene - 1)

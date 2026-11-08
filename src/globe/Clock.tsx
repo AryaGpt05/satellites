@@ -21,7 +21,7 @@ import { easeInOut } from '@/lib/ease'
 import { sceneClock } from '@/state/sceneClock'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { Pass, Report } from '@/types'
-import { approachStart, captureOf, decalSpecFor, scanAt, scanFrame, slowFactor, slowWindowS, type AcqState } from './acquisition'
+import { approachStart, captureOf, DECAL_WAIT_MS, decalSpecFor, scanAt, scanFrame, slowFactor, slowWindowS, type AcqState } from './acquisition'
 import { createClock, stepClock } from './clock'
 import { FRAME, useRuntime } from './runtime'
 import { sweptAcross } from './swath'
@@ -80,8 +80,10 @@ export function Clock() {
       rt.phaseEnteredAt = perfNow
     }
 
-    // Replay waits for the camera: the sweep starts on arrival, not mid-flight.
-    const hold = st.timeMode === 'replay' && rt.camera.flying
+    // Replay waits for the camera: the sweep starts on arrival, not mid-flight; and, briefly, for the pass's image.
+    const waitImage =
+      rt.acq.armed && rt.acq.imaged && !rt.acq.decalReady && perfNow - rt.camera.arrivedAt < DECAL_WAIT_MS
+    let hold = st.timeMode === 'replay' && (rt.camera.flying || waitImage)
     // ── acquisition sequence: which pass, and whether this frame starts a fresh one.
     const acq = rt.acq
     const pass = st.report && st.selectedPassId ? selectSelectedPass(st) : undefined
@@ -91,12 +93,20 @@ export function Clock() {
     const modeEntered = st.timeMode === 'replay' && c.mode !== 'replay'
     const seeked = st.simTime !== c.lastWritten
     let storeSimTime = st.simTime
-    if (pass && st.timeMode === 'replay' && seeked && (modeEntered || passChanged) && !rt.reducedMotion && st.simTime < acq.tc) {
+    // A fresh replay: entering replay or switching pass with a seeded time, or a re-seed while the clock still waits
+    // for the camera (the sequence has not started yet).
+    const fresh = modeEntered || passChanged || (acq.armed && hold)
+    if (pass && st.timeMode === 'replay' && seeked && fresh && !rt.reducedMotion && st.simTime < acq.tc) {
       // A fresh replay of this pass: arm the sequence, and give the approach room to read.
       storeSimTime = approachStart(st.simTime, acq.tc, acq.halfKm, acq.speedKmS, st.replayRate)
+      if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
+        const w = window as unknown as { __acqLog?: unknown[] }
+        ;(w.__acqLog ??= []).push({ t: Math.round(perfNow), arm: pass.id, seeded: (st.simTime - acq.tc) / 1000, start: (storeSimTime - acq.tc) / 1000, modeEntered, passChanged })
+      }
       if (storeSimTime !== st.simTime) c.lastWriteAt = -Infinity // the rewound start goes back to the store this frame
       acq.armed = true
       acq.armedAt = perfNow
+      hold = true // the camera starts its flight this frame: the approach starts on its arrival, from the very start
       acq.capturedAt = -Infinity
       acq.full = 0
     } else if (acq.armed && (st.timeMode === 'live' || (st.timeMode === 'scrub' && seeked))) {

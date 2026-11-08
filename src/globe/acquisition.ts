@@ -28,6 +28,11 @@ const SLOW_MIN = 0.2
 const SLOW_RAMP_S = 12
 /** Never rewind before this much sim time ahead of tc (the results replay window pads ±90 s). */
 const MAX_LEAD_MS = 88_000
+/**
+ * On arrival the replay waits at most this long (ms) for the pass's image to reach the GPU (Planetary Computer renders
+ * crops in 1–3 s): better a beat of stillness than a sweep that paints nothing. Then it goes regardless.
+ */
+export const DECAL_WAIT_MS = 1500
 
 export interface AcqState {
   /** Selected pass this state belongs to ('' = none) */
@@ -53,6 +58,8 @@ export interface AcqState {
   scanS: number
   /** Decal half size (km) for this pass's capture (0 = none) */
   halfKm: number
+  /** The decal is on the GPU (written by <Imagery/>): the replay waits a moment for it on arrival */
+  decalReady: boolean
 }
 
 export function createAcqState(): AcqState {
@@ -70,6 +77,7 @@ export function createAcqState(): AcqState {
     speedKmS: 6.8,
     scanS: 0,
     halfKm: 0,
+    decalReady: false,
   }
 }
 
@@ -107,15 +115,21 @@ export function captureOf(report: Pick<Report, 'captures'> | undefined, pass: Pi
  */
 export function closestLookPass(report: Report | undefined): Pass | undefined {
   if (!report || report.partial) return undefined
-  let best: { p: Pass; gsd: number } | undefined
+  let best: { p: Pass; gsd: number; clear: number } | undefined
   for (const p of report.passes) {
     if (p.verdict !== 'imaged') continue
     const c = captureOf(report, p)
     if (!c || !decalSpecFor(c.collection, false)) continue
-    if (!best || c.gsdM < best.gsd || (c.gsdM === best.gsd && p.tClosest > best.p.tClosest)) best = { p, gsd: c.gsdM }
+    const clear = SPOT_RANK[c.spot ?? 'unknown']
+    const better =
+      !best || c.gsdM < best.gsd || (c.gsdM === best.gsd && (clear < best.clear || (clear === best.clear && p.tClosest > best.p.tClosest)))
+    if (better) best = { p, gsd: c.gsdM, clear }
   }
   return best?.p
 }
+
+/** Spot clarity order (owner request B1): clear > cirrus > unknown > shadow > cloud. */
+const SPOT_RANK: Record<string, number> = { clear: 0, cirrus: 1, unknown: 2, shadow: 3, cloud: 4 }
 
 // ───────────────────────────── time ─────────────────────────────
 

@@ -114,6 +114,7 @@ export function createCurtainMaterial(color: Color): ShaderMaterial {
     blending: AdditiveBlending,
     uniforms: {
       uColor: { value: color },
+      uBone: { value: lin(palette.bone) },
       uOpacity: { value: 0 },
       uTime: { value: 0 },
     },

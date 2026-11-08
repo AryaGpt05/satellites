@@ -16,6 +16,11 @@
  *    on narrow phones.
  * Sizes are kept current by ResizeObservers, so the per-frame path only writes styles and never forces a layout.
  * Departing labels stay mounted for 240 ms at opacity 0, so they fade instead of popping (M11).
+ *
+ * Acquisition sequence (owner request C, rt.acq): at the capture of an imaged pass a mono line snaps in under the
+ * coordinates ("ACQUIRED 11:21:13 EST · 10 M"; straight away on a quiet selection), and while a live sequence runs a
+ * countdown readout sits top-right under the HUD clock ("T−00:01:12" → "ACQUIRED"), written per frame from the
+ * scene clock, never through React.
  */
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { ensureTz, timeZoneAt, tzReady } from '@/imagery'
@@ -24,6 +29,7 @@ import { selectSelectedPass, useApp } from '@/state/store'
 // The pure time module only, never the '@/ui/results' index (that is the lazy results chunk).
 import { fmtLocalTime, zoneAbbr } from '@/ui/results/lib/time'
 import { fmtLat, fmtLon, fmtNorad, fmtUtcTime } from '@/ui/system/format'
+import { captureOf, fmtCountdown } from './acquisition'
 import { getSatInfo, useCatalogBuffers } from './data'
 import { passAnchorId } from './PassOverlay'
 import { placeAnchorId } from './PlaceMarker'
@@ -71,10 +77,18 @@ export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
     return `IMAGED ${fmtUtcTime(t)} UTC`
   }
 
+  // The capture line under the coordinates: the image's local time and its ground resolution.
+  const report = useApp((st) => st.report)
+  const cap = pass && pass.verdict === 'imaged' ? captureOf(report, pass) : undefined
+  const acqLine = pass && cap ? `ACQUIRED ${imagedAt(pass.tClosest).replace(/^IMAGED /, '')} · ${Math.round(cap.gsdM)} M` : undefined
+
   return (
     <div ref={root} className={s.overlay} aria-hidden>
+      {pass && <AcqReadout runtime={runtime} vp={vp} passId={pass.id} norad={pass.norad} imaged={!!cap} ready={catalogReady} />}
       {places.map(({ key, item, leaving }) => (
-        <PlaceLabel key={key} runtime={runtime} vp={vp} id={placeAnchorId(key)} lat={item.lat} lon={item.lon} leaving={leaving} />
+        <PlaceLabel key={key} runtime={runtime} vp={vp} id={placeAnchorId(key)} lat={item.lat} lon={item.lon} leaving={leaving}   acq={acqLine}
+          passId={pass?.id}
+        />
       ))}
       {hovers.map(({ key, item, leaving }) => (
         <SatLabel
@@ -187,6 +201,8 @@ function PlaceLabel({
   lat,
   lon,
   leaving,
+  acq,
+  passId,
 }: {
   runtime: GlobeRuntime
   vp: RefObject<{ w: number; h: number }>
@@ -194,9 +210,14 @@ function PlaceLabel({
   lat: number
   lon: number
   leaving: boolean
+  /** "ACQUIRED 11:21:13 EST · 10 M" for the selected imaged pass */
+  acq?: string
+  passId?: string
 }) {
   const el = useRef<HTMLDivElement>(null)
   const label = useRef<HTMLDivElement>(null)
+  const acqEl = useRef<HTMLDivElement>(null)
+  const acqShown = useRef(false)
   const labelSize = useSizeRef(label)
   const last = useRef({ x: NaN, y: NaN, op: '', side: '' as '' | 'right' | 'left' | 'below' })
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 400)
@@ -209,6 +230,13 @@ function PlaceLabel({
     if (op !== st.op) {
       st.op = op
       d.style.opacity = op
+    }
+    // The capture line: once the capture has happened (or at once when nothing is live), never during the approach.
+    const q = runtime.acq
+    const showAcq = !!acq && !!passId && q.passId === passId && q.imaged && !q.armed
+    if (showAcq !== acqShown.current && acqEl.current) {
+      acqShown.current = showAcq
+      acqEl.current.hidden = !showAcq
     }
     const { W, H } = sizeOf(vp)
     const isNarrow = W <= 400
@@ -250,6 +278,9 @@ function PlaceLabel({
     <div ref={el} className={[s.anchor, leaving ? s.leaving : ''].join(' ')} style={{ opacity: 0 }}>
       <div ref={label} className={s.coord}>
         {fmtLat(lat, digits)} {fmtLon(lon, digits)}
+        <div ref={acqEl} className={s.coordAcq} hidden>
+          {acq}
+        </div>
       </div>
     </div>
   )
@@ -309,8 +340,9 @@ function SatLabel({
         d.style.transform = `translate3d(${x}px, ${y}px, 0)`
       }
       const { w, h } = boxSize.current
-      // Above the point unless that reaches into the HUD band; then below, if that clears the sheet / timeline.
-      below = y - BOX_RISE - h < ins.top
+      // Above the point unless that reaches into the HUD band (or the acquisition countdown under it); then below, if
+      // that clears the sheet / timeline.
+      below = y - BOX_RISE - h < Math.max(ins.top, runtime.readoutBottom)
       if (below && y + BOX_RISE + h > H - ins.bottom - 8) show = false
       // Right of the point unless the left has more room; then nudge it inside the free columns and let the
       // leader's level run follow the box's near corner.
@@ -395,6 +427,93 @@ function SatLabel({
             {detail ? <> · {detail}</> : null}
           </span>
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The acquisition countdown in the HUD's top-right cluster: on desktops beside the UTC clock and scene time (on their
+ * two lines, left of them), on stacked layouts under them, right-aligned: "ACQUISITION · SENTINEL-2C" over
+ * "T−00:01:12", snapping to "ACQUIRED" at the capture; for passes without an image "CLOSEST APPROACH". Visible while
+ * a live sequence runs and for a moment after its capture. Written every frame from the runtime (text only when it
+ * changes), never through React state. While it shows, callouts keep below it.
+ */
+const READOUT_HOLD_MS = 2600
+/** Desktop: the HUD's top-right readout block spans 336 px from the right edge (framing.trReadoutBox). */
+const HUD_TR_WIDTH = 336
+const READOUT_GAP = 28
+const READOUT_H = 34
+
+function AcqReadout({
+  runtime,
+  vp,
+  passId,
+  norad,
+  imaged,
+  ready,
+}: {
+  runtime: GlobeRuntime
+  vp: RefObject<{ w: number; h: number }>
+  passId: string
+  norad: number
+  imaged: boolean
+  ready: boolean
+}) {
+  const el = useRef<HTMLDivElement>(null)
+  const value = useRef<HTMLDivElement>(null)
+  const last = useRef({ op: '', text: '', done: false, x: NaN, y: NaN })
+  useEffect(
+    () => () => {
+      runtime.readoutBottom = 0
+    },
+    [runtime],
+  )
+  useAnchorListener(runtime, () => {
+    const d = el.current
+    const v = value.current
+    if (!d || !v) return
+    const q = runtime.acq
+    const st = last.current
+    const mine = q.passId === passId
+    const captured = mine && q.capturedAt > q.armedAt && q.armedAt > -Infinity
+    const show = mine && (q.armed || (captured && performance.now() - q.capturedAt < READOUT_HOLD_MS))
+    const op = show ? '1' : '0'
+    if (op !== st.op) {
+      st.op = op
+      d.style.opacity = op
+    }
+    const ins = useApp.getState().uiInsets
+    const { W, H } = sizeOf(vp)
+    const stacked = isStacked(W, H)
+    runtime.readoutBottom = show && stacked ? ins.top + 8 + READOUT_H : 0
+    if (!show) return
+    const text = captured ? (imaged ? 'ACQUIRED' : 'CLOSEST APPROACH') : fmtCountdown(runtime.simTime, q.tc)
+    if (text !== st.text) {
+      st.text = text
+      v.textContent = text
+    }
+    if (captured !== st.done) {
+      st.done = captured
+      d.classList.toggle(s.acqDone, captured)
+    }
+    const x = Math.round(stacked ? edgeFor(true) : HUD_TR_WIDTH + READOUT_GAP)
+    const y = Math.round(stacked ? ins.top + 8 : 26)
+    if (x !== st.x || y !== st.y) {
+      st.x = x
+      st.y = y
+      d.style.transform = `translate3d(${-x}px, ${y}px, 0)`
+    }
+  })
+  const info = ready ? getSatInfo(norad) : undefined
+  const name = info?.displayName ?? info?.name ?? `NORAD ${fmtNorad(norad)}`
+  return (
+    <div ref={el} className={s.acqReadout} style={{ opacity: 0 }}>
+      <div className={s.acqLabel}>
+        {imaged ? 'ACQUISITION' : 'CLOSEST APPROACH'} · {name}
+      </div>
+      <div ref={value} className={s.acqValue}>
+        T{'\u2212'}00:00:00
       </div>
     </div>
   )

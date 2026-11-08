@@ -44,7 +44,7 @@ const TRAIL_STEP_S = 20
 /** The dashed full-orbit ring: samples per orbit (dash = one sample on, one off). */
 const RING_SAMPLES = 220
 /** The spacecraft model's wing span on screen (CSS px). */
-const CRAFT_PX = { desktop: 46, phone: 36 }
+const CRAFT_PX = { desktop: 54, phone: 40 }
 /** Light curtain: columns across the swath; ground lift (matches the ribbon). */
 const CURTAIN_COLS = 32
 const CURTAIN_LIFT = 1.0006
@@ -142,7 +142,7 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
       trailPts: Array.from({ length: trailN + 1 }, () => new Vector3()),
       trailAlpha: new Float32Array(trailN + 1),
       ring: new Hairline({ capacity: RING_SAMPLES, color: lin(palette.bone), opacity: 0.16, uPx: rt.uniforms.uPx }),
-      edges: new Hairline({ capacity: 2, color: look.color.clone().multiplyScalar(1.15), opacity: 0.85, uPx: rt.uniforms.uPx }),
+      edges: new Hairline({ capacity: 2, color: look.color.clone(), opacity: 0.7, uPx: rt.uniforms.uPx }),
       edgePts: [new Vector3(), new Vector3(), new Vector3()],
     }
   }, [rt, look])
@@ -435,7 +435,7 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
 
 const tmpRes = new Vector2()
 /** Curtain edge hairlines: bright at the ground, fading toward the spacecraft. */
-const EDGE_ALPHA = [0.9, 0.3, 0.9]
+const EDGE_ALPHA = [0.85, 0.12, 0.85]
 
 /** The view line fades toward the ground so it reads as a line of sight, not a tether. */
 const VIEW_ALPHA = [0.9, 0.35]

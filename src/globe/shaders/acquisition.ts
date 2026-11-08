@@ -49,19 +49,19 @@ export const spacecraftFragment = glsl`
     vec3 base = uBone * 0.82;
     float spec = 0.0;
     if (vPart > 0.5 && vPart < 1.5) {
-      // Solar array: deep ink-blue cells on a bone frame grid (hairlines in screen space).
-      vec2 g = vUv * vec2(10.0, 4.0);
+      // Solar array: deep blue cells on a bone frame grid (hairlines in screen space), with a sun glint.
+      vec2 g = vUv * vec2(4.0, 9.0);
       vec2 d = abs(fract(g - 0.5) - 0.5) / max(fwidth(g), vec2(1e-5));
       float grid = 1.0 - min(min(d.x, d.y), 1.0);
-      base = mix(vec3(0.012, 0.016, 0.03), uBone * 0.4, grid * 0.55);
+      base = mix(vec3(0.035, 0.05, 0.1), uBone * 0.85, grid * 0.8);
       vec3 H = normalize(L + V);
-      spec = pow(max(dot(N, H), 0.0), 48.0) * 0.9;
+      spec = pow(max(dot(N, H), 0.0), 36.0) * 0.8;
     } else if (vPart > 2.5) {
       base = uInk * 3.0 + vec3(0.01);
     }
     float earth = max(dot(N, -normalize(vPos)), 0.0) * 0.16;
     float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
-    vec3 col = base * (0.07 + uLit * ndl * 1.1 + earth) + uBone * rim * 0.12 + vec3(1.0, 0.96, 0.9) * spec * uLit;
+    vec3 col = base * (0.1 + uLit * (0.25 + ndl * 0.95) + earth) + uBone * rim * 0.18 + vec3(1.0, 0.96, 0.9) * spec * uLit;
     if (vPart > 1.5 && vPart < 2.5) col = uSignal * (0.9 + 0.5 * uLit);
     gl_FragColor = vec4(col, uOpacity);
     ${OUTPUT}
@@ -90,22 +90,26 @@ export const curtainVertex = glsl`
 export const curtainFragment = glsl`
   ${COMMON}
   uniform vec3 uColor;
+  uniform vec3 uBone;
   uniform float uOpacity;
   uniform float uTime;   // wall seconds
   varying float vV;
   varying float vS;
   void main() {
-    float body = mix(0.012, 0.07, vV * vV);
-    // Scan lines streaming down: ~1 px lines, 30 across the curtain's height.
-    float k = vV * 30.0 - uTime * 2.2;
+    // A whisper of light, warmest and densest toward the ground; the colour is mostly bone, tinted by the verdict.
+    vec3 tint = mix(uBone, uColor, 0.45);
+    // (Additive in linear light: over dark ground even 0.01 reads clearly, so everything here is tiny.)
+    float body = mix(0.0006, 0.006, vV * vV);
+    // Scan lines streaming down: ~1 px lines, 40 across the curtain's height.
+    float k = vV * 40.0 - uTime * 2.6;
     float f = fract(k);
     float dpx = min(f, 1.0 - f) / max(fwidth(k), 1e-5);
-    float lines = (1.0 - smoothstep(0.4, 1.4, dpx)) * (0.25 + 0.75 * vV);
+    float lines = (1.0 - smoothstep(0.3, 1.2, dpx)) * (0.15 + 0.85 * vV * vV);
     // A soft brightening toward the two edges.
-    float edge = smoothstep(0.8, 1.0, abs(vS)) * 0.06;
-    float a = (body + lines * 0.07 + edge) * uOpacity;
-    if (a < 0.001) discard;
-    gl_FragColor = vec4(uColor, a);
+    float edge = smoothstep(0.86, 1.0, abs(vS)) * 0.008;
+    float a = (body + lines * 0.009 + edge) * uOpacity;
+    if (a < 0.0002) discard;
+    gl_FragColor = vec4(tint, a);
     ${OUTPUT}
   }
 `

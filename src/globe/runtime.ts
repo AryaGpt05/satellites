@@ -118,6 +118,8 @@ export interface GlobeRuntime {
   anchorListeners: Set<() => void>
   /** The selected satellite's callout box as last placed (CSS px), so the coordinate label can avoid it */
   calloutBox: { x0: number; y0: number; x1: number; y1: number; visible: boolean }
+  /** Bottom edge (CSS px) of the acquisition countdown while it shows (0 = hidden): callouts keep below it */
+  readoutBottom: number
 }
 
 export interface PaintUniforms {
@@ -127,6 +129,9 @@ export interface PaintUniforms {
   uDecalMap: { value: Texture | null }
   uDecalUv: { value: Vector4 }
   uDecalOn: { value: number }
+  uDecal2Map: { value: Texture | null }
+  uDecal2Uv: { value: Vector4 }
+  uDecal2On: { value: number }
   uScanT0: { value: Vector3 }
   uScanS: { value: number }
   uFull: { value: number }
@@ -143,6 +148,9 @@ export function createPaintUniforms(): PaintUniforms {
     uDecalMap: { value: null },
     uDecalUv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
     uDecalOn: { value: 0 },
+    uDecal2Map: { value: null },
+    uDecal2Uv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
+    uDecal2On: { value: 0 },
     uScanT0: { value: new Vector3(0, 1, 0) },
     uScanS: { value: 0 },
     uFull: { value: 1 },
@@ -185,6 +193,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     anchors: new Map(),
     anchorListeners: new Set(),
     calloutBox: { x0: 0, y0: 0, x1: 0, y1: 0, visible: false },
+    readoutBottom: 0,
   }
 }
 

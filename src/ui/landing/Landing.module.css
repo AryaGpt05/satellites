@@ -810,10 +810,11 @@
   .chip {
     position: relative;
   }
+  /* Absolute insets start inside the chip's 1 px border: -3 px reaches 2 px past its border box. */
   .chip::after {
     content: '';
     position: absolute;
-    inset: -2px 0;
+    inset: -3px -1px;
   }
 }
 

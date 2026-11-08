@@ -103,6 +103,9 @@ export const PAINT = glsl`
   uniform sampler2D uDecalMap;
   uniform vec4 uDecalUv;
   uniform float uDecalOn;
+  uniform sampler2D uDecal2Map;   // the previous image, fully developed, under the current one while it fades in
+  uniform vec4 uDecal2Uv;
+  uniform float uDecal2On;
   uniform vec3 uScanT0;
   uniform float uScanS;
   uniform float uFull;
@@ -152,5 +155,16 @@ export const PAINT = glsl`
     float dev = max(uFull, swept);
     fresh = swept * (1.0 - uFull) * (1.0 - smoothstep(0.0, max(uFreshRad, 1e-6), lead));
     return vec4(c, inside * key * dev * uDecalOn);
+  }
+  /** The previous decal (fully developed), for crossfades between passes. */
+  vec4 decalPrevSample(vec2 uv) {
+    vec2 p = patchCoord(uv, uDecal2Uv);
+    vec2 t = vec2(p.x, 1.0 - p.y);
+    vec2 gx = dFdx(t);
+    vec2 gy = dFdy(t);
+    vec3 c = textureGrad(uDecal2Map, t, gx, gy).rgb;
+    vec2 fwp = max(abs(gx) + abs(gy), vec2(1e-6));
+    float key = smoothstep(0.0025, 0.012, max(c.r, max(c.g, c.b)));
+    return vec4(c, patchMask(p, fwp * 1.5) * key * uDecal2On);
   }
 `

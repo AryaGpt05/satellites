@@ -113,6 +113,12 @@ const FOLD_MIN_MS = 300
 /** Acquisition: the chase keeps following this long after the capture, then settles over SETTLE_S. */
 const CAPTURE_HOLD_MS = 280
 const SETTLE_S = 1.4
+/**
+ * A new pass whose resting view is (nearly) the one on screen (swiping between photos of the same place) is not a
+ * flight: the camera re-frames softly over SAME_VIEW_S and reports arrival at once (no ring unlock, no clock hold).
+ */
+const SAME_VIEW = { rad: 0.004, logRange: 0.12, tilt: 0.05 }
+const SAME_VIEW_S = 0.6
 
 const INTERACTIVE: AppState['phase'][] = ['idle', 'locating', 'results', 'error']
 
@@ -496,7 +502,20 @@ export function CameraDirector() {
       control.spin.set(0, 0, 0)
       control.zoomTarget = null
       s.bootDolly = 'done'
-      startFlight(retarget)
+      const sameView =
+        !retarget &&
+        !chasing &&
+        !rt.reducedMotion &&
+        intent.kind === 'pass' &&
+        s.pose.d.angleTo(s.target.d) < SAME_VIEW.rad &&
+        Math.abs(Math.log(s.target.range / s.pose.range)) < SAME_VIEW.logRange &&
+        Math.abs(s.target.tilt - s.pose.tilt) < SAME_VIEW.tilt &&
+        Math.abs(s.target.r - s.pose.r) < 1e-3
+      if (sameView) {
+        copyPose(s.pose, s.from)
+        s.flight = { id: rt.camera.flightId, start: now, duration: SAME_VIEW_S, bump: 0, ease: easeInOut, soft: true }
+        arrive(rt, ++rt.camera.flightId, now, intent.kind)
+      } else startFlight(retarget)
       s.drift = 0
     } else if (spec && intent.kind === 'satellite') {
       // Moving target: keep the destination current.

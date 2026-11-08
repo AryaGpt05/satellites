@@ -177,3 +177,60 @@
   top: 24px;
   transform: translateX(-50%);
 }
+
+/* The capture line under the coordinates: signal, snapping in with a short mask wipe (one entrance per capture). */
+.coordAcq {
+  color: var(--signal);
+  animation: acqSnap 180ms var(--ease-out) both;
+}
+.coordAcq[hidden] {
+  display: none;
+}
+@keyframes acqSnap {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* ── acquisition countdown (top-right, under the HUD clock) ─────────────────────────────── */
+.acqReadout {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 4px 7px 4px;
+  background: color-mix(in srgb, var(--ink-0) 72%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  will-change: transform, opacity;
+  transition: opacity var(--d-sm) var(--ease-out);
+}
+.acqLabel {
+  font-size: var(--fs-meta, 10px);
+  font-weight: 350;
+  letter-spacing: var(--track-label);
+  color: var(--bone-2);
+}
+.acqValue {
+  font-size: var(--fs-readout, 12px);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--bone);
+}
+.acqDone .acqValue {
+  color: var(--signal);
+}
+@media (prefers-reduced-motion: reduce) {
+  .coordAcq {
+    animation: none;
+  }
+}

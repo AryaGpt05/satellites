@@ -82,6 +82,7 @@ export const cloudsFragment = glsl`
       float fresh;
       alpha *= 1.0 - decalSample(N, sphereUv(N), fresh).a;
     }
+    if (uDecal2On > 0.001) alpha *= 1.0 - decalPrevSample(sphereUv(N)).a;
     alpha *= uCloudFade;
     if (alpha < 0.002) discard;
 

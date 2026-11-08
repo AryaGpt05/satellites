@@ -38,21 +38,58 @@ export interface ExitOptions<T extends HTMLElement> {
 }
 
 /**
+ * Scroll offsets, recorded as they happen by one passive capturing listener on the document (installed
+ * when this module loads), so an exit never has to read them when it unmounts: a scrollTop read then
+ * forces a style and layout pass in the middle of the event that unmounted the node (the submit's
+ * keydown, a close). Only boxes that have scrolled are kept; disconnected ones are dropped as they are
+ * met. A read inside a scroll event is cheap: the frame's layout is normally clean when it fires.
+ */
+const scrolled = new Map<Element, [number, number]>()
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'scroll',
+    (e) => {
+      const t = e.target
+      if (t instanceof Element) scrolled.set(t, [t.scrollTop, t.scrollLeft])
+    },
+    { capture: true, passive: true },
+  )
+}
+
+/**
+ * The non-zero scroll offsets recorded inside `node` (itself included), as [index, top, left], where
+ * index is the element's position in `node.querySelectorAll('*')` (−1 for `node`). No layout reads.
+ */
+export function recordedScrolls(node: Element): [number, number, number][] {
+  const out: [number, number, number][] = []
+  let all: NodeListOf<Element> | null = null
+  for (const [el, [top, left]] of scrolled) {
+    if (!el.isConnected) {
+      scrolled.delete(el)
+      continue
+    }
+    if (!top && !left) continue
+    if (el === node) out.push([-1, top, left])
+    else if (node.contains(el)) {
+      all ??= node.querySelectorAll('*')
+      const i = Array.prototype.indexOf.call(all, el)
+      if (i >= 0) out.push([i, top, left])
+    }
+  }
+  return out
+}
+
+/**
  * Clone `node` as an inert, frozen copy and insert it right after `node` (so it paints in the same
  * place in the stacking order). Scroll positions are carried over. Returns the clone.
  *
- * The copy is never made to lay out here: the scroll offsets are read from the live tree before the
- * clone is inserted (its layout is current then, so the reads are free), and only the non-zero ones are
- * written to the clone afterwards. With nothing scrolled, the clone is first laid out with the next
- * frame, not inside the event that unmounted it.
+ * Nothing here makes the live tree or the copy lay out: the scroll offsets come from the record kept
+ * as they happened (recordedScrolls), and only the non-zero ones are written to the clone. With
+ * nothing scrolled, the clone is first laid out with the next frame, not inside the event that
+ * unmounted it.
  */
 export function insertFrozenClone<T extends HTMLElement>(node: T, prepare?: (clone: T) => void): T {
-  const src = node.querySelectorAll<HTMLElement>('*')
-  const scrolls: [number, number, number][] = []
-  if (node.scrollTop || node.scrollLeft) scrolls.push([-1, node.scrollTop, node.scrollLeft])
-  src.forEach((el, i) => {
-    if (el.scrollTop || el.scrollLeft) scrolls.push([i, el.scrollTop, el.scrollLeft])
-  })
+  const scrolls = recordedScrolls(node)
   const clone = node.cloneNode(true) as T
   clone.setAttribute('aria-hidden', 'true')
   clone.removeAttribute('role')
@@ -61,7 +98,8 @@ export function insertFrozenClone<T extends HTMLElement>(node: T, prepare?: (clo
   clone.inert = true
   clone.style.pointerEvents = 'none'
   clone.style.animation = 'none'
-  // Same document order as `src`: `prepare` runs after this list is taken, so the indexes still match.
+  // Same document order as the live tree's querySelectorAll('*'): `prepare` runs after this list is
+  // taken, so the recorded indexes still match.
   const dst = clone.querySelectorAll<HTMLElement>('*')
   dst.forEach((el) => {
     el.style.animation = 'none'

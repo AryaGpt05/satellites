@@ -316,7 +316,7 @@ export const CHASE_TILT = { stacked: 46 * DEG, desktop: 52 * DEG }
 /** Share of the free rect's limiting span that the spacecraft-to-place distance fills in the chase. */
 const CHASE_FILL = 0.6
 /** Share of the free rect's limiting span the painted image fills in the acquired view. */
-const ACQ_FILL = 0.58
+const ACQ_FILL = 0.5
 /** The acquired view's tilt: near top-down, so the globe's image lines up with the panel's (north-up). */
 export const ACQ_TILT = 5 * DEG
 

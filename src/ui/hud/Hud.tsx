@@ -17,9 +17,10 @@
  * every second, SunValue every ~24 s, CatalogAge every minute); the shell renders when the phase, the
  * catalog or the clock mode changes.
  */
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { timeZoneAt, tzReady } from '@/imagery'
 import { subsolarPoint } from '@/lib/geo'
+import { sceneClock, useSceneFrame } from '@/state/sceneClock'
 import { useApp } from '@/state/store'
 import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync } from '@/ui/system'
 // The pure time module, never the lazy '@/ui/results' index (that would pull the results chunk in).
@@ -38,22 +39,44 @@ const TOP_GAP = 8
  * The scene clock, when the globe isn't on live time (replay / scrub), at the place: the same clock and
  * date style as the pass header ("Scene Sun 1 Nov 11:21:13 EST"; phones drop the day so it clears the
  * top-left readout: "Scene 11:21:13 EST"). The zone always shows. UTC until the place's zone is known.
- * Its own subscriber: a replay at 60× changes the scene second every frame, and only this line should
- * re-render for it.
+ *
+ * Written straight into the DOM from the globe's per-frame clock (sceneClock), the one the replay
+ * controls read, so its seconds turn on the same frame as theirs; text changes only when a second
+ * does, and React never re-renders it for time (no 10 Hz store renders).
  */
 function SceneTime() {
-  const sceneSecond = useApp((st) => Math.floor(st.simTime / 1000))
-  const lat = useApp((st) => st.place?.lat)
-  const lon = useApp((st) => st.place?.lon)
-  const ready = tzReady()
-  const tz = useMemo(() => (lat !== undefined && lon !== undefined && ready ? timeZoneAt(lat, lon) : 'UTC'), [lat, lon, ready])
-  const t = sceneSecond * 1000
+  const dayRef = useRef<HTMLSpanElement>(null)
+  const timeRef = useRef<HTMLSpanElement>(null)
+  const last = useRef({ sec: NaN, key: '', tz: 'UTC', day: '', time: '' })
+  const write = () => {
+    const st = useApp.getState()
+    const ms = sceneClock.mode === st.timeMode ? sceneClock.simTime : st.simTime
+    const L = last.current
+    const place = st.place
+    const ready = tzReady()
+    const key = place ? `${place.lat},${place.lon},${ready ? 1 : 0}` : ''
+    const sec = Math.floor(ms / 1000)
+    if (sec === L.sec && key === L.key) return
+    if (key !== L.key) {
+      L.key = key
+      L.tz = place && ready ? timeZoneAt(place.lat, place.lon) : 'UTC'
+    }
+    L.sec = sec
+    const t = sec * 1000
+    const day = `${fmtLocalDay(t, L.tz)} `
+    const time = `${fmtLocalTime(t, L.tz, true)} ${zoneAbbr(t, L.tz)}`
+    if (day !== L.day && dayRef.current) dayRef.current.textContent = L.day = day
+    if (time !== L.time && timeRef.current) timeRef.current.textContent = L.time = time
+  }
+  // First text before the first paint; then once per frame (a no-op unless the second turned).
+  useLayoutEffect(write)
+  useSceneFrame(write)
   return (
     <span className={cx(s.line, s.dim)}>
       Scene
       <span className={s.sceneValue}>
-        <span className={s.desk}>{fmtLocalDay(t, tz)} </span>
-        {fmtLocalTime(t, tz, true)} {zoneAbbr(t, tz)}
+        <span ref={dayRef} className={s.desk} />
+        <span ref={timeRef} />
       </span>
     </span>
   )
@@ -206,8 +229,11 @@ function useTopInset(topLeft: RefObject<HTMLDivElement | null>, topRight: RefObj
       const b = Math.max(tl?.getBoundingClientRect().bottom ?? 0, tr?.getBoundingClientRect().bottom ?? 0)
       if (b > 0) useApp.getState().setUiInsets({ top: Math.ceil(b + TOP_GAP) })
     }
-    publish()
-    if (typeof ResizeObserver === 'undefined') return
+    if (typeof ResizeObserver === 'undefined') {
+      publish()
+      return
+    }
+    // The observer's first callback publishes (after layout, before paint): no forced layout at mount.
     const ro = new ResizeObserver(publish)
     if (tl) ro.observe(tl)
     if (tr) ro.observe(tr)

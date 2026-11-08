@@ -78,7 +78,9 @@ export const earthFragment = glsl`
     float fresh = 0.0;
     vec4 decal = vec4(0.0);
     if (uDecalOn > 0.001) decal = decalSample(N, suv, fresh);
-    float painted = decal.a;
+    vec4 decal2 = vec4(0.0);
+    if (uDecal2On > 0.001) decal2 = decalPrevSample(suv);
+    float painted = 1.0 - (1.0 - decal.a) * (1.0 - decal2.a);
 
     // ── data: elevation (R) + ocean mask (G)
     vec4 data = texture2D(uData, vUv);
@@ -119,7 +121,8 @@ export const earthFragment = glsl`
     // ── day
     vec3 dayTex = texture2D(uDay, vUv).rgb;
     dayTex = mix(dayTex, ctx.rgb, ctx.a);
-    dayTex = mix(dayTex, decal.rgb, painted);
+    dayTex = mix(dayTex, decal2.rgb, decal2.a);
+    dayTex = mix(dayTex, decal.rgb, decal.a);
     // A touch of contrast in linear light: deeper mid-tones, highlights kept.
     vec3 albedo = pow(gradeDay(dayTex, ocean), vec3(1.12)) * 1.06;
     // Soft terminator: the sun is a disc and the atmosphere scatters past the geometric line.
@@ -168,9 +171,9 @@ export const earthFragment = glsl`
     vec3 col = mix(night, day, dayMix);
 
     // ── the developing image: a short over-exposed band right behind the scan line, settling to true colour
-    col += (col * 1.6 + uFreshColor * 0.06) * fresh * painted;
+    col += (col * 1.6 + uFreshColor * 0.06) * fresh * decal.a;
     // ── the panel photo's extent: a 1 px hairline square at the place, once it is big enough to mean something
-    if (uPanelHalf > 0.0 && painted > 0.01) {
+    if (uPanelHalf > 0.0 && decal.a > 0.01) {
       vec2 p = patchCoord(suv, uDecalUv) - 0.5;
       vec2 fwq = max(fwidth(p), vec2(1e-7));
       float sidePx = 2.0 * uPanelHalf / max(fwq.x, fwq.y);
@@ -179,7 +182,7 @@ export const earthFragment = glsl`
       float onY = 1.0 - smoothstep(0.5, 1.5, d.y);
       float within = step(max(abs(p.x), abs(p.y)), uPanelHalf + 2.0 * max(fwq.x, fwq.y));
       float sq = max(onX * step(abs(p.y), uPanelHalf), onY * step(abs(p.x), uPanelHalf)) * within;
-      col = mix(col, uPanelColor, sq * 0.75 * painted * smoothstep(18.0, 40.0, sidePx) * (1.0 - fresh));
+      col = mix(col, uPanelColor, sq * 0.75 * decal.a * smoothstep(18.0, 40.0, sidePx) * (1.0 - fresh));
     }
 
     // ── twilight: the faintest warm glow just past the terminator (the dark side is nearly ink, so this is tiny)
