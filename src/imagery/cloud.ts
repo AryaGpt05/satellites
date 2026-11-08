@@ -18,7 +18,8 @@ import { Lru, memoAsync } from './lru'
 import { fetchJson, HttpError, isAbortError, raceAbort, throwIfAborted } from './net'
 import { isPcS2ItemId } from './stac'
 
-export type SpotCloud = 'clear' | 'cloud' | 'shadow' | 'unknown'
+import type { SpotCloud } from '@/types'
+export type { SpotCloud }
 
 /** Sentinel-2 Scene Classification value → verdict. */
 export function classifyScl(value: number | null | undefined): SpotCloud {

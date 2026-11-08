@@ -177,6 +177,9 @@ export type CaptureCollection =
   | 'gibs-goes-west'
   | 'gibs-himawari'
 
+/** Classification of the pixel at the searched place in a capture ('cirrus' = thin cirrus, Sentinel-2 SCL class 10). */
+export type SpotCloud = 'clear' | 'cirrus' | 'cloud' | 'shadow' | 'unknown'
+
 /** A real image that exists in a public archive. */
 export interface Capture {
   id: string
@@ -200,6 +203,8 @@ export interface Capture {
   previewUrl?: string
   /** Human link to the item in a browser (STAC browser / PC explorer) */
   sourceUrl?: string
+  /** Classification at the searched place; filled by the engine for best-look candidates */
+  spot?: SpotCloud
 }
 
 /** Geostationary imagers that see the place continuously. */
@@ -230,6 +235,8 @@ export interface Report {
   notes?: string[]
   /** True while archive/GIBS verification is still streaming in */
   partial?: boolean
+  /** True when the Sentinel-2/Landsat search failed or timed out on every provider (≠ "answered with nothing") */
+  archiveFailed?: boolean
   counts: {
     satellitesConsidered: number
     passes: number

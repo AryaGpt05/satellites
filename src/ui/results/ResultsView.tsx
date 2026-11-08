@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useApp } from '@/state/store'
-import type { Pass } from '@/types'
+import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
 import { Button, Glyph, Kbd, Rule, ScrambleOnce, Sheet, cx, fmtLat, fmtLon, useIsMobile } from '@/ui/system'
 import { clearPass, focusPass, startReplay, togglePlay } from './actions'
@@ -34,6 +34,10 @@ const SNAPS = [0.3, 0.7, 0.92]
 export interface ResultsViewProps {
   /** Back to search. Defaults to store.reset(); the app passes its controller's reset (aborts work, clears the URL). */
   onBack?: () => void
+  /** Re-run the same place (e.g. after an archive outage) */
+  onRetry?: () => void
+  /** Search another place inline from the results header */
+  onSearch?: (place: Place) => void
 }
 
 export function ResultsView({ onBack }: ResultsViewProps) {

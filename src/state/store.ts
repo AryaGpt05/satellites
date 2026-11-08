@@ -2,11 +2,31 @@
  * Global app state (zustand). This is the integration contract between UI, engine and globe.
  * - UI writes intents (place, selection, time controls).
  * - Engine results land in `report`.
- * - Globe READS everything here and writes only `globeReady`, `hoveredNorad` (hovers it started) and
- *   `simTime` (its frame loop owns the clock: throttled ~10 Hz in live/replay).
+ * - Globe READS everything here and writes only `globeReady`, `hoveredNorad` (hovers it started),
+ *   `simTime` (its frame loop owns the clock: throttled ~10 Hz in live/replay; per-frame time lives in
+ *   src/state/sceneClock.ts) and `cameraFlight` (on flight start/arrival only).
+ * - UI layout owners write `uiInsets` (measured, from layout effects); the globe reads it with getState()
+ *   inside its frame loop, never through a React subscription.
  */
 import { create } from 'zustand'
 import type { Pass, Place, ProgressEvent, Report } from '@/types'
+import type { Share } from '@/lib/backend'
+
+/** CSS px of the viewport covered by UI on each edge. The camera frames the globe inside what's left. */
+export interface UiInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+/** Camera flight status. Times are performance.now() ms. Written by the globe's CameraDirector only. */
+export interface CameraFlight {
+  id: number
+  flying: boolean
+  eta: number
+  arrivedAt: number
+}
 
 export type Phase =
   | 'boot' // loading textures + catalog
@@ -38,6 +58,14 @@ export interface AppState {
   /** Playback rate for 'replay' (sim seconds per real second) */
   replayRate: number
   camera: CameraIntent
+  /** Measured UI coverage of the viewport; the camera frames around it. Survives reset(). */
+  uiInsets: UiInsets
+  cameraFlight: CameraFlight
+  /** performance.now() ms until which UI entrances are animating; the globe defers heavy GPU work until then. */
+  motionBusyUntil: number
+  /** A shared pass opened via /?s=<id> (or /s/<id>) */
+  shared?: Share
+  aboutOpen: boolean
   /** Toggles */
   showAmbient: boolean
   globeReady: boolean
@@ -55,6 +83,13 @@ export interface AppState {
   setSimTime: (t: number) => void
   setReplayRate: (r: number) => void
   setCamera: (c: CameraIntent) => void
+  /** Shallow merge; no-op when every provided value is within 1px of the current one. */
+  setUiInsets: (p: Partial<UiInsets>) => void
+  setCameraFlight: (f: CameraFlight) => void
+  /** Extend motionBusyUntil to at least now + ms */
+  holdMotion: (ms: number) => void
+  setShared: (s?: Share) => void
+  setAboutOpen: (v: boolean) => void
   setGlobeReady: (v: boolean) => void
   setCatalogReady: (v: boolean) => void
   reset: () => void
@@ -66,6 +101,10 @@ export const useApp = create<AppState>((set) => ({
   simTime: Date.now(),
   replayRate: 60,
   camera: { kind: 'overview' },
+  uiInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+  cameraFlight: { id: 0, flying: false, eta: 0, arrivedAt: 0 },
+  motionBusyUntil: 0,
+  aboutOpen: false,
   showAmbient: true,
   globeReady: false,
   catalogReady: false,
@@ -81,6 +120,16 @@ export const useApp = create<AppState>((set) => ({
   setSimTime: (simTime) => set({ simTime }),
   setReplayRate: (replayRate) => set({ replayRate }),
   setCamera: (camera) => set({ camera }),
+  setUiInsets: (p) =>
+    set((st) => {
+      const cur = st.uiInsets
+      const changed = (Object.keys(p) as (keyof UiInsets)[]).some((k) => Math.abs((p[k] ?? cur[k]) - cur[k]) > 1)
+      return changed ? { uiInsets: { ...cur, ...p } } : {}
+    }),
+  setCameraFlight: (cameraFlight) => set({ cameraFlight }),
+  holdMotion: (ms) => set((st) => ({ motionBusyUntil: Math.max(st.motionBusyUntil, performance.now() + ms) })),
+  setShared: (shared) => set({ shared }),
+  setAboutOpen: (aboutOpen) => set({ aboutOpen }),
   setGlobeReady: (globeReady) => set({ globeReady }),
   setCatalogReady: (catalogReady) => set({ catalogReady }),
   reset: () =>
@@ -88,6 +137,7 @@ export const useApp = create<AppState>((set) => ({
       phase: 'idle',
       place: undefined,
       report: undefined,
+      shared: undefined,
       pendingWindow: undefined,
       progress: undefined,
       selectedPassId: undefined,

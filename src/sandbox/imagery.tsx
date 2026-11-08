@@ -99,7 +99,7 @@ function Picture({ src, alt, caption }: { src: string; alt: string; caption?: Re
   )
 }
 
-const VERDICT_COPY: Record<SpotCloud, string> = { clear: 'Clear', cloud: 'Cloud', shadow: 'Shadow', unknown: '—' }
+const VERDICT_COPY: Record<SpotCloud, string> = { clear: 'Clear', cirrus: 'Thin cirrus', cloud: 'Cloud', shadow: 'Shadow', unknown: '—' }
 
 function SpotVerdict({ capture, place }: { capture: Capture; place: LatLon }) {
   const job = useJob((s) => spotCloud(capture, place, s), [capture.id, place.lat, place.lon])

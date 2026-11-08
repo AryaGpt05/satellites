@@ -21,7 +21,7 @@ import { useLocate, type LocateState } from './useLocate'
 import { WINDOW_DAYS, windowLabel } from './windowLabel'
 import s from './Landing.module.css'
 
-export function Landing({ onSubmit }: { onSubmit: (place: Place) => void }) {
+export function Landing({ onSubmit }: { onSubmit: (place: Place) => void; /** ms to wait before the entrance (after the boot curtain) */ enterDelay?: number }) {
   const phase = useApp((st) => st.phase)
   const mobile = useIsMobile()
   const [searching, setSearching] = useState(false)

@@ -5,7 +5,9 @@
 import { useSyncExternalStore } from 'react'
 
 /** Phone layout: bottom sheets, condensed corner readouts, stacked hero. */
-export const MOBILE_QUERY = '(max-width: 760px)'
+import { STACKED_QUERY } from '@/lib/layout'
+/** Stacked (phone-like) layout: see src/lib/layout.ts */
+export const MOBILE_QUERY = STACKED_QUERY
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 
 function subscribeTo(query: string) {

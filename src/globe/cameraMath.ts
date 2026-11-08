@@ -224,46 +224,8 @@ export function interpolatePose(a: Pose, b: Pose, t: number, bump: number, out: 
 
 // ───────────────────────────── easing ─────────────────────────────
 
-/** CSS-style cubic-bezier timing function. */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
-  const cx = 3 * x1
-  const bx = 3 * (x2 - x1) - cx
-  const ax = 1 - cx - bx
-  const cy = 3 * y1
-  const by = 3 * (y2 - y1) - cy
-  const ay = 1 - cy - by
-  const sampleX = (u: number) => ((ax * u + bx) * u + cx) * u
-  const sampleY = (u: number) => ((ay * u + by) * u + cy) * u
-  const slopeX = (u: number) => (3 * ax * u + 2 * bx) * u + cx
-  return (x: number) => {
-    if (x <= 0) return 0
-    if (x >= 1) return 1
-    let u = x
-    for (let i = 0; i < 8; i++) {
-      const err = sampleX(u) - x
-      if (Math.abs(err) < 1e-6) return sampleY(u)
-      const dx = slopeX(u)
-      if (Math.abs(dx) < 1e-6) break
-      u -= err / dx
-    }
-    let lo = 0
-    let hi = 1
-    u = x
-    for (let i = 0; i < 30; i++) {
-      const v = sampleX(u)
-      if (Math.abs(v - x) < 1e-6) break
-      if (v < x) lo = u
-      else hi = u
-      u = (lo + hi) / 2
-    }
-    return sampleY(u)
-  }
-}
-
-/** --ease-in-out from the design tokens */
-export const easeInOut = cubicBezier(0.6, 0, 0.2, 1)
-/** --ease-out from the design tokens */
-export const easeOut = cubicBezier(0.2, 0, 0, 1)
+// The easing family lives in src/lib/ease.ts (one source for CSS-matching JS easing); re-exported here.
+export { cubicBezier, easeInOut, easeOut } from '@/lib/ease'
 
 /** Frame-rate independent exponential approach factor for a time constant tau (s). */
 export const damp = (dt: number, tau: number) => 1 - Math.exp(-dt / Math.max(tau, 1e-4))

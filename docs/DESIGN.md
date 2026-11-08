@@ -32,7 +32,8 @@ All colours are CSS variables in `src/styles/tokens.css`. Never hard-code hex va
 | `--ink-2` | `#14171C` | raised / hover |
 | `--bone` | `#ECE8E0` | primary text, primary marks (warm off-white, never pure white) |
 | `--bone-2` | `rgb(236 232 224 / .64)` | secondary text |
-| `--bone-3` | `rgb(236 232 224 / .40)` | tertiary text, labels |
+| `--bone-3` | `rgb(236 232 224 / .52)` | tertiary text, labels (AA on ink) |
+| `--bone-3-mark` | `rgb(236 232 224 / .40)` | non-text marks only (ticks, glyph strokes) |
 | `--bone-4` | `rgb(236 232 224 / .18)` | hairlines strong |
 | `--line` | `rgb(236 232 224 / .10)` | hairlines default |
 | `--signal` | `#FF6A1A` | sodium orange: photographed / you-are-here / primary action / live |
@@ -61,6 +62,20 @@ Self-hosted via `@fontsource-variable/*`, imported in `src/styles/fonts.css`.
 
 Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 KM/S`, `98.6°`.
 
+**Type scale tokens** (desktop / phone). Use only these; no raw font-size px in components.
+
+| token | desktop | phone | use |
+|---|---|---|---|
+| `--fs-micro` | 9.5px | 10.5px | in-image chips and tags only, never below bone-2 |
+| `--fs-meta` | 10px | 11px | secondary mono meta |
+| `--fs-label` | 10.5px | 11px | mono labels |
+| `--fs-readout` | 12px | 12.5px | mono readouts |
+| `--fs-readout-l` | 21px | 21px | large readouts |
+| `--fs-panel-h` | 34px | 34px | panel headline (condensed) |
+| `--fs-panel-sub` | 22px | 22px | panel sub-headline |
+
+The results headline integer is static: it does not count up (it must never visibly change while verification lands; say "at least" while partial).
+
 ## 4. Layout
 
 - The viewport is an **instrument bezel**: a hairline frame inset 16px (12px on mobile) with **corner tick marks** (8px L-shapes) and **edge rulers** (tiny ticks every 24px along the top edge, fading out at the centre). The 3D scene sits behind and bleeds past the frame.
@@ -69,6 +84,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
   - TR: live UTC clock `2026-11-08 03:31:07 UTC` with a blinking signal dot (1Hz, 50% duty, no fade)
   - BL: catalog status `12,847 OBJECTS · TLE EPOCH 2026-11-08 03:15Z · CELESTRAK`
   - BR: sub-solar point `SUN 12.4°S 118.2°E` plus scene FOV or camera altitude
+- **Stacked layout** (phone-like: bottom sheet, globe above) = width ≤ 760px, or portrait ≤ 1100px wide (portrait tablets). JS uses `src/lib/layout.ts`; CSS copies the query text.
 - 12-column grid inside the bezel, 24px gutters, 32px outer margins on desktop. The content column for panels is 4 columns (≈ 420px) and docks right on desktop, as a bottom sheet on mobile.
 - Hairline section rules have a **label notch**: a mono label sitting on the line, e.g. `── 02 / PASSES ─────────`.
 - Generous negative space. The globe is the hero, so panels never cover more than 40% of the viewport on desktop.
@@ -80,7 +96,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
 - **No bounce, no spring overshoot, no parallax gimmicks.** Precise and damped.
 - Text reveal: line-by-line mask wipe (clip-path), 60ms stagger. Numbers count up with tabular digits over 600–900ms using ease-out.
 - Code-like strings (NORAD IDs, coordinates) may do a brief **glyph scramble** (≤ 400ms), only on first appearance. Never on prose.
-- Camera: moves take 2.4–3.6s with ease-in-out. Always ease the target and distance together, never a straight linear lerp. Respect `prefers-reduced-motion` with cuts and fades.
+- Camera: moves take 2.4–3.6s with ease-in-out. **The pass camera frames north-up** (oblique ~35°, track visible); never south-up by default. Always ease the target and distance together, never a straight linear lerp. Respect `prefers-reduced-motion` with cuts and fades.
 - **The signature moment, the pushbroom reveal:** when a captured image is shown, it is revealed **line by line in the satellite's along-track direction**, the way a pushbroom sensor actually builds an image. A 1px signal-coloured scan line leads the reveal with a faint trailing glow (6px, 30% to 0). Duration ≈ 1.6s. A mono readout beside it counts `LINE 0000 → 1024`.
 
 ## 6. The globe (3D art direction)
@@ -110,6 +126,15 @@ Declarative, specific, quietly uncanny. Second person. Real numbers.
 - Geostationary: "GOES-19 has photographed this spot every 10 minutes, all week: 1,008 times."
 
 Honesty is part of the aesthetic. Uncertainty is stated plainly in `--bone-3` mono footnotes.
+
+### Verdict vocabulary (one set of words everywhere)
+
+| verdict | name | count unit | lane label | verb |
+|---|---|---|---|---|
+| imaged | Photographed | IMAGES | PHOTO | photographed |
+| likely | Likely photographed | PASSES | LIKELY | swept over |
+| could | Could have pointed here | PASSES | COULD | passed within view |
+| overhead | Passed overhead | PASSES | OVERHEAD | passed overhead |
 
 ## 8. Components (src/ui/system)
 
