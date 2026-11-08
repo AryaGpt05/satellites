@@ -30,15 +30,17 @@ export default function Main() {
 
   // Global keys: Esc backs out, "?" opens About.
   useEffect(() => {
+    // Overlays (About, ShareSheet, search suggestions) handle their own keys first and stop/prevent them.
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || about) return
       const typing = (e.target as HTMLElement)?.closest?.('input, textarea, [contenteditable="true"]')
       if (e.key === 'Escape') {
-        if (about) return setAbout(false)
+        if (typing) return
         const st = useApp.getState()
         if (st.selectedPassId) return st.selectPass(undefined)
         if (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error') resetToLanding()
       } else if (!typing && e.key === '?') {
-        setAbout((v) => !v)
+        setAbout(true)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -50,8 +52,8 @@ export default function Main() {
       <GlobeCanvas className={s.scene} />
       <div className={s.layer}>
         {(phase === 'idle' || phase === 'locating') && <Landing onSubmit={(place) => void runReport(place)} />}
-        {phase === 'computing' && <ComputingReadout />}
-        {phase === 'results' && <ResultsView />}
+        {phase === 'computing' && <ComputingReadout onCancel={resetToLanding} />}
+        {phase === 'results' && <ResultsView onBack={resetToLanding} />}
         {phase === 'error' && <ErrorNotice message={error} onBack={resetToLanding} />}
       </div>
       <Hud onAbout={() => setAbout(true)} />

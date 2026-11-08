@@ -75,6 +75,8 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   s.selectPass(undefined)
   s.setReport(undefined)
   s.setPlace(place)
+  const end = opts.now ?? Date.now()
+  s.setPendingWindow([end - 7 * DAY, end])
   s.setProgress({ stage: 'catalog', message: 'Loading orbital elements' })
   s.setPhase('computing')
   s.setTimeMode('live')

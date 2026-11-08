@@ -2,7 +2,8 @@
  * Global app state (zustand). This is the integration contract between UI, engine and globe.
  * - UI writes intents (place, selection, time controls).
  * - Engine results land in `report`.
- * - Globe READS everything here and never writes except `hoveredNorad` and `globeReady`.
+ * - Globe READS everything here and writes only `globeReady`, `hoveredNorad` (hovers it started) and
+ *   `simTime` (its frame loop owns the clock: throttled ~10 Hz in live/replay).
  */
 import { create } from 'zustand'
 import type { Pass, Place, ProgressEvent, Report } from '@/types'
@@ -26,6 +27,8 @@ export interface AppState {
   error?: string
   place?: Place
   report?: Report
+  /** The [start, end] window of the report being computed (ms). Set by the controller before computing. */
+  pendingWindow?: [number, number]
   progress?: ProgressEvent
   selectedPassId?: string
   hoveredNorad?: number
@@ -43,6 +46,7 @@ export interface AppState {
   // actions
   setPhase: (p: Phase, error?: string) => void
   setPlace: (p?: Place) => void
+  setPendingWindow: (w?: [number, number]) => void
   setReport: (r?: Report) => void
   setProgress: (e?: ProgressEvent) => void
   selectPass: (id?: string) => void
@@ -68,6 +72,7 @@ export const useApp = create<AppState>((set) => ({
 
   setPhase: (phase, error) => set({ phase, error }),
   setPlace: (place) => set({ place }),
+  setPendingWindow: (pendingWindow) => set({ pendingWindow }),
   setReport: (report) => set({ report }),
   setProgress: (progress) => set({ progress }),
   selectPass: (selectedPassId) => set({ selectedPassId }),
@@ -83,6 +88,7 @@ export const useApp = create<AppState>((set) => ({
       phase: 'idle',
       place: undefined,
       report: undefined,
+      pendingWindow: undefined,
       progress: undefined,
       selectedPassId: undefined,
       timeMode: 'live',

@@ -5,8 +5,12 @@
  */
 import { lazy, Suspense, type ComponentType } from 'react'
 
-const sandboxes = import.meta.glob('../sandbox/*.tsx') as Record<string, () => Promise<{ default: ComponentType }>>
-const sandboxName = new URLSearchParams(location.search).get('sandbox')
+// Sandboxes are dev-only: production builds never bundle them (or their fixtures).
+const sandboxes = (import.meta.env.DEV ? import.meta.glob('../sandbox/*.tsx') : {}) as Record<
+  string,
+  () => Promise<{ default: ComponentType }>
+>
+const sandboxName = import.meta.env.DEV ? new URLSearchParams(location.search).get('sandbox') : null
 const sandboxLoader = sandboxName ? sandboxes[`../sandbox/${sandboxName}.tsx`] : undefined
 const Root = sandboxLoader ? lazy(sandboxLoader) : lazy(() => import('./Main'))
 

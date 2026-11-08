@@ -49,7 +49,9 @@ export function ComputingReadout({ onCancel }: { onCancel?: () => void }) {
   const mobile = useIsMobile()
   const rootRef = useRef<HTMLDivElement>(null)
   const [t0] = useState(() => performance.now())
-  const [windowEnd] = useState(() => Date.now())
+  const pending = useApp((st) => st.pendingWindow)
+  const [fallbackEnd] = useState(() => Date.now())
+  const windowEnd = pending?.[1] ?? fallbackEnd
   const [now, setNow] = useState(t0)
   // Progress history lives in a ref, folded from a store subscription. The engine streams events from
   // worker messages (hundreds a second); rendering each one would be wasted work, so the 10 Hz clock

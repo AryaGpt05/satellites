@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { timeZoneAt } from '@/imagery'
+import { cityLevelLabel } from '@/lib/backend'
 import type { Pass, Report } from '@/types'
 import { Button, Glyph, Rule, cx } from '@/ui/system'
 import { captureFor, slug } from '../results/lib/captures'
@@ -44,6 +45,8 @@ export function ShareSheet({ pass, report, onClose }: ShareSheetProps) {
   const host = typeof location !== 'undefined' ? location.host : 'overflight'
   const spec = useMemo(() => cardSpec(pass, report, meta, tz, host), [pass, report, meta, tz, host])
   const rounded = useMemo(() => roundedPlace(place.lat, place.lon), [place.lat, place.lon])
+  // Shares are public: never publish a street address. Fall back to the city, then coordinates.
+  const publicLabel = cityLevelLabel(place) ?? `${rounded.lat.toFixed(2)}, ${rounded.lon.toFixed(2)}`
   const [link, setLink] = useState<LinkState>({ kind: 'idle' })
   const [copied, setCopied] = useState(false)
   const [png, setPng] = useState<'idle' | 'busy' | 'err'>('idle')
@@ -54,8 +57,8 @@ export function ShareSheet({ pass, report, onClose }: ShareSheetProps) {
 
   // ── link: made on the first share action, never on open ─────────────────────────────────
   const input: CreateShareInput = useMemo(
-    () => ({ placeLabel: place.label, lat: rounded.lat, lon: rounded.lon, pass, capture, satName: meta.name }),
-    [place.label, rounded, pass, capture, meta.name],
+    () => ({ placeLabel: publicLabel, lat: rounded.lat, lon: rounded.lon, pass, capture, satName: meta.name }),
+    [publicLabel, rounded, pass, capture, meta.name],
   )
   const linkPromise = useRef<Promise<string> | null>(null)
   const resolveLink = useCallback(
@@ -116,7 +119,7 @@ export function ShareSheet({ pass, report, onClose }: ShareSheetProps) {
   const text = postText({
     verdict: pass.verdict,
     satName: meta.name,
-    placeLabel: place.label,
+    placeLabel: publicLabel,
     altitudeKm: pass.altitudeKm,
     localDay: fmtLocalDay(pass.tClosest, tz),
     localTime: fmtLocalTime(pass.tClosest, tz),
