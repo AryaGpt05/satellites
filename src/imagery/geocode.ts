@@ -199,9 +199,15 @@ export function preferSettlements(hits: Hit[]): Hit[] {
       (s) => s !== a && isSettlement(s.props) && textKey(s.place.label) === k && (insideExtent(a.props.extent, s.place) || (!a.props.extent && haversineKm(a.place, s.place) < 50)),
     )
     if (j < 0) continue
+    if (j < i) {
+      // The settlement already outranks this admin area: drop the duplicate, never demote the city.
+      out.splice(i, 1)
+      i--
+      continue
+    }
+    // Promote the settlement into the admin area's rank (j > i, so index i is unaffected by the splice).
     const [s] = out.splice(j, 1)
-    out.splice(out.indexOf(a), 1, s)
-    i = -1 // re-scan: positions moved
+    out[i] = s
   }
   return out
 }

@@ -79,7 +79,7 @@ describe('copy', () => {
     const s = shareFromRpc(ROW)!
     expect(headline(s)).toBe('Sentinel-2C photographed Waterloo.')
     expect(description(s)).toBe(
-      'Sentinel-2C crossed 795 km above Waterloo at 16:14 UTC on 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. See every satellite that passed over any place this week.',
+      'Sentinel-2C crossed 795 km above Waterloo at 16:21 UTC on 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. See every satellite that passed over any place this week.',
     )
     expect(headline({ ...s, verdict: 'could', satName: 'SkySat-C3' })).toBe('SkySat-C3 passed within view of Waterloo.')
     expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 photographed Waterloo.')

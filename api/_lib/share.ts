@@ -270,9 +270,12 @@ export function fmtDate(ms: number): string {
   return `${d.getUTCDate()} ${m} ${d.getUTCFullYear()}`
 }
 
-/** When the moment happened: the image's acquisition time if there is one, else closest approach. */
+/**
+ * When the moment happened: the satellite's closest approach to the place. Archive timestamps are not used:
+ * Sentinel-2's STAC datetime is the start of the datatake, often minutes before the satellite was overhead.
+ */
 export function momentOf(s: ShareRecord): number | undefined {
-  return (s.verdict === 'imaged' ? s.capture?.datetime : undefined) ?? s.tClosest ?? s.pass.tClosest
+  return s.tClosest ?? s.pass.tClosest ?? s.capture?.datetime
 }
 
 const COMPASS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']
