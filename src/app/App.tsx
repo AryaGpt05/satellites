@@ -1,27 +1,25 @@
 /**
- * Integration root — owned by the integrator. Modules are composed here.
+ * Integration root — owned by the integrator.
  * Dev sandboxes: append ?sandbox=<name> to render src/sandbox/<name>.tsx (default export) in isolation.
+ * The production app is lazy-loaded so sandbox pages never import unfinished modules.
  */
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ComponentType } from 'react'
 
-const sandboxes = import.meta.glob('../sandbox/*.tsx')
+const sandboxes = import.meta.glob('../sandbox/*.tsx') as Record<string, () => Promise<{ default: ComponentType }>>
 const sandboxName = new URLSearchParams(location.search).get('sandbox')
+const sandboxLoader = sandboxName ? sandboxes[`../sandbox/${sandboxName}.tsx`] : undefined
+const Root = sandboxLoader ? lazy(sandboxLoader) : lazy(() => import('./Main'))
 
 export function App() {
-  if (sandboxName) {
-    const key = `../sandbox/${sandboxName}.tsx`
-    const loader = sandboxes[key] as undefined | (() => Promise<{ default: React.ComponentType }>)
-    if (!loader) return <pre className="t-mono" style={{ padding: 24 }}>No sandbox "{sandboxName}". Available: {Object.keys(sandboxes).join(', ')}</pre>
-    const Comp = lazy(loader)
+  if (sandboxName && !sandboxLoader)
     return (
-      <Suspense fallback={null}>
-        <Comp />
-      </Suspense>
+      <pre className="t-mono" style={{ padding: 24 }}>
+        No sandbox "{sandboxName}". Available: {Object.keys(sandboxes).join(', ')}
+      </pre>
     )
-  }
   return (
-    <main style={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-      <span className="t-label">Overflight — scaffold</span>
-    </main>
+    <Suspense fallback={null}>
+      <Root />
+    </Suspense>
   )
 }

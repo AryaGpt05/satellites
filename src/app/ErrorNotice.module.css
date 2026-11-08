@@ -1,0 +1,16 @@
+.wrap {
+  position: absolute;
+  left: calc(var(--bezel-inset) + var(--margin));
+  bottom: calc(var(--bezel-inset) + 72px);
+  max-width: 420px;
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  background: var(--ink-1);
+  border: 1px solid var(--line-strong);
+  border-left: 2px solid var(--warn);
+}
+.msg {
+  margin: 0;
+  color: var(--bone);
+}

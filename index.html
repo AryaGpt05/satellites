@@ -11,9 +11,17 @@
     <meta property="og:image" content="/og-default.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://planetarycomputer.microsoft.com" crossorigin />
+    <link rel="preconnect" href="https://photon.komoot.io" crossorigin />
+    <link rel="preconnect" href="https://gibs.earthdata.nasa.gov" crossorigin />
+    <link rel="preload" href="/textures/earth-day-1k.webp" as="image" type="image/webp" />
+    <link rel="preload" href="/data/catalog.json" as="fetch" type="application/json" crossorigin />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Overflight" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript><p style="font-family:monospace;color:#ece8e0;background:#07080a;padding:24px">Overflight needs JavaScript and WebGL to compute satellite passes in your browser.</p></noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
