@@ -2,8 +2,18 @@
   display: flex;
   flex-direction: column;
 }
-.detail > section + section {
+.detail > section + section,
+.body > section + section {
   margin-top: 28px;
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  margin-top: 20px;
+}
+/* A quiet selection (a gallery swipe): the pass's words change in place with one short fade (owner A1). */
+.quietIn {
+  animation: st-fade 160ms linear backwards;
 }
 .prose {
   gap: 12px;
@@ -32,201 +42,10 @@
   }
 }
 
-.capture {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Mostly cloud, said plainly above the frame (decision #2). */
-.clouded {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: var(--fs-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  line-height: 1.4;
-  color: var(--warn);
-}
-
-.figure {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-/*
- * Desktop: the square never runs under the footer. --detail-chrome (frame top + footer + bezel) is
- * measured by the results view; on short screens the frame shrinks and centres, but never below
- * 240 px (a 390 px-tall landscape phone scrolls to it rather than show a stamp-sized picture).
- */
-.stack {
-  position: relative;
-  width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
-  margin-inline: auto;
-}
 .plan {
   width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
   margin-inline: auto;
 }
-.zoomLayer {
-  position: absolute;
-  inset: 0;
-}
-.caption {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 2px 12px;
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: var(--fs-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--bone-3);
-}
-.product {
-  white-space: nowrap;
-}
-.credit {
-  font-size: var(--fs-micro, 9.5px);
-  letter-spacing: 0.04em;
-  color: var(--bone-3);
-}
-
-/* ── overlay on the image ─────────────────────────────────────── */
-.overlay {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity var(--d-md) var(--ease-out);
-  pointer-events: none;
-}
-.overlayOn {
-  opacity: 1;
-}
-.reticle {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 26%;
-  height: 26%;
-  transform: translate(-50%, -50%) scale(2);
-  opacity: 0;
-  transition:
-    transform 500ms var(--ease-out),
-    opacity 240ms var(--ease-out);
-  overflow: visible;
-}
-.reticleLocked {
-  transform: translate(-50%, -50%) scale(1);
-  opacity: 1;
-}
-.knock circle,
-.knock path {
-  fill: none;
-  stroke: color-mix(in srgb, var(--ink-0) 55%, transparent);
-  stroke-width: 3;
-  vector-effect: non-scaling-stroke;
-}
-.ring,
-.ticks {
-  fill: none;
-  stroke: var(--signal);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-.dot {
-  fill: var(--signal);
-}
-.chip {
-  position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 6px;
-  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: var(--fs-micro, 9.5px);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--bone);
-  white-space: nowrap;
-}
-.tl {
-  top: 8px;
-  left: 8px;
-}
-.tr {
-  top: 8px;
-  right: 8px;
-}
-.br {
-  bottom: 8px;
-  right: 8px;
-}
-.zoomSlot {
-  position: absolute;
-  top: 34px;
-  right: 8px;
-  pointer-events: auto;
-}
-.zoomChip {
-  position: static;
-  gap: 6px;
-  color: var(--bone-3);
-  border: 1px solid var(--line-strong);
-  cursor: pointer;
-}
-.zoomChip:disabled {
-  cursor: progress;
-}
-.zoomOn {
-  color: var(--bone);
-}
-@media (pointer: coarse) {
-  .zoomChip {
-    min-height: 40px;
-    padding: 0 10px;
-  }
-}
-.scale {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity var(--d-md) var(--ease-out);
-}
-.scaleOn {
-  opacity: 1;
-}
-.bar {
-  display: block;
-  height: 5px;
-  border: 1px solid var(--bone);
-  border-top: 0;
-}
-.scaleText {
-  align-self: flex-start;
-  padding: 2px 5px;
-  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: var(--fs-micro, 9.5px);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--bone);
-  white-space: nowrap;
-}
-
 /* ── four-up readout strip under the frame (R23) ──────────────── */
 .strip {
   display: grid;
@@ -344,15 +163,9 @@
   background: linear-gradient(135deg, transparent 45%, currentColor 45% 55%, transparent 55%);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .reticle {
-    transition: opacity 200ms linear;
-  }
-}
 
 /* Wide stacked layouts (portrait tablets): the square stays a picture, not a wall. */
 @media (min-width: 600px) and (max-width: 1100px) and (orientation: portrait) {
-  .stack,
   .plan {
     width: min(100%, 520px);
   }

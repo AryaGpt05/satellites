@@ -148,17 +148,21 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const root = scrollRef.current
     if (!root || typeof IntersectionObserver === 'undefined') return
+    // The last sections can't reach the reading band: at the end of the page, the last one is current
+    // (also when the observer reports after the scroll event that got there, e.g. a jump to "Keys").
+    const atEnd = () => root.scrollTop + root.clientHeight >= root.scrollHeight - 8
+    const last = SECTIONS[SECTIONS.length - 1].id
     const io = new IntersectionObserver(
       (entries) => {
+        if (atEnd()) return setCurrent(last)
         const hit = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
         if (hit) setCurrent(hit.target.id.replace('about-', '') as SectionId)
       },
       { root, rootMargin: '-20% 0px -70% 0px', threshold: 0 },
     )
     root.querySelectorAll('section[id^="about-"]').forEach((el) => io.observe(el))
-    // The last sections can't reach the reading band: at the end of the page, the last one is current.
     const onScroll = () => {
-      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 8) setCurrent(SECTIONS[SECTIONS.length - 1].id)
+      if (atEnd()) setCurrent(last)
     }
     root.addEventListener('scroll', onScroll, { passive: true })
     return () => {

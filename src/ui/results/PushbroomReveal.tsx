@@ -14,6 +14,10 @@
  *              scan line crosses the centre as the swath crosses the reticle; never later than 2.8 s
  *              after mount for the camera; on phones also only once the frame is ≥ 95 % visible
  *   'hero'     the summary best look: max(decoded, mount + 480 ms, camera eta − 200 ms)
+ *   'capture'  the pass view (owner C4): the globe's capture moment, i.e. replay sim time crossing the pass's
+ *              closest approach `tc`, the frame the globe's scan line crosses the place. Until then the frame
+ *              waits as raster with a countdown ("AWAITING PASS · T−00:00:41"). A quiet selection (no replay
+ *              within 400 ms), a paused replay or 14 s without a crossing reveal it at once.
  * `instant` draws the finished picture at once (already revealed this session).
  *
  * Cheap by construction (PERF-04): the per-frame work is canvas paint + one textContent write.
@@ -25,7 +29,10 @@ import { DUR } from '@/lib/ease'
 import { preloadImage } from '@/imagery'
 import { useApp } from '@/state/store'
 import { Button, LiveDot, cx, palette, useReducedMotion } from '@/ui/system'
+import { sceneClock } from '@/state/sceneClock'
+import { countdown, useCaptureMoment } from './capture'
 import { frontLine, lineLabel, motionVector, revealProgress, REVEAL_MS, scannedPolygon, sweepRange } from './lib/pushbroom'
+import { markSeen } from './once'
 import s from './PushbroomReveal.module.css'
 
 export type RevealPhase = 'loading' | 'waiting' | 'revealing' | 'done' | 'error'
@@ -42,7 +49,11 @@ interface Props {
   caption?: ReactNode
   /** Slow-network copy under ACQUIRING… */
   acquiringNote?: string
-  startAt?: 'now' | 'arrival' | 'hero'
+  startAt?: 'now' | 'arrival' | 'hero' | 'capture'
+  /** Closest approach (sim ms) for startAt 'capture' */
+  tc?: number
+  /** Marked as seen (useOnce key) when the reveal starts, so a remount shows the picture at once */
+  seenKey?: string
   /** Draw the finished picture at once (no scan) */
   instant?: boolean
   /** Phones: hold the scan until the frame is (≥ 95 %) on screen */
@@ -69,6 +80,9 @@ const RASTER_PITCH = 4
 const CAMERA_CAP_MS = 2800
 const ARRIVAL_LEAD_MS = 400
 const HERO_MIN_MS = 480
+/** 'capture': no replay this long after mount = a quiet selection (reveal now); never wait longer than CAPTURE_CAP_MS. */
+const QUIET_MS = 400
+const CAPTURE_CAP_MS = 14_000
 /** A new flight starts within a frame or two of a selection; wait this long before assuming none will. */
 const FLIGHT_GRACE_MS = 250
 
@@ -81,6 +95,8 @@ export function PushbroomReveal({
   caption,
   acquiringNote,
   startAt = 'arrival',
+  tc,
+  seenKey,
   instant = false,
   gateOnVisible = false,
   dim = false,
@@ -105,6 +121,29 @@ export function PushbroomReveal({
   const onPhaseRef = useRef(onPhase)
   onPhaseRef.current = onPhase
   const hasOverlay = !!overlay
+  /** 'capture': performance.now() of the crossing (0 = not yet), and of the last frame the clock was replaying */
+  const capturedAt = useRef(0)
+  const replaySeenAt = useRef(0)
+  const countRef = useRef<HTMLElement>(null)
+  const phaseRef = useRef<RevealPhase>('loading')
+  phaseRef.current = phase
+  useCaptureMoment(
+    startAt === 'capture' ? tc : undefined,
+    {
+      onCapture: () => {
+        if (!capturedAt.current) capturedAt.current = performance.now()
+      },
+      onFrame: (t, mode) => {
+        if (mode === 'replay') replaySeenAt.current = performance.now()
+        const el = countRef.current
+        if (el && tc !== undefined && (phaseRef.current === 'waiting' || phaseRef.current === 'loading')) {
+          const text = countdown(t, tc)
+          if (el.textContent !== text) el.textContent = text
+        }
+      },
+    },
+    startAt === 'capture' && phase !== 'done' && phase !== 'revealing',
+  )
 
   const setP = useCallback((p: RevealPhase) => {
     setPhase(p)
@@ -255,6 +294,7 @@ export function PushbroomReveal({
     }
     const run = () => {
       if (!alive) return
+      if (seenKey) markSeen(seenKey)
       useApp.getState().holdMotion(DUR.pushbroom + 200)
       if (reduced) {
         finish()
@@ -283,6 +323,14 @@ export function PushbroomReveal({
     /** When the camera lets the scan start (performance.now() ms), or undefined while it is still flying. */
     const cameraReadyAt = (now: number): number | undefined => {
       const f = useApp.getState().cameraFlight
+      if (startAt === 'capture') {
+        if (capturedAt.current) return now
+        if (now - mountedAt >= CAPTURE_CAP_MS) return now
+        // Quiet: the clock has not replayed for a while (a gallery swipe, a paused replay, reduced motion).
+        const lastReplay = replaySeenAt.current || (sceneClock.mode === 'replay' ? now : 0)
+        if (now - mountedAt >= QUIET_MS && now - Math.max(lastReplay, mountedAt) >= QUIET_MS) return now
+        return undefined
+      }
       if (startAt === 'hero') return Math.max(mountedAt + HERO_MIN_MS, f.flying ? f.eta - 200 : 0)
       if (now - mountedAt >= CAMERA_CAP_MS) return now
       if (f.flying) return undefined
@@ -361,6 +409,11 @@ export function PushbroomReveal({
           {phase === 'revealing' ? <LiveDot className={s.dot} /> : null}
           Line <b ref={lineRef}>{lineLabel(0)}</b> → {lineLabel(lines)}
         </span>
+        {startAt === 'capture' && tc !== undefined ? (
+          <span className={cx(s.awaitChip, phase === 'waiting' && s.scanChipOn)} aria-hidden>
+            Awaiting pass · <b ref={countRef}>{countdown(sceneClock.simTime, tc)}</b>
+          </span>
+        ) : null}
       </div>
       {caption ? <figcaption className={s.caption}>{caption}</figcaption> : null}
     </figure>

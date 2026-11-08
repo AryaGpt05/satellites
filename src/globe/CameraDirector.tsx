@@ -37,7 +37,7 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Mesh, PerspectiveCamera, PlaneGeometry, Vector3 } from 'three'
-import { bearingDeg, clamp, DEG, EARTH_RADIUS_KM, subsolarPoint } from '@/lib/geo'
+import { bearingDeg, clamp, DEG, EARTH_RADIUS_KM, latLonToWorld, subsolarPoint } from '@/lib/geo'
 import { easeInOut, easeOut } from '@/lib/ease'
 import { selectSelectedPass, useApp, type AppState, type CameraIntent, type UiInsets } from '@/state/store'
 import {
@@ -65,7 +65,6 @@ import {
 } from './cameraMath'
 import { applyControls, attachControls, createControlInput, createControlState } from './controls'
 import { propagate } from './data'
-import { EARTH_RADIUS_KM as R_KM, latLonToWorld } from '@/lib/geo'
 import type { AcqState } from './acquisition'
 import {
   acquiredPose,
@@ -197,7 +196,7 @@ function targetFor(
       if (pass && place && acq.passId === pass.id) {
         if (chasing) {
           const sat = propagate(pass.norad, simTime)
-          if (sat) return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / R_KM, _sat), place)
+          if (sat) return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / EARTH_RADIUS_KM, _sat), place)
         }
         if (acq.imaged) return acquiredPose(vp, insets, place, acq.halfKm)
       }

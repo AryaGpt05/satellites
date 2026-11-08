@@ -404,6 +404,41 @@ export async function searchCaptures(place: LatLon, start: number, end: number, 
   return (await searchCapturesDetailed(place, start, end, signal)).captures
 }
 
+/** Scene cloud below which an archive scene is a clear-cover candidate (server-side filter). */
+export const CLEAR_SCENE_MAX_CLOUD = 20
+/** Candidates per collection for the clear cover (newest first; one page, no paging). */
+const CLEAR_SCENE_LIMIT = 12
+
+/**
+ * The STAC body for "the newest nearly cloud-free scenes over the place": the usual search plus a server-side
+ * scene-cloud filter (`query` extension, eo:cloud_cover < 20) and newest-first sorting, one page.
+ */
+export function clearSceneBody(collection: StacCollection, place: LatLon, start: number, end: number, limit = CLEAR_SCENE_LIMIT): Record<string, unknown> {
+  const body = searchBody(collection, place, start, end)
+  const query = { ...((body.query as Record<string, unknown> | undefined) ?? {}), 'eo:cloud_cover': { lt: CLEAR_SCENE_MAX_CLOUD } }
+  return { ...body, limit, query, sortby: [{ field: 'datetime', direction: 'desc' }] }
+}
+
+/**
+ * Nearly cloud-free Sentinel-2 and Landsat 8/9 scenes over `place` in [start, end] (Planetary Computer, one page
+ * per collection), one per overflight, newest first. For the clear cover (owner D): the last clear look from
+ * before a cloudy week. Resolves [] when neither collection answers; rejects only on abort.
+ */
+export async function searchClearScenes(place: LatLon, start: number, end: number, signal?: AbortSignal): Promise<Capture[]> {
+  throwIfAborted(signal)
+  if (!(end > start) || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) return []
+  const one = async (collection: StacCollection) => {
+    const page = await fetchJson<StacItemCollection>(PC_STAC_SEARCH, { body: clearSceneBody(collection, place, start, end), signal, timeoutMs: SEARCH_TIMEOUT_MS, retries: 1 })
+    return (page.features ?? [])
+      .map((it) => pcItemToCandidate({ ...it, collection: it.collection ?? collection }, place))
+      .filter((c): c is Candidate => !!c && (c.capture.cloudCoverPct ?? 100) < CLEAR_SCENE_MAX_CLOUD)
+  }
+  const settled = await Promise.allSettled([one('sentinel-2-l2a'), one('landsat-c2-l2')])
+  throwIfAborted(signal)
+  const cands = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+  return dedupeCandidates(cands, place).map((c) => c.capture)
+}
+
 /** How far back the acquisition-plan check looks: Sentinel-2 revisits land every 5 days, so 90 days is decisive. */
 const PLAN_LOOKBACK_MS = 90 * 86_400_000
 

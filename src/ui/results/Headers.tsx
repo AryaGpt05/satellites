@@ -12,7 +12,9 @@
  * drop the place row once results land (the headline names the place).
  *
  * DetailHeader: back crumb, "3 / 31 ‹ ›" stepping within the pass's verdict (chevrons, so stepping never
- * reads as the ← of "back"), name, local time.
+ * reads as the ← of "back"), name, local time. A pass with a photo drops the stepper (the gallery under it
+ * has its own counter and ‹ ›) and its name and time change in place, with a short fade, as you swipe.
+ * A share recipient sees a one-line tag above it (R2R10): SHARED WITH YOU · SENTINEL-2C PHOTOGRAPHED WATERLOO.
  */
 import { memo, useEffect, useRef, type KeyboardEvent } from 'react'
 import { timeZoneAt } from '@/imagery'
@@ -217,10 +219,14 @@ interface DetailHeaderProps {
   onSelect: (p: Pass) => void
   /** Phones: show the compact replay strip (replay/scrub, camera not flying) */
   strip: boolean
+  /** A pass with a photo: the gallery steps (no stepper here); the title changes in place */
+  photo?: boolean
+  /** A shared link is open (R2R10): the tag above the header */
+  shared?: { sat: string; place: string }
 }
 
 /** Pass header: back, position within the verdict with ‹ ›, the satellite, its local time. */
-export function DetailHeader({ model, pass, mobile, onSelect, strip }: DetailHeaderProps) {
+export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shared }: DetailHeaderProps) {
   const meta = model.meta(pass.norad)
   const lane = model.lanes[pass.verdict].passes
   const index = lane.findIndex((p) => p.id === pass.id)
@@ -231,8 +237,20 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip }: DetailHea
   const t = model.times(pass)
   // The strip shows once the camera has arrived and the scene is replaying or held (MOB-16).
   const replayOn = useApp((st) => st.timeMode !== 'live' && !st.cameraFlight.flying)
+  // A quiet selection (a swipe) changes the title in place: a 160 ms fade of the words, never the header.
+  const firstId = useRef(pass.id)
+  const titleKey = photo ? pass.id : 'one'
+  const titleCls = photo && pass.id !== firstId.current ? s.titleIn : undefined
   return (
     <div className={s.detailHead}>
+      {shared ? (
+        <p className={s.sharedTag}>
+          <span className={s.sharedDot} aria-hidden />
+          <span className={s.sharedText}>
+            Shared with you · {shared.sat} photographed {shared.place}
+          </span>
+        </p>
+      ) : null}
       <div className={s.headTop}>
         <button type="button" className={s.crumb} onClick={clearPass} aria-keyshortcuts="Escape">
           <Glyph name="arrow-left" size={11} />
@@ -241,7 +259,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip }: DetailHea
             <Kbd>Esc</Kbd>
           </span>
         </button>
-        <span className={s.stepper}>
+        <span className={cx(s.stepper, photo && s.stepperOff)} aria-hidden={photo || undefined}>
           <span className={s.position} aria-label={`Pass ${index + 1} of ${lane.length} of this kind`}>
             {index + 1} / {lane.length}
           </span>
@@ -263,7 +281,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip }: DetailHea
       </div>
       {mobile ? (
         // Phones: name and time on one line, so the flight snap stays low (≤ 25 % of the screen).
-        <div className={cx(s.passTitle, s.passTitleCompact)}>
+        <div key={titleKey} className={cx(s.passTitle, s.passTitleCompact, titleCls)}>
           <Mark name={glyphForPass(pass.verdict, meta.category)} size={14} color={markColorVar(pass.verdict, meta.category)} />
           <h1 className={s.passName}>{meta.name}</h1>
           <span className={s.passWhen}>
@@ -271,7 +289,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip }: DetailHea
           </span>
         </div>
       ) : (
-        <>
+        <div key={titleKey} className={titleCls}>
           <div className={s.passTitle}>
             <Mark name={glyphForPass(pass.verdict, meta.category)} size={18} color={markColorVar(pass.verdict, meta.category)} />
             <h1 className={s.passName}>{meta.name}</h1>
@@ -282,7 +300,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip }: DetailHea
             </b>
             {meta.operator ? <span>{meta.operator}</span> : null}
           </div>
-        </>
+        </div>
       )}
       {strip && replayOn ? <ReplayStrip pass={pass} /> : null}
     </div>

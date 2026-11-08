@@ -5,6 +5,8 @@
  *  focusPass   select + frame the pass + replay its swath sweep (ARCHITECTURE: "selecting a pass frames
  *              it and replays the swath sweep"). Reduced motion (decision #8): never auto-plays; the
  *              clock is parked at closest approach instead.
+ *  selectQuietly  a gallery swipe (owner B): select + frame the pass, but no replay and no new reveal: the
+ *              clock parks at closest approach (scrub), so the globe settles on the acquired view
  *  clearPass   back to the overview: live time, camera on the place
  *  play/pause  replay ↔ scrub (scrub holds the exact frame; see globe/clock.ts)
  */
@@ -41,6 +43,7 @@ export function startReplay(pass: Pass, rate = DEFAULT_REPLAY_RATE) {
 
 export function focusPass(pass: Pass) {
   const st = useApp.getState()
+  quiet.id = ''
   prefetchPassImage(st.report, pass)
   st.selectPass(pass.id)
   st.setCamera({ kind: 'pass', passId: pass.id })
@@ -51,6 +54,20 @@ export function focusPass(pass: Pass) {
     return
   }
   startReplay(pass, st.timeMode === 'replay' || st.timeMode === 'scrub' ? st.replayRate : DEFAULT_REPLAY_RATE)
+}
+
+/** The last quiet selection (a gallery swipe): the phone two-beat sheet choreography skips it. */
+export const quiet = { id: '' as string }
+
+export function selectQuietly(pass: Pass) {
+  const st = useApp.getState()
+  if (st.selectedPassId === pass.id && st.camera.kind === 'pass' && st.camera.passId === pass.id) return
+  quiet.id = pass.id
+  // Time first: the globe's next frame sees scrub at closest approach together with the selection (no arming).
+  st.setTimeMode('scrub')
+  st.setSimTime(pass.tClosest)
+  st.selectPass(pass.id)
+  st.setCamera({ kind: 'pass', passId: pass.id })
 }
 
 export function clearPass() {

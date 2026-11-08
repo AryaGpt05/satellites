@@ -127,9 +127,10 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
       createRibbonMaterial(
         { uPx: rt.uniforms.uPx, uSunDir: rt.uniforms.uSunDir, uCloudMap: rt.uniforms.uCloudMap, uCloudOffset: rt.uniforms.uCloudOffset },
         look,
-        { speedKmS: pass.groundSpeedKmS > 0 ? pass.groundSpeedKmS : 6.8 },
+        // An image being exposed glows a little longer behind the line than a sweep that captured nothing.
+        { speedKmS: pass.groundSpeedKmS > 0 ? pass.groundSpeedKmS : 6.8, freshPx: pass.verdict === 'imaged' ? 36 : 12 },
       ),
-    [rt, look, pass.groundSpeedKmS],
+    [rt, look, pass.groundSpeedKmS, pass.verdict],
   )
 
   // ── hairlines
@@ -148,22 +149,35 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   }, [rt, look])
 
   // ── the full orbit, as an inertial ring: sampled positions rotated back by GMST at their own time (the mesh then
-  // turns with -GMST every frame, like the stars), so it passes through the spacecraft at any sim time.
-  const orbitRing = useMemo(() => {
-    const periodMs = (2 * Math.PI * Math.sqrt((EARTH_RADIUS_KM + pass.altitudeKm) ** 3 / 398600.4418)) * 1000
-    const pts: Vector3[] = []
-    const alpha = new Float32Array(RING_SAMPLES + 1)
-    const Y = new Vector3(0, 1, 0)
-    for (let i = 0; i <= RING_SAMPLES; i++) {
-      const t = pass.tClosest + (i / RING_SAMPLES - 0.5) * periodMs
-      const st = propagate(pass.norad, t)
-      if (!st) continue
-      pts.push(latLonToWorld(st.lat, st.lon, 1 + st.altKm / EARTH_RADIUS_KM).applyAxisAngle(Y, gmst(t)))
+  // turns with -GMST every frame, like the stars), so it passes through the spacecraft at any sim time. ~220 SGP4 calls:
+  // built in an idle slot after the pass opens (never on the flight's first frame), then it fades in with the scene.
+  const ringReady = useRef(false)
+  useEffect(() => {
+    ringReady.current = false
+    const build = () => {
+      const periodMs = 2 * Math.PI * Math.sqrt((EARTH_RADIUS_KM + pass.altitudeKm) ** 3 / 398600.4418) * 1000
+      const pts: Vector3[] = []
+      const alpha = new Float32Array(RING_SAMPLES + 1)
+      const Y = new Vector3(0, 1, 0)
+      for (let i = 0; i <= RING_SAMPLES; i++) {
+        const t = pass.tClosest + (i / RING_SAMPLES - 0.5) * periodMs
+        const st = propagate(pass.norad, t)
+        if (!st) continue
+        pts.push(latLonToWorld(st.lat, st.lon, 1 + st.altKm / EARTH_RADIUS_KM).applyAxisAngle(Y, gmst(t)))
+      }
+      for (let i = 0; i < pts.length; i++) alpha[i] = i % 4 < 2 ? 1 : 0
+      lines.ring.setPoints(pts, alpha)
+      ringReady.current = pts.length > 2
     }
-    for (let i = 0; i < pts.length; i++) alpha[i] = i % 4 < 2 ? 1 : 0
-    lines.ring.setPoints(pts, alpha)
-    return pts.length > 2
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void }
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(build, { timeout: 1200 })
+      return () => w.cancelIdleCallback?.(id)
+    }
+    const id = window.setTimeout(build, 300)
+    return () => window.clearTimeout(id)
   }, [pass, lines])
+  const ringFade = useRef(0)
 
   // ── the spacecraft model and the light curtain
   const craft = useMemo(() => ({ geometry: buildSpacecraftGeometry(), material: createSpacecraftMaterial(rt.uniforms.uSunDir) }), [rt])
@@ -362,7 +376,6 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
         if (j === CURTAIN_COLS) lines.edgePts[2].copy(q)
       }
       attr.needsUpdate = true
-      curtain.geometry.computeBoundingSphere()
       const cu = curtain.material.uniforms
       cu.uOpacity.value = L * (field.mode === 'regard' ? 0.5 : 1)
       cu.uTime.value = perfNow / 1000
@@ -373,12 +386,13 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
     }
 
     // ── the full orbit ring (inertial: turns with GMST, as the stars do)
+    if (ringReady.current) ringFade.current = Math.min(1, ringFade.current + dt / 0.6)
     if (ringMesh.current) {
-      ringMesh.current.visible = orbitRing && f > 0.004
+      ringMesh.current.visible = ringReady.current && f * ringFade.current > 0.004
       ringMesh.current.rotation.y = -rt.gmst
     }
     lines.ring.setResolution(tmpRes.x, tmpRes.y)
-    lines.ring.setFade(f)
+    lines.ring.setFade(f * ringFade.current)
 
     // View line to the place, for pointable imagers while the place is in their field of regard.
     const viewOn = pointable && s.ok && !!placePos && now >= pass.tStart && now <= pass.tEnd && f > 0.004

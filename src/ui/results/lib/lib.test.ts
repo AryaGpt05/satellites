@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Capture, Pass } from '@/types'
 import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
-import { archiveDown, compassAbbr, compassWord, geoSentence, headline, passSentences, placeInProse, placeParts, plain, radarSentence, shareHeadline } from './copy'
+import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, flewOverPhrase, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline } from './copy'
+import { cardUrl, filterCounts, filterPhotos, hiResUrl, orderPhotos, thumbUrl } from './photos'
 import { groupPasses, visibleCount } from './groups'
 import { glyphForPass, markColorVar, VERDICT_META, VERDICT_TAG, VERDICT_TITLE, verdictUnit, type SatMeta } from './meta'
 import { frontLine, motionVector, revealProgress, scannedPolygon, sweepRange } from './pushbroom'
@@ -128,8 +129,44 @@ describe('copy', () => {
       ],
     }
     const h = headline(report, meta)
-    expect(h).toMatchObject({ photographed: 2, more: 2, images: 2, detailed: 1, mosaics: 1 })
+    expect(h).toMatchObject({ flewOver: 4, photographed: 2, detailedSats: 1, mosaicSats: 1, more: 2, images: 2, detailed: 1, mosaics: 1 })
     expect(h.zeroReason).toBeUndefined()
+  })
+
+  it('owner F: "N satellites flew over" counts every distinct satellite with a pass, never a geostationary one', () => {
+    const geoMeta = (n: number): SatMeta => (n === 99999 ? { norad: n, name: 'GOES-19', category: 'weather-geo' } : meta(n))
+    const report = {
+      captures: [s2],
+      notes: [],
+      passes: [
+        pass({ norad: 60989, captureId: 'S2C_X' }),
+        pass({ norad: 60989, verdict: 'likely' }),
+        pass({ norad: 59625, verdict: 'could' }),
+        pass({ norad: 99999, verdict: 'overhead' }),
+      ],
+    }
+    expect(headline(report, geoMeta).flewOver).toBe(2)
+    expect(flewOverPhrase(1)).toBe('1 satellite flew over')
+    expect(flewOverPhrase(256)).toBe('256 satellites flew over')
+  })
+
+  it('owner F: the photos line, exact strings', () => {
+    expect(photosLine(31)).toBe('31 photos were made public.')
+    expect(photosLine(1)).toBe('1 photo was made public.')
+    expect(photosLine(0)).toBe('No photos were made public this week.')
+    expect(photosLine(0, { week: 'that week' })).toBe('No photos were made public that week.')
+    expect(photosLine(4, { partial: true })).toBe('At least 4 photos were made public.')
+    expect(photosLine(1234)).toBe('1,234 photos were made public.')
+    expect(ARCHIVE_DOWN_LINE).not.toContain('—')
+  })
+
+  it('the partial and final reports of one search give the same headline integer', () => {
+    const passes = [pass({ norad: 60989, captureId: 'S2C_X' }), pass({ norad: 43013, verdict: 'likely' }), pass({ norad: 59625, verdict: 'could' })]
+    const partial = headline({ captures: [s2], notes: [], passes }, meta)
+    // The final report verifies NOAA-20's mosaic: one more photo, the same satellites.
+    const final = headline({ captures: [s2, viirs], notes: [], passes: [passes[0], { ...passes[1], verdict: 'imaged', captureId: viirs.id }, passes[2]] }, meta)
+    expect(final.flewOver).toBe(partial.flewOver)
+    expect(final.images).toBe(partial.images + 1)
   })
 
   it('states a plain reason when nothing photographed the place', () => {
@@ -440,14 +477,23 @@ describe('best look (decision #1)', () => {
     expect(best?.kind).toBe('detailed')
     expect(best && best.kind !== 'geo' && best.capture.id).toBe('A')
   })
-  it('thin cirrus ranks with clear: it loses only on scene cloud (or a tie)', () => {
+  it('owner B1/D1: most zoomed-in clear first: smaller pixels beat a clearer spot, then the clearer spot, then newer', () => {
     const clear = cap('C', { spot: 'clear', cloudCoverPct: 35 })
     const cirrus = cap('I', { spot: 'cirrus', cloudCoverPct: 12 })
-    const r1 = pickBestLook(report([clear, cirrus], [pass({ captureId: 'C', tClosest: 2 }), pass({ captureId: 'I', tClosest: 1 })]))
-    expect(r1 && r1.kind !== 'geo' && r1.capture.id).toBe('I') // less scene cloud wins
-    const tie = cap('T', { spot: 'cirrus', cloudCoverPct: 33 })
-    const r2 = pickBestLook(report([clear, tie], [pass({ captureId: 'C', tClosest: 1 }), pass({ captureId: 'T', tClosest: 2 })]))
-    expect(r2 && r2.kind !== 'geo' && r2.capture.id).toBe('C') // same bucket: clear first, even though older
+    const r1 = pickBestLook(report([clear, cirrus], [pass({ captureId: 'C', tClosest: 1 }), pass({ captureId: 'I', tClosest: 2 })]))
+    expect(r1 && r1.kind !== 'geo' && r1.capture.id).toBe('C') // same 10 m: clear beats cirrus, even though older
+    const landsat = cap('L', { collection: 'landsat-c2-l2', gsdM: 30, spot: 'clear', cloudCoverPct: 2 })
+    const r2 = pickBestLook(report([landsat, cirrus], [pass({ captureId: 'L', tClosest: 3 }), pass({ captureId: 'I', tClosest: 1 })]))
+    expect(r2 && r2.kind !== 'geo' && r2.capture.id).toBe('I') // 10 m (cirrus, not clouded) beats 30 m
+  })
+  it('owner D1: a clouded capture never leads while a clear one exists; if all are clouded, the least cloudy', () => {
+    const white = cap('W', { spot: 'cloud', cloudCoverPct: 99, gsdM: 10 })
+    const grey = cap('G', { cloudCoverPct: 86, gsdM: 10 })
+    const landsat = cap('L', { collection: 'landsat-c2-l2', gsdM: 30, spot: 'clear', cloudCoverPct: 20 })
+    const r1 = pickBestLook(report([white, landsat], [pass({ captureId: 'W', tClosest: 9 }), pass({ captureId: 'L', tClosest: 1 })]))
+    expect(r1 && r1.kind !== 'geo' && r1.capture.id).toBe('L')
+    const r2 = pickBestLook(report([white, grey], [pass({ captureId: 'W', tClosest: 9 }), pass({ captureId: 'G', tClosest: 1 })]))
+    expect(r2 && r2.kind !== 'geo' && r2.capture.id).toBe('G')
   })
   it('then the more recent one', () => {
     const a = cap('A', { cloudCoverPct: 21 })
@@ -471,8 +517,8 @@ describe('best look (decision #1)', () => {
   })
 })
 
-describe('groups: photographs clearest first (decision #2)', () => {
-  it('orders detailed captures by clarity, not time', () => {
+describe('groups: photographs in the gallery order (owner B1)', () => {
+  it('the closest clear look first, then newest first', () => {
     const white = { ...s2, id: 'W', itemId: 'W', cloudCoverPct: 100 }
     const clear = { ...s2, id: 'K', itemId: 'K', cloudCoverPct: 3 }
     const groups = groupPasses({ captures: [white, clear], passes: [pass({ captureId: 'W', tClosest: 9 }), pass({ captureId: 'K', tClosest: 1 })] }, meta)
@@ -577,5 +623,91 @@ describe('familiar time zones (R22) and spoken labels (R19)', () => {
     expect(fmtSpokenDay(t, TZ)).toBe('Friday 6 November')
     expect(spokenRelative(t, t + 41 * 3_600_000)).toBe('41 hours ago')
     expect(fmtDayMonth(t, TZ)).toBe('6 Nov')
+  })
+})
+
+// ── polish round 2: the photo order (owner B1 + D1) and the headline (owner F) ─────────────────
+
+describe('photos: one order everywhere (owner B1 + D1)', () => {
+  const cap = (id: string, over: Partial<Capture> = {}): Capture => ({ ...s2, id, itemId: id, ...over })
+  const mos = (id: string, gsdM: number): Capture => ({ ...viirs, id, itemId: id, gsdM })
+
+  it('the cover is the most zoomed-in clear photo, then every other photo newest first', () => {
+    const a = cap('A', { spot: 'clear', cloudCoverPct: 10 })
+    const b = cap('B', { spot: 'cloud', cloudCoverPct: 90 })
+    const l = cap('L', { collection: 'landsat-c2-l2', gsdM: 30, spot: 'clear', cloudCoverPct: 1 })
+    const m1 = mos('M1', 250)
+    const m2 = mos('M2', 375)
+    const passes = [
+      pass({ captureId: 'A', tClosest: 100 }),
+      pass({ captureId: 'B', tClosest: 500 }),
+      pass({ captureId: 'L', tClosest: 300 }),
+      pass({ norad: 43013, captureId: 'M1', tClosest: 400 }),
+      pass({ norad: 43013, captureId: 'M2', tClosest: 200 }),
+    ]
+    const set = orderPhotos({ captures: [a, b, l, m1, m2], passes })
+    expect(set.photos.map((p) => p.key)).toEqual(['A', 'B', 'M1', 'L', 'M2'])
+    expect(set.cover?.why).toBe('closest')
+    expect(set.windowCount).toBe(5)
+    expect(set.photos[1].clouded).toBe(true)
+    expect(filterPhotos(set.photos, 'detailed').map((p) => p.key)).toEqual(['A', 'B', 'L'])
+    expect(filterPhotos(set.photos, 'weather').map((p) => p.key)).toEqual(['M1', 'M2'])
+    expect(filterCounts(set.photos)).toEqual({ all: 5, detailed: 3, weather: 2 })
+  })
+
+  it('no clear detailed photo this week: the last clear look from before the window leads, and is not counted', () => {
+    const b = cap('B', { spot: 'cloud', cloudCoverPct: 99 })
+    const clearCover = cap('OLD', { spot: 'clear', cloudCoverPct: 3, datetime: 5 })
+    const set = orderPhotos({ captures: [b, viirs], passes: [pass({ captureId: 'B', tClosest: 50 }), pass({ norad: 43013, captureId: viirs.id, tClosest: 60 })], clearCover })
+    expect(set.cover?.why).toBe('lastClear')
+    expect(set.photos[0].key).toBe('OLD')
+    expect(set.photos[0].pass).toBeUndefined()
+    expect(set.photos.map((p) => p.key)).toEqual(['OLD', viirs.id, 'B'])
+    expect(set.windowCount).toBe(2)
+    // pickBestLook stays within the window (it needs a pass): the least cloudy capture.
+    const best = pickBestLook({ captures: [b, viirs], passes: [pass({ captureId: 'B', tClosest: 50 })], geo: [] })
+    expect(best && best.kind !== 'geo' && best.capture.id).toBe('B')
+  })
+
+  it('no clear image anywhere: the least cloudy capture leads, honestly flagged', () => {
+    const b = cap('B', { spot: 'cloud', cloudCoverPct: 99 })
+    const c = cap('C', { cloudCoverPct: 80 })
+    const set = orderPhotos({ captures: [b, c], passes: [pass({ captureId: 'B', tClosest: 50 }), pass({ captureId: 'C', tClosest: 10 })] })
+    expect(set.cover?.why).toBe('clouded')
+    expect(set.photos.map((p) => p.key)).toEqual(['C', 'B'])
+  })
+
+  it('weather mosaics only: the sharpest (MODIS 250 m beats VIIRS 375 m), lit, then newest', () => {
+    const set = orderPhotos({
+      captures: [mos('V', 375), mos('T', 250), mos('T2', 250)],
+      passes: [
+        pass({ norad: 43013, captureId: 'V', tClosest: 30 }),
+        pass({ norad: 43013, captureId: 'T', tClosest: 10, sunElevationDeg: 2 }),
+        pass({ norad: 43013, captureId: 'T2', tClosest: 5, sunElevationDeg: 30 }),
+      ],
+    })
+    expect(set.photos.map((p) => p.key)).toEqual(['T2', 'V', 'T'])
+  })
+
+  it('one canonical URL per (capture, size); the lightbox asks for 2048 px of Sentinel-2 / Landsat only', () => {
+    expect(cardUrl(s2)).toBe(displayUrl(s2, cropSpec('sentinel-2-l2a')))
+    expect(cardUrl(s2)).toContain('/1024x1024.jpg?')
+    expect(thumbUrl(s2)).toContain('/112x112.jpg?')
+    expect(hiResUrl(s2)).toContain('/2048x2048.jpg?')
+    expect(hiResUrl(s2)).toContain('&h=5')
+    expect(hiResUrl(viirs)).toBeUndefined()
+  })
+})
+
+describe('owner F: polar night never contradicts itself', () => {
+  it('the dark sentences name the sun and the infrared sweeps, never "in daylight"', () => {
+    const passes = [pass({ norad: 43013, verdict: 'likely', sunElevationDeg: -10 }), pass({ norad: 43013, verdict: 'likely', sunElevationDeg: -12 }), pass({ norad: 25544, verdict: 'overhead' })]
+    const h = headline({ captures: [], notes: [], passes }, meta, -4)
+    expect(h.zeroKind).toBe('dark')
+    expect(h.flewOver).toBe(2)
+    expect(h.infraredSweeps).toBe(2)
+    const text = plain(darkSentences(h))
+    expect(text).toBe('The sun never rose, so no daylight camera could see it. Weather satellites still swept it in infrared, 2 times.')
+    expect(text).not.toContain('in daylight')
   })
 })

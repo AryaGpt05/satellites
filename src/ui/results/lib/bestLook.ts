@@ -1,22 +1,18 @@
 /**
- * Best look (decision #1): the single clearest real picture of the place in a report.
+ * Closest look (owner requests B1 + D1, superseding decision #1's "clearest first"): the photo the summary
+ * leads with, among the window's own photos. The full order (and the clear cover from before the window,
+ * which has no pass) lives in ./photos.ts; this is its first window photo:
  *
- *   detailed  Sentinel-2 / Landsat captures on imaged passes, ranked by clarity (below)
- *   mosaic    else the best daylight weather mosaic (VIIRS / MODIS, 250–375 m)
+ *   detailed  the most zoomed-in CLEAR Sentinel-2 / Landsat capture (smallest gsd, clearest spot, newest);
+ *             if every one is clouded, the least cloudy (honestly labelled "Clouded over")
+ *   mosaic    else the sharpest weather mosaic (VIIRS / MODIS, 250–375 m): well lit, then newest
  *   geo       else the lead geostationary watcher's latest frame (GOES / Himawari)
  *   null      else nothing: the summary says why
  *
- * Clarity rank (also the order of the PHOTOGRAPHED list, decision #2):
- *   1. the pixel at your spot: clear or thin cirrus < unknown < shadow < cloud. Thin cirrus (SCL 10)
- *      often fires falsely over bright cities, so it ranks WITH clear and only loses a tie.
- *   2. scene cloud cover in 10 % buckets (lower first; unknown counts as 50 %)
- *   3. clear before cirrus
- *   4. more recent first
- *
- * Pure: unit-tested in lib.test.ts; the controller calls it to preload the hero during computing.
+ * Pure: unit-tested in lib.test.ts; the controller calls it (via bestLookImageUrl) to preload the hero.
  */
 import type { Capture, GeoWatcher, Pass, Report, SpotCloud } from '@/types'
-import { captureFor, isDetailed } from './captures'
+import { orderPhotos, windowCover } from './photos'
 
 export type BestLook =
   | { kind: 'detailed' | 'mosaic'; pass: Pass; capture: Capture }
@@ -49,29 +45,10 @@ export function byClarity(a: { pass: Pass; capture?: Capture }, b: { pass: Pass;
   return b.pass.tClosest - a.pass.tClosest
 }
 
-/** Sun high enough that a daily true-colour mosaic shows the ground, not twilight. */
-const MOSAIC_MIN_SUN_DEG = 10
-
 export function pickBestLook(report: Pick<Report, 'passes' | 'captures' | 'geo'>): BestLook | null {
-  const imaged: { pass: Pass; capture: Capture }[] = []
-  for (const pass of report.passes) {
-    if (pass.verdict !== 'imaged') continue
-    const capture = captureFor(report, pass)
-    if (capture) imaged.push({ pass, capture })
-  }
-  const detailed = imaged.filter((x) => isDetailed(x.capture)).sort(byClarity)
-  if (detailed[0]) return { kind: 'detailed', ...detailed[0] }
-
-  // Weather mosaics carry no per-pixel cloud: prefer a well-lit day, then the most recent.
-  const mosaics = imaged
-    .filter((x) => !isDetailed(x.capture))
-    .sort(
-      (a, b) =>
-        Number(b.pass.sunElevationDeg >= MOSAIC_MIN_SUN_DEG) - Number(a.pass.sunElevationDeg >= MOSAIC_MIN_SUN_DEG) ||
-        b.pass.tClosest - a.pass.tClosest,
-    )
-  if (mosaics[0]) return { kind: 'mosaic', ...mosaics[0] }
-
+  const { photos } = orderPhotos({ passes: report.passes, captures: report.captures })
+  const cover = windowCover(photos)
+  if (cover?.photo.pass) return { kind: cover.photo.kind, pass: cover.photo.pass, capture: cover.photo.capture }
   const watcher = report.geo.find((g) => !!g.gibs)
   if (watcher) return { kind: 'geo', watcher }
   return null

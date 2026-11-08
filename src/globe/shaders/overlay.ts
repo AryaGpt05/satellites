@@ -55,6 +55,7 @@ export const ribbonFragment = glsl`
   uniform float uGlowPx;      // trailing halo length, CSS px
   uniform float uRate;        // sim s per real s right now (0 = not playing)
   uniform float uLive;        // 0..1 the replay / acquisition is running
+  uniform float uFreshPx;     // the fresh-exposure glow's screen-space reach (shorter when no image exists)
   varying float vAlong;
   varying float vSide;
   varying float vU;
@@ -107,7 +108,7 @@ export const ribbonFragment = glsl`
       // few dozen pixels however close the camera is (the developing image carries the exposure there)
       float realBehind = uRate > 0.001 ? max(lead, 0.0) / uRate : 1e3;
       float leadPx0 = max(lead, 0.0) / max(fwA, 1e-6) / max(uPx, 1.0);
-      float fresh = exp(-realBehind / 0.16) * exp(-leadPx0 / 36.0) * swept;
+      float fresh = exp(-realBehind / 0.16) * exp(-leadPx0 / max(uFreshPx, 1.0)) * swept;
       float fillA = uFill * 2.2 * fresh * mix(0.5, 1.0, daylight) * (1.0 - 0.6 * cover);
       acc = vec4(uColor, min(1.0, fillA));
 
@@ -123,7 +124,8 @@ export const ribbonFragment = glsl`
       float leadPx = lead / max(fwA, 1e-6) / max(uPx, 1.0);
       float core = line(lead, fwA, w * 1.5);
       float halo = leadPx > 0.0 ? exp(-leadPx / max(uGlowPx, 1.0)) : exp(leadPx / 1.5);
-      float frontA = max(core, halo * 0.32) * mix(0.45, 1.0, uLive) * mix(0.75, 1.0, daylight);
+      // Parked (no replay running) the line only marks where the spacecraft is, quietly, without its glow.
+      float frontA = max(core, halo * 0.32 * uLive) * mix(0.14, 1.0, uLive) * mix(0.75, 1.0, daylight);
       vec3 frontCol = mix(uColor, uFrontColor, core);
       acc = over(vec4(frontCol, min(1.0, frontA)), acc);
     }

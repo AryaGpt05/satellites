@@ -78,9 +78,10 @@ export const earthFragment = glsl`
     if (uCtxOn > 0.001) {
       vec3 ctxLow;
       ctx = contextSample(suv, ctxLow);
-      // Detail from the patch, tone from the global map: the patch sharpens the ground without a visible square.
+      // Detail from the patch, tone from the global map (the patch's own low frequencies swapped for the map's), so
+      // it sharpens the ground without a visible square, dark seas included.
       vec3 dayLow = textureLod(uDay, vUv, uDayLod).rgb;
-      ctx.rgb *= clamp((dayLow + 0.004) / (ctxLow + 0.004), vec3(0.35), vec3(2.8));
+      ctx.rgb = max(dayLow + (ctx.rgb - ctxLow) * mix(1.0, 1.6, smoothstep(0.02, 0.0, luma(ctxLow))), vec3(0.0));
     }
     float fresh = 0.0;
     vec4 decal = vec4(0.0);

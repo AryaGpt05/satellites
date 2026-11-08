@@ -1,16 +1,18 @@
 /**
- * 01 / SUMMARY pieces: the headline ("In the last 7 days, 9 satellites photographed Waterloo."), the
- * second line, readouts per verdict (each jumps to its group in the list) and the report's caveats.
+ * 01 / SUMMARY pieces: the headline ("In the last 7 days, 256 satellites flew over Waterloo."), the second
+ * line ("27 photos were made public."), readouts per verdict (each jumps to its group in the list) and the
+ * report's caveats. Owner request F: these are the final words; every place that says it uses these helpers.
  *
- * Numbers are honest and stable (M03 / PRD-04): the headline integer never counts (it says "at least"
- * while weather mosaics are still being verified), readouts count up once per report and roll when
- * the final report changes them, and coming back from a pass shows final values at once.
+ * Numbers are honest and stable (A1): the headline integer is final as soon as the passes exist and never
+ * counts; only the photos line can be partial ("At least 4 photos…") and it settles in place (a 200 ms
+ * crossfade of the changed digits). Readouts count up once per report; coming back from a pass shows final
+ * values at once.
  */
 import type { CSSProperties, ReactNode } from 'react'
 import { Button, Glyph, cx, prefersReducedMotion } from '@/ui/system'
 import { Count } from './Count'
 import { Paragraph } from './Text'
-import { geoSentence, int, placeParts, plain, radarSentence } from './lib/copy'
+import { ARCHIVE_DOWN_LINE, darkSentences, flewOverPhrase, geoSentence, int, photosLine, placeParts, plain, radarSentence, type Sentence } from './lib/copy'
 import { VERDICTS, VERDICT_GLYPH, VERDICT_META, verdictUnit, type Verdict } from './lib/meta'
 import { fmtDayMonth } from './lib/time'
 import type { ResultsModel } from './model'
@@ -40,35 +42,24 @@ function PlaceName({ label }: { label: string }) {
 }
 
 /**
- * The headline sentence. `compact` is the phone sheet header style. `enter` plays the line wipe of
- * the results handoff (first appearance per report only).
+ * The headline sentence: "In the last 7 days, **256 satellites flew over** *Waterloo*." `compact` is the phone
+ * sheet header style. `enter` plays the line wipe of the results handoff (first appearance per report only).
  */
 export function Headline({ model, compact = false, enter = false }: { model: ResultsModel; compact?: boolean; enter?: boolean }) {
   const { head, report } = model
   const label = report.place.label
-  const n = head.photographed
+  const n = head.flewOver
   const cls = cx(compact ? s.mHeadline : s.headline, enter && s.enterWipe)
-  const week = isOldWindow(model) ? 'that week' : 'this week'
-  let body: ReactNode
-  if (model.archiveFailed) body = <span className={s.outageHead}>The image archives didn’t answer.</span>
-  else if (n === 0 && head.zeroKind === 'dark')
-    body = (
+  const body: ReactNode =
+    n === 0 ? (
       <>
-        No camera could see <PlaceName label={label} /> {week}: {head.sunNeverRose ? 'the sun never rose' : 'the sun barely rose'}.
+        No satellite we track flew over <PlaceName label={label} /> {weekWord(model)}.
       </>
-    )
-  else if (n === 0)
-    body = (
+    ) : (
       <>
-        No public satellite caught a clear look at <PlaceName label={label} /> {week}.
-      </>
-    )
-  else
-    body = (
-      <>
-        {windowPhrase(model)}, {report.partial ? 'at least ' : null}
+        {windowPhrase(model)},{' '}
         <strong>
-          <Count value={n} className={s.numDisplay} /> {n === 1 ? 'satellite' : 'satellites'} photographed
+          <span className={s.numDisplay}>{int(n)}</span> {n === 1 ? 'satellite' : 'satellites'} flew over
         </strong>{' '}
         <PlaceName label={label} />.
       </>
@@ -81,19 +72,21 @@ export function Headline({ model, compact = false, enter = false }: { model: Res
   )
 }
 
-/** The second line: who else passed, or plainly why there is no picture. */
+const weekWord = (model: ResultsModel) => (isOldWindow(model) ? 'that week' : 'this week')
+
+/**
+ * The second line: how many photos were made public (owner F). When there are none, one plain sentence says
+ * why (the sun, the archives' lag, the geostationary imager that sees it anyway). An archive outage says so,
+ * with Try again.
+ */
 export function MoreLine({ model, compact = false, enter = false, onRetry }: { model: ResultsModel; compact?: boolean; enter?: boolean; onRetry?: () => void }) {
   const { head, report, best } = model
   const cls = cx(compact ? s.mMore : s.headlineMore, enter && s.enter)
   const style = enterStyle(0.5)
   if (model.archiveFailed) {
-    const [article, name] = placeParts(report.place.label)
     return (
-      <div className={s.outage} style={style}>
-        <p className={cx(cls, s.moreProse)}>
-          Everything that passed over {article}
-          {name} is below, from orbital geometry alone.
-        </p>
+      <div className={cx(s.outage, enter && s.enter)} style={style}>
+        <p className={cx(compact ? s.mMore : s.headlineMore, s.moreProse)}>{ARCHIVE_DOWN_LINE}</p>
         {onRetry ? (
           <Button variant="primary" onClick={onRetry} className={s.retry}>
             Try again
@@ -102,28 +95,37 @@ export function MoreLine({ model, compact = false, enter = false, onRetry }: { m
       </div>
     )
   }
-  if (!head.photographed) {
-    // Dark: radar needs no light. Otherwise the geostationary imager that sees it all week, else why.
-    const sentence =
-      head.zeroKind === 'dark' && head.radar
-        ? radarSentence(head.radar)
-        : best?.kind === 'geo'
-          ? geoSentence(best.watcher, model.windowDays)
-          : undefined
-    if (sentence) return <Paragraph sentences={[sentence]} className={cx(cls, s.moreProse)} />
-    const why = head.zeroReason
-    if (!why || head.zeroKind === 'dark') return null
-    return (
-      <p className={cx(cls, s.moreProse)} style={style}>
-        {why[0].toUpperCase() + why.slice(1)}.
-      </p>
-    )
-  }
-  if (!head.more) return null
-  return (
+  const k = head.images
+  const line = (
     <p className={cls} style={style}>
-      <Count value={head.more} countKey={`${report.windowEnd}:more`} delay={200} className={s.numDisplay} /> more passed within view.
+      {k > 0 ? <PhotosCount k={k} partial={!!report.partial} /> : photosLine(0, { week: weekWord(model) })}
     </p>
+  )
+  if (k > 0) return line
+  // No photo: one plain sentence on why (dark → the sun, and the infrared sweeps; else radar / geostationary / the reason).
+  let why: Sentence[] | undefined
+  if (head.zeroKind === 'dark') why = darkSentences(head)
+  else if (head.radar && head.zeroKind !== 'unpublished') why = [radarSentence(head.radar)]
+  else if (best?.kind === 'geo') why = [geoSentence(best.watcher, model.windowDays)]
+  else if (head.zeroReason && head.zeroKind !== 'archive') why = [[head.zeroReason[0].toUpperCase() + head.zeroReason.slice(1) + '.']]
+  return (
+    <>
+      {line}
+      {why ? <Paragraph sentences={why} className={cx(compact ? s.mWhy : s.why, enter && s.enter)} /> : null}
+    </>
+  )
+}
+
+/** "27 photos were made public." with the number set in the display face; partial → final settles in place. */
+function PhotosCount({ k, partial }: { k: number; partial: boolean }) {
+  return (
+    <>
+      <span className={cx(s.atLeast, !partial && s.atLeastOff)} aria-hidden={!partial}>
+        At least{' '}
+      </span>
+      <Count value={k} className={s.numDisplay} />
+      {k === 1 ? ' photo was made public.' : ' photos were made public.'}
+    </>
   )
 }
 
@@ -207,12 +209,14 @@ export function Notes({ model, enter = false }: { model: ResultsModel; enter?: b
   )
 }
 
-/** Plain-text headline for aria labels and share text. */
+/** Plain-text headline + second line, for aria labels and share text (mirrors Headline / MoreLine). */
 export function headlineText(model: ResultsModel): string {
-  const n = model.head.photographed
-  if (model.archiveFailed) return 'The image archives didn’t answer.'
-  if (!n) return `No public satellite caught a clear look at ${model.report.place.label}.`
-  return plain([`${windowPhrase(model)}, ${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${model.report.place.label}.`])
+  const { head, report } = model
+  const n = head.flewOver
+  const label = report.place.label
+  const first = n === 0 ? `No satellite we track flew over ${label} ${weekWord(model)}.` : `${windowPhrase(model)}, ${flewOverPhrase(n)} ${label}.`
+  const second = model.archiveFailed ? ARCHIVE_DOWN_LINE : photosLine(head.images, { partial: !!report.partial, week: weekWord(model) })
+  return plain([first, ' ', second])
 }
 
 const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹'

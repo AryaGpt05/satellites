@@ -69,11 +69,22 @@ const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 export type ZeroKind = 'archive' | 'dark' | 'unpublished' | 'none'
 
 export interface Headline {
+  /**
+   * Distinct satellites that flew over the place in the window: any pass (imaged, likely, could, overhead).
+   * Geostationary watchers don't fly over, so they are not counted. Final as soon as the passes exist.
+   */
+  flewOver: number
   /** Distinct satellites with at least one real image */
   photographed: number
+  /** Distinct satellites with a detailed image (Sentinel-2 / Landsat) */
+  detailedSats: number
+  /** Distinct satellites with only a daily weather mosaic */
+  mosaicSats: number
+  /** Weather satellites that swept the place without a published picture (they image in infrared at night) */
+  infraredSweeps: number
   /** Distinct other satellites that passed within view (likely / could / overhead) */
   more: number
-  /** Total real images */
+  /** Total real images: the photos made public (what "K photos were made public" counts) */
   images: number
   /** Of which per-scene detailed images (Sentinel-2, Landsat) */
   detailed: number
@@ -104,23 +115,40 @@ export function headline(
   sunMaxDeg?: number,
 ): Headline {
   const imagedSats = new Set<number>()
+  const detailedSats = new Set<number>()
+  const mosaicSats = new Set<number>()
   const viewSats = new Set<number>()
+  const flew = new Set<number>()
   const radarSats = new Map<number, number>()
   let detailed = 0
   let mosaics = 0
+  let infraredSweeps = 0
   const byId = new Map(report.captures.map((c) => [c.id, c]))
   for (const p of report.passes) {
+    const cat = meta(p.norad).category
+    if (cat !== 'weather-geo') flew.add(p.norad)
     if (p.verdict === 'imaged') {
       imagedSats.add(p.norad)
       const c = p.captureId ? byId.get(p.captureId) : undefined
-      if (c && isDailyMosaic(c)) mosaics++
-      else detailed++
+      if (c && isDailyMosaic(c)) {
+        mosaics++
+        mosaicSats.add(p.norad)
+      } else {
+        detailed++
+        detailedSats.add(p.norad)
+      }
     } else viewSats.add(p.norad)
-    if (p.verdict === 'could' && meta(p.norad).category === 'radar') radarSats.set(p.norad, (radarSats.get(p.norad) ?? 0) + 1)
+    if (p.verdict === 'likely' && cat === 'weather-leo') infraredSweeps++
+    if (p.verdict === 'could' && cat === 'radar') radarSats.set(p.norad, (radarSats.get(p.norad) ?? 0) + 1)
   }
   for (const n of imagedSats) viewSats.delete(n)
+  for (const n of detailedSats) mosaicSats.delete(n)
   const h: Headline = {
+    flewOver: flew.size,
     photographed: imagedSats.size,
+    detailedSats: detailedSats.size,
+    mosaicSats: mosaicSats.size,
+    infraredSweeps,
     more: viewSats.size,
     images: detailed + mosaics,
     detailed,
@@ -162,6 +190,27 @@ function zeroReason(
 }
 
 /** "Radar doesn’t need light. Umbra, Capella and 7 other radar satellites passed within range 1,204 times." */
+/** "The sun never rose, so no daylight camera could see it." + "Weather satellites still swept it in infrared, 42 times." */
+export function darkSentences(h: Pick<Headline, 'sunNeverRose' | 'infraredSweeps'>): Sentence[] {
+  const out: Sentence[] = [[h.sunNeverRose ? 'The sun never rose, so no daylight camera could see it.' : 'The sun barely rose, so no daylight camera could see it.']]
+  if (h.infraredSweeps > 0)
+    out.push(['Weather satellites still swept it in infrared, ', num(int(h.infraredSweeps)), h.infraredSweeps === 1 ? ' time.' : ' times.'])
+  return out
+}
+
+/** "31 photos were made public." / "At least 4 photos…" / "1 photo was made public." / "No photos were made public this week." */
+export function photosLine(k: number, opts: { partial?: boolean; week?: 'this week' | 'that week' } = {}): string {
+  if (k <= 0) return `No photos were made public ${opts.week ?? 'this week'}.`
+  const lead = opts.partial ? 'At least ' : ''
+  return k === 1 ? `${lead}1 photo was made public.` : `${lead}${int(k)} photos were made public.`
+}
+
+/** "256 satellites flew over" / "1 satellite flew over" */
+export const flewOverPhrase = (n: number) => `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} flew over`
+
+/** The archive outage, as the second line says it. */
+export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public photos right now.'
+
 export function radarSentence(r: NonNullable<Headline['radar']>): Sentence {
   const others = r.sats - r.names.length
   const names =

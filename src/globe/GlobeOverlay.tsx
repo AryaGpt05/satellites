@@ -43,6 +43,25 @@ const BOX_RISE = 24
 const edgeFor = (stacked: boolean) => (stacked ? 22 : 28)
 /** Departing labels stay mounted this long (the .anchor opacity transition). */
 const DEPART_MS = 240
+/**
+ * A label's visibility must hold this long (ms) before it is applied: a sheet gliding past the satellite, a frame of
+ * re-framing or an anchor flickering at a threshold never blinks a label (owner request A1). Leaving is immediate.
+ */
+const VIS_HOLD_MS = 160
+
+/** Debounced opacity write: returns the opacity in effect. `st` keeps the wanted state and since when. */
+function settleOpacity(d: HTMLElement, st: { op: string; want: string; wantAt: number }, want: string, immediate: boolean): string {
+  const now = performance.now()
+  if (want !== st.want) {
+    st.want = want
+    st.wantAt = now
+  }
+  if (want !== st.op && (immediate || st.op === '' || now - st.wantAt >= VIS_HOLD_MS)) {
+    st.op = want
+    d.style.opacity = want
+  }
+  return st.op
+}
 
 export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
   const place = useApp((st) => st.report?.place ?? st.place)
@@ -219,18 +238,14 @@ function PlaceLabel({
   const acqEl = useRef<HTMLDivElement>(null)
   const acqShown = useRef(false)
   const labelSize = useSizeRef(label)
-  const last = useRef({ x: NaN, y: NaN, op: '', side: '' as '' | 'right' | 'left' | 'below' })
+  const last = useRef({ x: NaN, y: NaN, op: '', want: '', wantAt: 0, side: '' as '' | 'right' | 'left' | 'below' })
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 400)
   useAnchorListener(runtime, () => {
     const a = runtime.anchors.get(id)
     const d = el.current
     if (!d) return
     const st = last.current
-    const op = a?.visible && !leaving ? '1' : '0'
-    if (op !== st.op) {
-      st.op = op
-      d.style.opacity = op
-    }
+    settleOpacity(d, st, a?.visible && !leaving ? '1' : '0', leaving)
     // The capture line: once the capture has happened (or at once when nothing is live), never during the approach.
     const q = runtime.acq
     const showAcq = !!acq && !!passId && q.passId === passId && q.imaged && !q.armed
@@ -311,7 +326,7 @@ function SatLabel({
   const altEl = useRef<HTMLElement>(null)
   const boxSize = useSizeRef(box)
   const [compact, setCompact] = useState(() => typeof window !== 'undefined' && isStacked(window.innerWidth, window.innerHeight))
-  const last = useRef({ x: NaN, y: NaN, op: '', flip: false, below: false, shift: 0, altAt: 0 })
+  const last = useRef({ x: NaN, y: NaN, op: '', want: '', wantAt: 0, flip: false, below: false, shift: 0, altAt: 0 })
   useAnchorListener(runtime, () => {
     const a = runtime.anchors.get(id)
     const d = el.current
@@ -376,16 +391,12 @@ function SatLabel({
         altEl.current.textContent = a.altKm !== null ? Math.round(a.altKm).toLocaleString('en-US') : '—'
       }
     }
-    const op = show ? '1' : '0'
-    if (op !== st.op) {
-      st.op = op
-      d.style.opacity = op
-    }
+    const shown = settleOpacity(d, st, show ? '1' : '0', leaving) === '1'
     // Publish where the selected callout's box sits, so the coordinate label can keep clear of it.
     if (id !== 'hover') {
       const { w, h } = boxSize.current
       const cb = runtime.calloutBox
-      cb.visible = show && !leaving
+      cb.visible = shown && !leaving
       if (cb.visible) {
         cb.x0 = (st.flip ? st.x - BOX_OFFSET - w : st.x + BOX_OFFSET) + st.shift
         cb.x1 = cb.x0 + w

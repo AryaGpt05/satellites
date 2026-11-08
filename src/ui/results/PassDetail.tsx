@@ -1,30 +1,32 @@
 /**
- * Pass detail: the capture (pushbroom reveal) or a plan view when no image exists, a four-up readout
- * strip under it, the sentence, then 01 / GEOMETRY and 02 / REPLAY.
+ * Pass detail.
  *
- * Copy always uses Pass.tClosest, never Capture.datetime (Sentinel-2 archive times are the datatake
- * start, minutes before the satellite was over the place).
+ *   PhotoPassView  a pass with a photo (owner B): the gallery (the same carousel as the summary hero, at the
+ *                  column's width) stays mounted while you swipe; under it the pass's readouts, sentence,
+ *                  01 / GEOMETRY and 02 / REPLAY change in place (a 160 ms fade) as the selection follows.
+ *   PassDetail     a pass with no photo: the plan view, the same readouts and sections.
  *
- * Honest about cloud (decision #2): a scene that is mostly cloud says so above the frame, and a
+ * Copy always uses Pass.tClosest, never Capture.datetime (Sentinel-2 archive times are the datatake start,
+ * minutes before the satellite was over the place).
+ *
+ * Honest about cloud (decision #2): a mostly-cloud scene says so in its caption and its spot line, and a
  * near-total one is dimmed so it is never the brightest thing on screen.
  */
-import { startTransition, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { preloadImage, spotCloud } from '@/imagery'
+import { startTransition, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { spotCloud } from '@/imagery'
 import type { Capture, Pass, SpotCloud } from '@/types'
-import { Glyph, Readout, Rule, ScrambleOnce, cx, fmtLat, fmtLon, fmtNorad, fmtUtc, useIsMobile } from '@/ui/system'
+import { Glyph, Readout, Rule, ScrambleOnce, cx, fmtNorad, fmtUtc } from '@/ui/system'
 import { reportNow } from './Ago'
+import { Gallery } from './Gallery'
 import { PassPlan } from './PassPlan'
-import { PushbroomReveal, type RevealPhase } from './PushbroomReveal'
 import { ReplayControls } from './ReplayControls'
 import { Paragraph } from './Text'
-import { CLOUDED_PCT, isClouded } from './lib/bestLook'
-import { archiveName, cropSpec, downloadUrl, displayUrl, isDailyMosaic, isDetailed, productLabel, scaleBarKm, sensorName, slug, captureFor, type CropSpec } from './lib/captures'
+import { archiveName, cropSpec, downloadUrl, isDailyMosaic, slug, captureFor } from './lib/captures'
 import { compassAbbr, dec1, dec2, int, passSentences } from './lib/copy'
 import type { SatMeta } from './lib/meta'
 import { replayWindow } from './lib/replay'
 import { fmtDuration } from './lib/time'
 import type { ResultsModel } from './model'
-import { useOnce } from './once'
 import r from './results.module.css'
 import s from './PassDetail.module.css'
 
@@ -34,7 +36,46 @@ const st = (ms: number) => ({ '--st': `${ms}ms` }) as CSSProperties
 /** A pass older than this with no scene has no scene (not "archive lag"). */
 const SCENE_LAG_MS = 48 * 3_600_000
 
+/**
+ * A pass with a photo. The gallery persists across quiet selections (swipes); the body below is keyed by the
+ * pass and fades in place when the selection moves (the first one enters with the panel's own swap).
+ */
+export function PhotoPassView({ model, pass, mobile, onReplay }: { model: ResultsModel; pass: Pass; mobile: boolean; onReplay?: (p: Pass) => void }) {
+  const first = useRef(pass.id)
+  return (
+    <div className={s.detail}>
+      <section className={cx(r.section, s.st)} style={st(0)} aria-label="Photos">
+        <Gallery model={model} context="detail" mobile={mobile} selectedId={pass.id} onReplay={onReplay} />
+      </section>
+      <PassBody key={pass.id} model={model} pass={pass} entering={first.current === pass.id} />
+    </div>
+  )
+}
+
+/** A pass with no photo: its plan view, then the same body. */
 export function PassDetail({ model, pass }: { model: ResultsModel; pass: Pass }) {
+  const meta = model.meta(pass.norad)
+  const place = model.report.place
+  const now = reportNow(model.clock)
+  return (
+    <div className={s.detail}>
+      <section className={cx(r.section, s.st)} style={st(0)} aria-label="Plan view">
+        <div data-image-end>
+          <PassPlan pass={pass} meta={meta} lat={place.lat} lon={place.lon} className={s.plan} />
+        </div>
+        <p className={r.footnote}>{noImageNote(pass, meta, model.archiveFailed, now)}</p>
+      </section>
+      <PassBody model={model} pass={pass} entering />
+    </div>
+  )
+}
+
+/**
+ * The pass's words and numbers: the readout strip, the sentence (+ the spot line, the blurb, the links),
+ * 01 / GEOMETRY and 02 / REPLAY. `entering`: the staggered entrance of a freshly opened pass; otherwise (a
+ * quiet selection from the gallery) one 160 ms fade of the block.
+ */
+function PassBody({ model, pass, entering }: { model: ResultsModel; pass: Pass; entering: boolean }) {
   const { report, tz } = model
   const meta = model.meta(pass.norad)
   const capture = captureFor(report, pass)
@@ -42,33 +83,27 @@ export function PassDetail({ model, pass }: { model: ResultsModel; pass: Pass })
   const cloud = useSpotCloud(capture, place)
   const now = reportNow(model.clock)
   const sentences = passSentences({ pass, meta, capture, timeZone: tz, placeLabel: place.label, archiveFailed: model.archiveFailed, now })
-  // PERF-04: the picture and its words commit first; geometry and replay a frame later, interruptibly.
+  // PERF-04: the words commit first; geometry and replay a frame later, interruptibly.
   const [rest, setRest] = useState(false)
   useEffect(() => {
     const id = requestAnimationFrame(() => startTransition(() => setRest(true)))
     return () => cancelAnimationFrame(id)
   }, [])
-
+  const stc = entering ? s.st : undefined
   return (
-    <div className={s.detail}>
-      {/* The picture first: the reveal is the moment this whole product exists for. */}
-      <section className={cx(r.section, s.st)} style={st(0)} aria-label={capture ? 'Capture' : 'Plan view'}>
-        {capture ? (
-          <CaptureView capture={capture} pass={pass} meta={meta} model={model} cloud={cloud} />
-        ) : (
-          <>
-            <div data-image-end>
-              <PassPlan pass={pass} meta={meta} lat={place.lat} lon={place.lon} className={s.plan} />
-            </div>
-            <p className={r.footnote}>{noImageNote(pass, meta, model.archiveFailed, now)}</p>
-          </>
-        )}
+    <div className={cx(s.body, !entering && s.quietIn)}>
+      <section className={cx(r.section, stc)} style={st(0)}>
         <ReadoutStrip pass={pass} meta={meta} capture={capture} cloud={cloud} />
       </section>
 
-      <section className={cx(r.section, s.st, s.prose)} style={st(60)}>
+      <section className={cx(r.section, stc, s.prose)} style={st(60)}>
         <Paragraph sentences={sentences} />
         {capture && !isDailyMosaic(capture) ? <SpotLine state={cloud} /> : null}
+        {capture && isDailyMosaic(capture) ? (
+          <p className={r.footnote}>
+            A daily mosaic: NASA stitches each day’s swaths into one picture at {int(capture.gsdM)} m per pixel. Coarse, but real, and from this pass’s day.
+          </p>
+        ) : null}
         {meta.profile?.blurb ? <p className={r.blurb}>{meta.profile.blurb}</p> : null}
         {capture ? <Links capture={capture} pass={pass} meta={meta} placeLabel={place.label} /> : null}
       </section>
@@ -76,15 +111,15 @@ export function PassDetail({ model, pass }: { model: ResultsModel; pass: Pass })
       {rest ? (
         <>
           <section className={r.section} aria-label="Geometry">
-            <div className={s.st} style={st(120)}>
+            <div className={stc} style={st(120)}>
               <Rule index="01" className={r.rule}>
                 Geometry
               </Rule>
             </div>
-            <Geometry pass={pass} meta={meta} tz={tz} model={model} />
+            <Geometry pass={pass} meta={meta} tz={tz} model={model} entering={entering} />
           </section>
 
-          <section className={cx(r.section, s.st)} style={st(300)} aria-label="Replay">
+          <section className={cx(r.section, stc)} style={st(300)} aria-label="Replay">
             <Rule index="02" className={r.rule}>
               Replay
             </Rule>
@@ -113,122 +148,6 @@ function noImageNote(p: Pass, meta: SatMeta, archiveFailed: boolean, now: number
     default:
       return 'The image for this pass is not available.'
   }
-}
-
-// ── capture ───────────────────────────────────────────────────────────────────────────────
-
-/** 2.5 km close-up (R24): native pixels, enlarged. Landsat's 30 m pixels get a 7.5 km box. */
-function zoomSpec(c: Capture): CropSpec {
-  return { halfSizeKm: c.collection === 'landsat-c2-l2' ? 3.75 : 1.25, px: 512 }
-}
-
-/** Copyright / credit line required by each archive. */
-function credit(c: Capture): string {
-  if (c.collection === 'sentinel-2-l2a') return `Contains modified Copernicus Sentinel data ${new Date(c.datetime || Date.now()).getUTCFullYear()}`
-  if (c.collection === 'landsat-c2-l2') return 'Landsat: USGS / NASA'
-  return 'NASA GIBS / EOSDIS'
-}
-
-function CaptureView({ capture, pass, meta, model, cloud }: { capture: Capture; pass: Pass; meta: SatMeta; model: ResultsModel; cloud: CloudState }) {
-  const mobile = useIsMobile()
-  const base = cropSpec(capture.collection)
-  const src = displayUrl(capture, base)
-  const [zoom, setZoom] = useState<'off' | 'loading' | 'on'>('off')
-  const spec = zoom === 'on' ? zoomSpec(capture) : base
-  const widthKm = spec.halfSizeKm * 2
-  const mosaic = isDailyMosaic(capture)
-  const place = model.report.place
-  const bar = scaleBarKm(widthKm)
-  const [phase, setPhase] = useState<RevealPhase>('loading')
-  // Revealed once per capture this session (a shared picture already shown counts too).
-  const first = useOnce(`capture:${capture.itemId}`)
-  const spot: SpotCloud | undefined = cloud === 'checking' || cloud === 'none' ? capture.spot : cloud
-  const clouded = !mosaic && isClouded({ spot, cloudCoverPct: capture.cloudCoverPct })
-  const pct = capture.cloudCoverPct
-  const canZoom = isDetailed(capture)
-
-  const toggleZoom = () => {
-    if (zoom !== 'off') return setZoom('off')
-    setZoom('loading')
-    preloadImage(displayUrl(capture, zoomSpec(capture)))
-      .then(() => setZoom((z) => (z === 'loading' ? 'on' : z)))
-      .catch(() => setZoom('off'))
-  }
-
-  return (
-    <div className={s.capture}>
-      {clouded ? (
-        <p className={s.clouded}>
-          {pct !== undefined && pct >= CLOUDED_PCT ? `Clouded over · ${int(pct)}% of the scene` : 'Cloud over your spot'}
-          {pct !== undefined && pct >= 90 ? ' · it saw only cloud' : null}
-        </p>
-      ) : null}
-      <figure className={s.figure} data-image-end>
-        <div className={s.stack} data-detail-frame>
-          <PushbroomReveal
-            key={src}
-            src={src}
-            headingDeg={pass.headingDeg}
-            lines={base.px}
-            alt={`${meta.name} image of ${place.label}, ${model.times(pass).day}. The place is at the centre.`}
-            acquiringNote={capture.provider === 'gibs' ? 'NASA GIBS · rendering the mosaic tile' : `${archiveName(capture)} renders on demand · 1–3 s`}
-            startAt="arrival"
-            instant={!first}
-            gateOnVisible={mobile}
-            dim={clouded ? ((pct ?? 0) >= 90 ? 'overcast' : 'cloud') : false}
-            onPhase={setPhase}
-          />
-          {zoom === 'on' ? (
-            <PushbroomReveal
-              src={displayUrl(capture, spec)}
-              headingDeg={pass.headingDeg}
-              lines={spec.px}
-              alt={`${meta.name} close-up of ${place.label}, 2.5 km across.`}
-              instant
-              fade
-              className={s.zoomLayer}
-              dim={clouded ? ((pct ?? 0) >= 90 ? 'overcast' : 'cloud') : false}
-            />
-          ) : null}
-          <CaptureOverlay
-            locked={phase === 'done' || phase === 'revealing'}
-            visible={phase === 'revealing' || phase === 'done'}
-            done={phase === 'done'}
-            satLabel={`${meta.name} · ${sensorName(capture)}`}
-            coords={`${fmtLat(place.lat, 4)} ${fmtLon(place.lon, 4)}`}
-            barKm={bar}
-            widthKm={widthKm}
-            zoom={
-              canZoom && phase === 'done' ? (
-                <button type="button" className={cx(s.chip, s.zoomChip)} onClick={toggleZoom} aria-pressed={zoom === 'on'} disabled={zoom === 'loading'}>
-                  <span className={zoom !== 'on' ? s.zoomOn : undefined}>{int(base.halfSizeKm * 2)} km</span>
-                  <span aria-hidden>↔</span>
-                  <span className={zoom === 'on' ? s.zoomOn : undefined}>{dec1(zoomSpec(capture).halfSizeKm * 2)} km</span>
-                </button>
-              ) : null
-            }
-          />
-        </div>
-        <figcaption className={s.caption}>
-          <span className={s.product}>
-            {zoom === 'on' ? (
-              <>Native {int(capture.gsdM)} m pixels, enlarged 4×</>
-            ) : (
-              <>
-                {productLabel(capture)} · {widthKm >= 100 ? int(widthKm) : dec1(widthKm)} km
-              </>
-            )}
-          </span>
-          <span className={s.credit}>{credit(capture)}</span>
-        </figcaption>
-      </figure>
-      {mosaic ? (
-        <p className={r.footnote}>
-          A daily mosaic: NASA stitches each day’s swaths into one picture at {int(capture.gsdM)} m per pixel. Coarse, but real, and from this pass’s day.
-        </p>
-      ) : null}
-    </div>
-  )
 }
 
 function Links({ capture, pass, meta, placeLabel }: { capture: Capture; pass: Pass; meta: SatMeta; placeLabel: string }) {
@@ -276,54 +195,6 @@ function Links({ capture, pass, meta, placeLabel }: { capture: Capture; pass: Pa
           View source · {archiveName(capture)}
         </a>
       ) : null}
-    </div>
-  )
-}
-
-function CaptureOverlay({
-  locked,
-  visible,
-  done,
-  satLabel,
-  coords,
-  barKm,
-  widthKm,
-  zoom,
-}: {
-  locked: boolean
-  visible: boolean
-  done: boolean
-  satLabel: string
-  coords: string
-  barKm: number
-  widthKm: number
-  zoom?: ReactNode
-}) {
-  return (
-    <div className={cx(s.overlay, visible && s.overlayOn)}>
-      <svg className={cx(s.reticle, locked && s.reticleLocked)} viewBox="-50 -50 100 100" aria-hidden>
-        {/* ink knock-out under the signal strokes keeps the mark legible over any terrain */}
-        <g className={s.knock}>
-          <circle r="15" />
-          <path d="M0 -30V-20M0 20V30M-30 0H-20M20 0H30" />
-        </g>
-        <circle r="15" className={s.ring} />
-        <path d="M0 -30V-20M0 20V30M-30 0H-20M20 0H30" className={s.ticks} />
-        <circle r="1.6" className={s.dot} />
-      </svg>
-      <span className={cx(s.chip, s.tl)}>{satLabel}</span>
-      <span className={cx(s.chip, s.tr)} aria-hidden>
-        <svg width="8" height="10" viewBox="0 0 8 10">
-          <path d="M4 0.5 7.5 9.5 4 7.2 0.5 9.5Z" fill="currentColor" />
-        </svg>
-        N
-      </span>
-      <span className={cx(s.scale, done && s.scaleOn)} style={{ width: `${(barKm / widthKm) * 100}%` }}>
-        <span className={s.bar} />
-        <span className={s.scaleText}>{barKm >= 1 ? int(barKm) : barKm} km</span>
-      </span>
-      <span className={cx(s.chip, s.br)}>{coords}</span>
-      {zoom ? <span className={s.zoomSlot}>{zoom}</span> : null}
     </div>
   )
 }
@@ -402,7 +273,7 @@ function SpotLine({ state }: { state: CloudState }) {
 
 // ── geometry ──────────────────────────────────────────────────────────────────────────────
 
-function Geometry({ pass: p, meta, tz, model }: { pass: Pass; meta: SatMeta; tz: string; model: ResultsModel }) {
+function Geometry({ pass: p, meta, tz, model, entering }: { pass: Pass; meta: SatMeta; tz: string; model: ResultsModel; entering: boolean }) {
   const [utcDate, utcTime] = fmtUtc(p.tClosest).split(' ')
   const prof = meta.profile
   const w = replayWindow(p)
@@ -431,7 +302,7 @@ function Geometry({ pass: p, meta, tz, model }: { pass: Pass; meta: SatMeta; tz:
   return (
     <div className={r.grid}>
       {cells.map((c, i) => (
-        <div key={c.label} className={cx(r.cell, c.wide && r.cellWide, s.st)} style={st(Math.min(300, 120 + i * 20))}>
+        <div key={c.label} className={cx(r.cell, c.wide && r.cellWide, entering && s.st)} style={st(Math.min(300, 120 + i * 20))}>
           <Readout label={c.label} value={c.value} unit={c.unit} />
         </div>
       ))}

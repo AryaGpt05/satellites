@@ -1,0 +1,403 @@
+/* The lightbox (owner B2): a full-viewport ink layer above the globe and the panel, below the share sheet. */
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-overlay) - 1);
+  outline: none;
+  overscroll-behavior: contain;
+  color: var(--bone);
+}
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--ink-0) 94%, transparent);
+}
+.mobile .scrim {
+  background: var(--ink-0);
+}
+.closing {
+  pointer-events: none;
+}
+
+/* ── top bar ──────────────────────────────────────────────────── */
+.top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 calc(var(--bezel-inset) + 16px);
+  pointer-events: none;
+}
+.mobile .top {
+  height: 56px;
+  padding: env(safe-area-inset-top, 0px) 8px 0 16px;
+}
+.top > * {
+  pointer-events: auto;
+}
+.counter {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+}
+.zoomCtl {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  border: 1px solid var(--line-strong);
+}
+.ctl {
+  width: 32px;
+  height: 28px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--bone-2);
+  transition: color var(--d-hover) var(--ease-out);
+}
+.zoomText {
+  min-width: 48px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  border-left: 1px solid var(--line-strong);
+  border-right: 1px solid var(--line-strong);
+  line-height: 28px;
+}
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line-strong);
+  color: var(--bone);
+  background: var(--ink-1);
+  transition:
+    color var(--d-hover) var(--ease-out),
+    border-color var(--d-hover) var(--ease-out);
+}
+.mobile .close {
+  border-color: transparent;
+  background: transparent;
+}
+@media (hover: hover) and (pointer: fine) {
+  .close:hover,
+  .ctl:hover,
+  .arrow:hover:not(:disabled) {
+    color: var(--signal);
+  }
+  .thumb:hover:not(.thumbOn) {
+    border-color: var(--bone-3);
+  }
+}
+
+/* ── the photo ────────────────────────────────────────────────── */
+.box {
+  position: absolute;
+  overflow: hidden;
+  background: var(--ink-0);
+  border: 1px solid var(--line-strong);
+  touch-action: none;
+  cursor: zoom-in;
+  transform-origin: 50% 50%;
+}
+.mobile .box {
+  border-left: 0;
+  border-right: 0;
+}
+.box[data-zoomed='true'] {
+  cursor: grab;
+}
+.box[data-grabbing='true'] {
+  cursor: grabbing;
+}
+.strip {
+  position: absolute;
+  inset: 0;
+}
+.slide {
+  position: absolute;
+  inset: 0;
+}
+.zoom {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 50%;
+}
+.img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+.hiFade {
+  animation: hi-in 200ms linear backwards;
+}
+@keyframes hi-in {
+  from {
+    opacity: 0;
+  }
+}
+.dimCloud {
+  filter: brightness(0.82);
+}
+.dimOvercast {
+  filter: brightness(0.72);
+}
+.fill {
+  position: absolute;
+  inset: 0;
+}
+.fillFrame.fillFrame {
+  height: 100%;
+  aspect-ratio: auto;
+  border: 0;
+}
+.acquiring {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-readout, 12px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 25% 25%;
+}
+.acquiring::after {
+  content: '…';
+}
+.reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.tl {
+  top: 10px;
+  left: 10px;
+}
+.tr {
+  top: 10px;
+  right: 10px;
+}
+.br {
+  bottom: 10px;
+  right: 10px;
+}
+.scale {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+.scaleBar {
+  display: block;
+  height: 5px;
+  border: 1px solid var(--bone);
+  border-top: 0;
+}
+.scaleText {
+  align-self: flex-start;
+  padding: 2px 5px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+}
+
+/* ── arrows (laptops) ─────────────────────────────────────────── */
+.arrow {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  border: 1px solid var(--line-strong);
+  background: var(--ink-1);
+  color: var(--bone);
+  transition: color var(--d-hover) var(--ease-out);
+}
+.arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.prev {
+  left: calc(var(--bezel-inset) + 24px);
+}
+.next {
+  right: calc(var(--bezel-inset) + 24px);
+}
+
+/* ── metadata strip ───────────────────────────────────────────── */
+.meta {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.mobile .meta {
+  right: 16px;
+}
+.metaText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.metaRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.metaMain {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metaMain b {
+  font-weight: 400;
+  color: var(--bone);
+}
+.metaMain b.lead {
+  color: var(--bone);
+}
+.status {
+  flex: none;
+  color: var(--bone-2);
+}
+.warn,
+.metaMain b.warn {
+  color: var(--warn);
+}
+.dim {
+  color: var(--bone-3);
+}
+.credit {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: 0.04em;
+}
+.replay {
+  flex: none;
+}
+
+/* ── filmstrip (laptops) ──────────────────────────────────────── */
+.film {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--bezel-inset) + 8px);
+  display: flex;
+  justify-content: center;
+  padding: 0 calc(var(--bezel-inset) + 24px);
+}
+.thumbs {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px;
+}
+.thumbs::-webkit-scrollbar {
+  display: none;
+}
+.thumb {
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--ink-1);
+  border: 1px solid var(--line);
+  transition: border-color var(--d-hover) var(--ease-out);
+}
+.thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.7;
+}
+.thumbOn {
+  border-color: var(--signal);
+}
+.thumbOn img {
+  opacity: 1;
+}
+.thumbCloud img {
+  filter: brightness(0.75);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hiFade {
+    animation-duration: 160ms;
+  }
+}

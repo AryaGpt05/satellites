@@ -1,17 +1,20 @@
 /**
  * Everything derived from a report that the results UI needs, computed once per report.
  *
- * Split in two memos (PERF-03): the place/window part (time zone, sun samples, day and hour marks:
- * the expensive Intl + astronomy work) is keyed on [lat, lon, windowStart, windowEnd], so the
- * partial → final report swap only regroups passes. Per-pass local time strings are formatted
- * lazily and cached for the life of the report.
+ * Split in two (PERF-03): the place/window part (time zone, sun samples, day and hour marks: the expensive
+ * Intl + astronomy work) is cached on [lat, lon, windowStart, windowEnd], so the partial → final report swap
+ * only regroups passes. Per-pass local time strings are formatted lazily and cached for the life of the report.
+ *
+ * R2R7: the whole model is a pure function of the report (`buildResultsModel`), cached per Report object.
+ * The controller calls `prewarmResultsModel(report)` in idle time before the handoff, so the render that shows
+ * the results only reads the cache.
  */
-import { useMemo } from 'react'
 import { timeZoneAt } from '@/imagery'
 import type { Pass, Report } from '@/types'
 import { pickBestLook, type BestLook } from './lib/bestLook'
 import { archiveDown, headline, type Headline } from './lib/copy'
 import { groupPasses, type PassGroup } from './lib/groups'
+import { orderPhotos, type CoverKind, type Photo } from './lib/photos'
 import type { MetaFn, Verdict } from './lib/meta'
 import { dayBoundaries, hourMarks, indexLanes, sunSamples, type DayMark, type LaneIndex } from './lib/timeline'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr, zoneLabel } from './lib/time'
@@ -61,6 +64,14 @@ export interface ResultsModel {
   /** Local time strings for a pass (cached) */
   times: (p: Pass) => PassTimes
   clock: ReportClock
+  /** Every photo, in the one gallery order (owner B1 + D1): the cover, then newest first */
+  photos: Photo[]
+  /** The cover (photos[0]) and why it leads */
+  cover?: { photo: Photo; why: CoverKind }
+  /** Photos of the window (the clear cover from before it excluded) */
+  windowPhotos: number
+  /** Photo key by pass id (imaged passes with a capture) */
+  photoByPass: Map<string, string>
 }
 
 interface PlaceModel {
@@ -89,50 +100,88 @@ function placeModel(lat: number, lon: number, t0: number, t1: number): PlaceMode
   }
 }
 
+/** Place/window models, anchored once per place/window (the final report never moves them). */
+const placeCache = new Map<string, PlaceModel>()
+const clockCache = new Map<string, ReportClock>()
+const modelCache = new WeakMap<Report, ResultsModel>()
+
+function cachedPlace(lat: number, lon: number, t0: number, t1: number): PlaceModel {
+  const key = `${lat},${lon},${t0},${t1}`
+  let v = placeCache.get(key)
+  if (!v) {
+    v = placeModel(lat, lon, t0, t1)
+    placeCache.set(key, v)
+    if (placeCache.size > 8) placeCache.delete(placeCache.keys().next().value as string)
+  }
+  return v
+}
+
+/** "Now" for relative times is anchored once per place/window, so the final report doesn't move it. */
+function cachedClock(report: Report): ReportClock {
+  const key = `${report.windowEnd}|${report.place.lat}|${report.place.lon}`
+  let v = clockCache.get(key)
+  if (!v) {
+    v = { end: report.windowEnd, at: Math.max(Date.now(), report.generatedAt ?? 0) }
+    clockCache.set(key, v)
+    if (clockCache.size > 8) clockCache.delete(clockCache.keys().next().value as string)
+  }
+  return v
+}
+
+/** The results model of a report (pure, apart from the module caches above). */
+export function buildResultsModel(report: Report, place = cachedPlace(report.place.lat, report.place.lon, report.windowStart, report.windowEnd), clock = cachedClock(report)): ResultsModel {
+  const archiveFailed = archiveDown(report)
+  const cache = new Map<string, PassTimes>()
+  const tz = place.tz
+  const times = (p: Pass): PassTimes => {
+    let v = cache.get(p.id)
+    if (!v) {
+      const day = fmtLocalDay(p.tClosest, tz)
+      const timeS = fmtLocalTime(p.tClosest, tz, true)
+      const time = timeS.slice(0, 5)
+      const zone = zoneAbbr(p.tClosest, tz)
+      v = { day, time, timeS, zone, stamp: `${day} · ${time} ${zone}` }
+      cache.set(p.id, v)
+    }
+    return v
+  }
+  const set = orderPhotos(report)
+  const photoByPass = new Map<string, string>()
+  for (const ph of set.photos) if (ph.pass) photoByPass.set(ph.pass.id, ph.key)
+  return {
+    report,
+    ...place,
+    meta: satMeta,
+    passById: new Map(report.passes.map((p) => [p.id, p])),
+    lanes: indexLanes(report.passes),
+    groups: groupPasses(report, satMeta, { archiveFailed, photos: set.photos }),
+    head: headline(report, satMeta, place.sunMax),
+    best: pickBestLook(report),
+    archiveFailed,
+    times,
+    clock,
+    photos: set.photos,
+    cover: set.cover,
+    windowPhotos: set.windowCount,
+    photoByPass,
+  }
+}
+
+/** Build (and cache) the model of a report ahead of its first render: call it in idle time (R2R7). */
+export function prewarmResultsModel(report: Report): void {
+  if (!modelCache.has(report)) modelCache.set(report, buildResultsModel(report))
+}
+
+/** The model of a report, from the cache when prewarmed (identical object), else built now and cached. */
+export function getResultsModel(report: Report): ResultsModel {
+  let m = modelCache.get(report)
+  if (!m) {
+    m = buildResultsModel(report)
+    modelCache.set(report, m)
+  }
+  return m
+}
+
 export function useResultsModel(report: Report | undefined): ResultsModel | undefined {
-  const lat = report?.place.lat
-  const lon = report?.place.lon
-  const t0 = report?.windowStart
-  const t1 = report?.windowEnd
-  const place = useMemo(
-    () => (lat === undefined || lon === undefined || t0 === undefined || t1 === undefined ? undefined : placeModel(lat, lon, t0, t1)),
-    [lat, lon, t0, t1],
-  )
-  // "Now" for relative times is anchored once per place/window, so the final report doesn't move it.
-  const clock = useMemo<ReportClock | undefined>(
-    () => (t1 === undefined ? undefined : { end: t1, at: Math.max(Date.now(), report?.generatedAt ?? 0) }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t1, lat, lon],
-  )
-  return useMemo(() => {
-    if (!report || !place || !clock) return undefined
-    const archiveFailed = archiveDown(report)
-    const cache = new Map<string, PassTimes>()
-    const tz = place.tz
-    const times = (p: Pass): PassTimes => {
-      let v = cache.get(p.id)
-      if (!v) {
-        const day = fmtLocalDay(p.tClosest, tz)
-        const timeS = fmtLocalTime(p.tClosest, tz, true)
-        const time = timeS.slice(0, 5)
-        const zone = zoneAbbr(p.tClosest, tz)
-        v = { day, time, timeS, zone, stamp: `${day} · ${time} ${zone}` }
-        cache.set(p.id, v)
-      }
-      return v
-    }
-    return {
-      report,
-      ...place,
-      meta: satMeta,
-      passById: new Map(report.passes.map((p) => [p.id, p])),
-      lanes: indexLanes(report.passes),
-      groups: groupPasses(report, satMeta, { archiveFailed }),
-      head: headline(report, satMeta, place.sunMax),
-      best: pickBestLook(report),
-      archiveFailed,
-      times,
-      clock,
-    }
-  }, [report, place, clock])
+  return report ? getResultsModel(report) : undefined
 }

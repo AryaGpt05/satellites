@@ -3,15 +3,15 @@
  *
  *  - First display of `countKey` this session: counts up from 0 (ease-out, 700 ms). Already seen
  *    (back from a pass, a remount): shows the final value at once.
- *  - A later change of `value` (the final report replacing the partial one): the digits roll
- *    (old up and out, new up and in, 240 ms) and flash the signal colour once (600 ms), up or down.
- *  - Reduced motion: no count, no roll; a change fades in over 200 ms.
+ *  - A later change of `value` (the final report replacing the partial one): the digits change IN PLACE
+ *    with a 200 ms crossfade of the number only (owner A1: no roll, no colour flash, never the panel).
+ *  - Reduced motion: no count; a change is the same 200 ms crossfade.
  *
  * Every frame writes textContent through refs; React renders this once. Local adapter for the
  * shell's planned Num `countKey` / `tick` props (S7).
  */
 import { useLayoutEffect, useRef } from 'react'
-import { DUR, EASE, easeOut } from '@/lib/ease'
+import { DUR, easeOut } from '@/lib/ease'
 import { prefersReducedMotion } from '@/ui/system'
 import { int } from './lib/copy'
 import { markSeen, wasSeen } from './once'
@@ -75,26 +75,16 @@ export function Count({ value, countKey, duration = DUR.count, delay = 0, tick =
     shown.current = value
     cur.textContent = f(value)
     if (!tick) return
-    if (reduced) {
-      cur.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'linear' })
-      return
-    }
-    // Roll: the old digits leave upward, the new ones arrive from below.
+    // Crossfade: the old digits fade out where they stood while the new ones fade in (compositor only).
     old.textContent = f(prev)
-    root.classList.add(s.rolling)
-    const dir = value > prev ? 1 : -1
-    const opts = { duration: DUR.sm, easing: EASE.out, fill: 'both' as const }
-    old.animate([{ transform: 'translateY(0)' }, { transform: `translateY(${-100 * dir}%)` }], opts)
-    const a = cur.animate([{ transform: `translateY(${100 * dir}%)` }, { transform: 'translateY(0)' }], opts)
+    const opts = { duration: 200, easing: 'linear', fill: 'both' as const }
+    old.animate([{ opacity: 1 }, { opacity: 0 }], opts)
+    const a = cur.animate([{ opacity: 0 }, { opacity: 1 }], opts)
     a.onfinish = () => {
-      root.classList.remove(s.rolling)
       old.textContent = ''
       a.cancel()
     }
-    // One signal flash back to the resting colour.
-    const rest = getComputedStyle(root).color
-    const signal = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim() || '#ff6a1a'
-    root.animate([{ color: signal }, { color: rest }], { duration: 600, easing: 'linear' })
+    void reduced
   }, [value, countKey, duration, delay, tick])
 
   useLayoutEffect(() => () => cancelAnimationFrame(raf.current), [])

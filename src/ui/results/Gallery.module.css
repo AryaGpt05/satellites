@@ -1,0 +1,560 @@
+/*
+ * The gallery (owner B): one carousel for the summary hero and the pass view. Flat ink, hairlines, radius 0.
+ * Scrolling stays on the compositor: native scroll-snap, transform-only chrome.
+ */
+.gallery {
+  --slide-w: 100%;
+  --slide-gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.mobile {
+  /* The next photo peeks ~12 % at the right edge: swiping is discoverable. */
+  --slide-w: 88%;
+  --slide-gap: 8px;
+}
+
+/* ── bar: filter · counter · ‹ › ─────────────────────────────── */
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+.barLabel,
+.counter {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.counter {
+  color: var(--bone-2);
+  margin-right: 6px;
+}
+.filter {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  min-width: 0;
+}
+.seg {
+  height: 26px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+  white-space: nowrap;
+  transition: color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+}
+.seg + .seg {
+  border-left: 1px solid var(--line-strong);
+}
+.segOn {
+  color: var(--bone);
+  background: var(--ink-2);
+}
+.seg:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+@media (hover: hover) and (pointer: fine) {
+  .seg:hover:not(.segOn):not(:disabled) {
+    color: var(--bone-2);
+  }
+  .navBtn:hover:not(:disabled),
+  .expand:hover {
+    color: var(--signal);
+  }
+}
+@media (pointer: coarse) {
+  .seg {
+    height: 40px;
+    padding: 0 12px;
+  }
+}
+.nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.navBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border: 1px solid var(--line);
+  color: var(--bone-2);
+  transition:
+    color var(--d-hover) var(--ease-out),
+    border-color var(--d-hover) var(--ease-out);
+}
+.navBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.navBtn:active:not(:disabled) {
+  background: var(--ink-2);
+}
+
+/* ── the track ────────────────────────────────────────────────── */
+.viewport {
+  position: relative;
+  min-width: 0;
+}
+.track {
+  display: flex;
+  gap: var(--slide-gap);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+.track::-webkit-scrollbar {
+  display: none;
+}
+.mobile .track::after {
+  /* the last photo can come to rest at the left edge like the others */
+  content: '';
+  flex: 0 0 calc(100% - var(--slide-w) - var(--slide-gap));
+}
+.slide {
+  flex: 0 0 var(--slide-w);
+  min-width: 0;
+  margin: 0;
+  scroll-snap-align: start;
+}
+.mobile .slide {
+  scroll-snap-stop: always;
+}
+.figure {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The rail: a slim progress line under the photos (position, not a scrollbar). */
+.rail {
+  position: relative;
+  display: block;
+  height: 2px;
+  margin-top: 10px;
+  background: var(--line);
+  overflow: hidden;
+}
+.railThumb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: var(--bone-2);
+}
+
+/* ── one frame ────────────────────────────────────────────────── */
+.frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--ink-0);
+  border: 1px solid var(--line-strong);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+.square {
+  aspect-ratio: 1 / 1;
+}
+/* The summary hero: a wider crop of the same square (the place stays centred). */
+.heroFrame {
+  aspect-ratio: var(--hero-aspect, 16 / 9);
+}
+.mobile .heroFrame {
+  aspect-ratio: 4 / 3;
+}
+@media (min-width: 761px) and (orientation: landscape) and (min-height: 1001px), (min-width: 1101px) and (min-height: 1001px) {
+  .heroFrame {
+    --hero-aspect: 3 / 2;
+  }
+}
+.zoomable {
+  cursor: zoom-in;
+}
+.img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.imgFade {
+  animation: img-in 200ms linear backwards;
+}
+@keyframes img-in {
+  from {
+    opacity: 0;
+  }
+}
+/* A scene that is mostly cloud must never be the brightest thing on screen (decision #2). */
+.dimCloud {
+  filter: brightness(0.82);
+}
+.dimOvercast {
+  filter: brightness(0.72);
+}
+/* The pushbroom reveal fills the frame (the frame owns the border and the aspect). */
+.fill {
+  position: absolute;
+  inset: 0;
+}
+.fillFrame.fillFrame {
+  height: 100%;
+  aspect-ratio: auto;
+  border: 0;
+}
+
+.waiting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 25% 25%;
+  background-position: -1px -1px;
+}
+.waitMain {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-readout, 12px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+}
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 11px;
+  margin-left: 6px;
+  background: var(--bone-2);
+  animation: blink 1s steps(1, end) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.retry {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+}
+
+.centre {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.reticleSvg {
+  width: 100%;
+  height: 100%;
+}
+
+/* expand (owner B2): corner arrows, top right; a 44 px target on touch */
+.expand {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  width: 40px;
+  height: 40px;
+  padding: 6px;
+  color: var(--bone);
+  transition: color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+}
+.expand svg {
+  box-sizing: content-box;
+  padding: 5px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+}
+@media (pointer: coarse) {
+  .expand {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* pass-view overlays: sensor (top left), scale (bottom left), north (bottom right) */
+.chips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+}
+.tl {
+  top: 8px;
+  left: 8px;
+}
+.br {
+  bottom: 8px;
+  right: 8px;
+}
+.scale {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.scaleBar {
+  display: block;
+  height: 5px;
+  border: 1px solid var(--bone);
+  border-top: 0;
+}
+.scaleText {
+  align-self: flex-start;
+  padding: 2px 5px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+}
+
+/* echo of the scan at the capture moment (a photo already shown, owner C4) */
+.echo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.echo[data-on='true'] {
+  opacity: 1;
+}
+.echoLine {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--signal);
+}
+.echoLine::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 10px;
+  background: linear-gradient(to left, rgb(255 106 26 / 0.32), rgb(255 106 26 / 0));
+}
+.echoLine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0.5px;
+  width: 1px;
+  background: rgb(236 232 224 / 0.6);
+}
+
+/* ── captions ─────────────────────────────────────────────────── */
+.cap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+  min-width: 0;
+}
+.capRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.capMain {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.capMain b,
+.mLine b {
+  font-weight: 400;
+  color: var(--bone-2);
+}
+.capMain b.lead,
+.mLine b.lead {
+  color: var(--bone);
+}
+.ago,
+.status {
+  flex: none;
+  color: var(--bone-2);
+}
+.warn,
+b.warn,
+.capMain b.warn,
+.mLine b.warn {
+  color: var(--warn);
+}
+.credit {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: 0.04em;
+}
+.dim {
+  color: var(--bone-3);
+}
+.mCap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  min-width: 0;
+}
+.mLines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mLine {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mReplay {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding-left: 12px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--signal);
+  border-left: 1px solid var(--line);
+  -webkit-tap-highlight-color: transparent;
+}
+.mReplay:active {
+  background: var(--ink-2);
+}
+.coverNote {
+  margin: 6px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.4;
+  color: var(--bone-2);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ── pass view: the square never runs under the footer (--detail-chrome is measured by the view) ── */
+.detail .figure {
+  width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
+  margin-inline: auto;
+}
+.detail.mobile .figure {
+  width: 100%;
+}
+@media (min-width: 600px) and (max-width: 1100px) and (orientation: portrait) {
+  .detail .figure,
+  .detail.mobile .figure {
+    width: min(100%, 520px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+  .imgFade {
+    animation-duration: 160ms;
+  }
+}

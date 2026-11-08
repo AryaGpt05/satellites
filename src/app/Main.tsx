@@ -7,7 +7,9 @@
  *             index.html in production), so it downloads while the boot log runs
  *   results   the results panel, pass detail and share sheet: prefetched at landing idle, on the first focus
  *             of the search field, and at once for deep links / share links
- *   about     prefetched at landing idle
+ *   about     prefetched at landing idle, and after a deep or share link's results entrance; opening About waits
+ *             for its chunk before setting aboutOpen (the globe pauses on aboutOpen), so the globe never freezes
+ *             on an empty frame while the chunk downloads (R2K4)
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { useApp, type Phase } from '@/state/store'
@@ -80,6 +82,26 @@ function prefetchChunks() {
   void loadAbout()
 }
 
+/**
+ * R2K4: About opens once its chunk is in. The globe pauses its frame loop on aboutOpen, so setting it before the
+ * page can mount would freeze the globe on a frame with no About over it for as long as the chunk takes (a cold
+ * chunk on 4G: ~1 s). Repeat calls while the load is pending are ignored; a failed load leaves About closed.
+ */
+let aboutPending = false
+function openAbout() {
+  if (aboutPending || useApp.getState().aboutOpen) return
+  aboutPending = true
+  void loadAbout().then(
+    () => {
+      aboutPending = false
+      useApp.getState().setAboutOpen(true)
+    },
+    () => {
+      aboutPending = false
+    },
+  )
+}
+
 /** Landing entrance delay after `prev` (K5): it starts after the boot curtain, quickly after a results exit. */
 function enterDelayAfter(prev: Phase): number {
   if (prefersReducedMotion()) return 0
@@ -119,11 +141,11 @@ export default function Main() {
     prevPhase.current = phase
   }
 
-  // Warm the results and About chunks once the landing has finished its entrance, and on the first focus
-  // of a text field (someone about to search).
+  // Warm the results and About chunks once the landing has finished its entrance, once a deep or share link's
+  // results have landed (those never idle on the landing), and on the first focus of a text field (someone
+  // about to search). prefetchChunks is idempotent.
   useEffect(() => {
-    if (phase !== 'idle') return
-    afterLandingEntrance(prefetchChunks)
+    if (phase === 'idle' || phase === 'results') afterLandingEntrance(prefetchChunks)
   }, [phase])
   useEffect(() => {
     const onFocus = (e: FocusEvent) => {
@@ -154,19 +176,27 @@ export default function Main() {
         if (st.selectedPassId) return st.selectPass(undefined)
         if (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error') resetToLanding()
       } else if (!typing && e.key === '?') {
-        useApp.getState().setAboutOpen(true)
+        openAbout()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const openAbout = () => {
-    void loadAbout()
-    useApp.getState().setAboutOpen(true)
-  }
   const closeAbout = () => useApp.getState().setAboutOpen(false)
   const panel = phase === 'computing' || phase === 'results'
+  // R2K3: the results panel mounts one frame after the phase change, so the submit task carries only the
+  // landing's exit and the camera's new intent; the panel's mount commit runs in the next frame's task (one
+  // frame under the lifting boot curtain on a deep link).
+  const [panelReady, setPanelReady] = useState(false)
+  useEffect(() => {
+    if (!panel) {
+      setPanelReady(false)
+      return
+    }
+    const raf = requestAnimationFrame(() => setPanelReady(true))
+    return () => cancelAnimationFrame(raf)
+  }, [panel])
   const GlobeCanvas: ComponentType<{ className?: string }> | undefined = useChunk(loadGlobe, true)?.GlobeCanvas
   const ResultsView = useChunk(loadResults, panel)?.ResultsView
   const AboutPage = useChunk(loadAbout, about)?.AboutPage
@@ -177,7 +207,7 @@ export default function Main() {
       <div className={s.layer}>
         {(phase === 'idle' || phase === 'locating') && <Landing onSubmit={(place) => void runReport(place)} enterDelay={enterDelay.current} />}
         {/* One persistent panel from computing through results (decision #10): the same instance survives the phase change. */}
-        {panel && ResultsView ? <ResultsView key="results" onBack={resetToLanding} onRetry={retryReport} onSearch={(p) => void runReport(p)} /> : null}
+        {panel && panelReady && ResultsView ? <ResultsView key="results" onBack={resetToLanding} onRetry={retryReport} onSearch={(p) => void runReport(p)} /> : null}
         {phase === 'error' && <ErrorNotice message={error} onRetry={retryReport} onBack={resetToLanding} />}
       </div>
       <Hud onAbout={openAbout} />

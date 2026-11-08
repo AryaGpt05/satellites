@@ -53,7 +53,7 @@ export interface RibbonLook {
 export function createRibbonMaterial(
   shared: { uPx: U<number>; uSunDir: U<Vector3>; uCloudMap: U<Texture | null>; uCloudOffset: U<number> },
   look: RibbonLook,
-  sweep: { speedKmS: number; frontGlowPx?: number },
+  sweep: { speedKmS: number; frontGlowPx?: number; freshPx?: number },
 ): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader: ribbonVertex,
@@ -79,6 +79,7 @@ export function createRibbonMaterial(
       uGlowPx: { value: sweep.frontGlowPx ?? 9 },
       uRate: { value: 0 },
       uLive: { value: 0 },
+      uFreshPx: { value: sweep.freshPx ?? 36 },
       uFrontColor: { value: look.color.clone().multiplyScalar(1.7) },
     },
   })

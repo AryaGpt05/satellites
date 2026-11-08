@@ -87,6 +87,8 @@ export function useAnimatedHeight(outer: RefObject<HTMLElement | null>, inner: R
 // ── phone sheet geometry ─────────────────────────────────────────────────────────────────
 
 export interface SheetGeometry {
+  /** The shown content these numbers were measured from ('computing', 'overview', 'photo', 'pass:…') (R2R8) */
+  key: string
   /** grip + header (+ border): where the body starts, at the header's natural (target) height */
   top: number
   /** body padding above the content */
@@ -107,7 +109,20 @@ const BODY_PAD_TOP = 20
  * Measures the mobile sheet: the body's offset (grip + header), the footer, and where the content's
  * marked blocks end. Re-measures on any size change of the header, body content or footer.
  */
-export function useSheetGeometry(bodyRef: RefObject<HTMLDivElement | null>, innerRef: RefObject<HTMLDivElement | null>, enabled: boolean, deps: unknown[]): SheetGeometry | null {
+/** The last computing snap measured (px), for a computing view whose readout isn't measured yet (R2R8). */
+let computingSnapPx: number | undefined
+export const rememberComputingSnap = (px: number) => void (computingSnapPx = px)
+export const lastComputingSnapPx = () => computingSnapPx
+
+export function useSheetGeometry(
+  bodyRef: RefObject<HTMLDivElement | null>,
+  innerRef: RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  key: string,
+  deps: unknown[],
+): SheetGeometry | null {
+  const keyRef = useRef(key)
+  keyRef.current = key
   const [geo, setGeo] = useState<SheetGeometry | null>(null)
   const measured = useRef(false)
   const measure = useCallback(() => {
@@ -128,6 +143,7 @@ export function useSheetGeometry(bodyRef: RefObject<HTMLDivElement | null>, inne
       return el ? el.getBoundingClientRect().bottom - innerTop : undefined
     }
     const next: SheetGeometry = {
+      key: keyRef.current,
       top,
       pad,
       foot: foot?.offsetHeight ?? 0,
@@ -137,6 +153,7 @@ export function useSheetGeometry(bodyRef: RefObject<HTMLDivElement | null>, inne
     }
     setGeo((g) =>
       g &&
+      g.key === next.key &&
       Math.abs(g.top - next.top) < 2 &&
       g.pad === next.pad &&
       Math.abs(g.foot - next.foot) < 2 &&
@@ -189,9 +206,20 @@ export function useInsets(sectionRef: RefObject<HTMLElement | null>, timelineRef
     if (!section || mobile) return
     const set = useApp.getState().setUiInsets
     const publish = () => {
-      const r = section.getBoundingClientRect()
+      // R2R9: the panel's LAYOUT position (offsetLeft ignores the dock-in translate), so the computing flight
+      // is aimed at the results layout from its first frame.
+      const right = Math.max(0, window.innerWidth - section.offsetLeft + 24)
       const tl = timelineRef.current?.getBoundingClientRect()
-      set({ right: Math.max(0, window.innerWidth - r.left + 24), bottom: tl && tl.height ? Math.max(0, window.innerHeight - tl.top) : 0, left: 0 })
+      let bottom: number
+      if (tl && tl.height) bottom = Math.max(0, window.innerHeight - tl.top)
+      else {
+        // Computing (no strip yet): the strip's CSS geometry. It covers the bottom band both under the panel
+        // and beside it (short desktops), so this is right in both layouts.
+        const cs = getComputedStyle(section)
+        const px = (v: string) => parseFloat(cs.getPropertyValue(v)) || 0
+        bottom = px('--bezel-inset') + px('--timeline-bottom') + px('--timeline-h')
+      }
+      set({ right, bottom, left: 0 })
     }
     // First publish from the observer's first callback (after layout, same frame): no forced layout.
     if (typeof ResizeObserver === 'undefined') publish()
@@ -285,13 +313,25 @@ function exitClone(node: HTMLElement | null | undefined, keyframes: Keyframe[], 
       /* tainted or lost context: the clone shows the frame without pixels */
     }
   })
-  // Keep scrolled content where it was.
+  // Keep scrolled content where it was (R2R9): read the offsets BEFORE inserting (no layout of the clone
+  // in between), then write only the non-zero ones.
   const a = node.querySelectorAll<HTMLElement>('*')
-  const b = clone.querySelectorAll<HTMLElement>('*')
-  parent.insertBefore(clone, node.nextSibling)
+  const scrolled: [number, number, number][] = []
   a.forEach((el, i) => {
-    if (el.scrollTop && b[i]) b[i].scrollTop = el.scrollTop
+    const t = el.scrollTop
+    const l = el.scrollLeft
+    if (t || l) scrolled.push([i, t, l])
   })
+  parent.insertBefore(clone, node.nextSibling)
+  if (scrolled.length) {
+    const b = clone.querySelectorAll<HTMLElement>('*')
+    for (const [i, t, l] of scrolled) {
+      const el = b[i]
+      if (!el) continue
+      if (t) el.scrollTop = t
+      if (l) el.scrollLeft = l
+    }
+  }
   const anim = clone.animate(keyframes, { duration, easing: EASE.inOut, fill: 'forwards' })
   const remove = () => clone.remove()
   anim.onfinish = remove

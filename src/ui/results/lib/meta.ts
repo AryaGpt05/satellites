@@ -48,7 +48,7 @@ export const VERDICT_META: Record<Verdict, VerdictWords> = {
     title: 'Likely photographed',
     short: 'Likely',
     unit: 'passes',
-    definition: 'A fixed camera’s swath covered this place in daylight. No picture is published.',
+    definition: 'A fixed camera’s swath covered this place. No picture of it is published.',
     verb: 'swept over',
   },
   could: {
@@ -90,7 +90,7 @@ export const VERDICT_TAG: Record<Verdict, string> = {
 }
 
 /** Mark names: the system glyphs plus 'mosaic' (drawn locally by ../Mark.tsx until the shell adds it). */
-export type MarkName = GlyphName | 'mosaic' | 'chevron-left' | 'chevron-right'
+export type MarkName = GlyphName | 'mosaic' | 'chevron-left' | 'chevron-right' | 'expand'
 
 /** Mark for a whole verdict group (summary readouts, lane labels). */
 export const VERDICT_GLYPH: Record<Verdict, GlyphName> = {

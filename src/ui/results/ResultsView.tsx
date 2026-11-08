@@ -5,15 +5,17 @@
  *   desktop  right-docked panel (Sheet). While computing it is as tall as its readout; when results
  *            land it grows to the full dock above the timeline strip (beside it on short screens).
  *   phones   bottom sheet with content-measured snaps: computing = the readout; overview = header +
- *            best-look hero (the peek); a pass = flight (header + footer), then image.
+ *            the gallery's first card (the peek); a pass = flight (header + footer), then image.
  *
  * Contents swap in two beats (old out 160 ms, new in 240 ms), never as a page cut. Overview:
- * 01 / SUMMARY (headline, best look, readouts) · 02 / PASSES · 03 / WATCHED CONTINUOUSLY, and the
- * 04 / TIMELINE strip. A pass: its capture (pushbroom reveal), readouts, 01 / GEOMETRY, 02 / REPLAY,
- * with Share / Replay in the footer.
+ * 01 / SUMMARY (headline, the photo gallery, readouts) · 02 / PASSES · 03 / WATCHED CONTINUOUSLY, and the
+ * 04 / TIMELINE strip. A pass with a photo ('photo'): the gallery (persistent while you swipe, owner B), then
+ * its readouts, 01 / GEOMETRY, 02 / REPLAY, with Share / Replay in the footer; a quiet selection from the
+ * gallery changes the words in place, never the panel. A pass with no photo: its plan view.
  *
- * Keys: ←/→ step through passes (same verdict as the selection), Space plays/pauses the replay.
- * Esc is NOT handled here (except inside the inline search field): the app shell owns it.
+ * Keys: ←/→ walk the photos (the gallery) or, on a pass without one, step through passes of its verdict;
+ * F opens the photo large (the lightbox); Space plays/pauses the replay. Esc is NOT handled here (except
+ * inside the inline search field and the lightbox): the app shell owns it.
  */
 import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { timeZoneAt } from '@/imagery'
@@ -22,22 +24,26 @@ import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
 import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion } from '@/ui/system'
-import { BestLook } from './BestLook'
+import { GeoLook } from './BestLook'
 import { ComputingBody } from './ComputingBody'
+import { Gallery, galleryCtl } from './Gallery'
+import { Lightbox } from './Lightbox'
 import { GeoWatchers } from './GeoWatchers'
 import { DetailHeader, OverviewHeader, rememberPlace } from './Headers'
-import { PassDetail } from './PassDetail'
+import { PassDetail, PhotoPassView } from './PassDetail'
 import { PassList } from './PassList'
 import { Headline, MoreLine, Notes, Verdicts, enterStyle } from './Summary'
 import { Timeline } from './Timeline'
-import { clearPass, focusPass, startReplay, togglePlay } from './actions'
+import { clearPass, focusPass, quiet, startReplay, togglePlay } from './actions'
+import { useGallery } from './gallery'
 import { isClouded } from './lib/bestLook'
 import { captureFor } from './lib/captures'
 import { replayWindow } from './lib/replay'
 import { stepPass } from './lib/timeline'
 import { useResultsModel, type ResultsModel } from './model'
+import type { CameraFlight } from '@/state/store'
 import { useOnce } from './once'
-import { exitTimeline, lastShellUnmount, publishSheetInset, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
+import { exitTimeline, lastShellUnmount, publishSheetInset, rememberComputingSnap, lastComputingSnapPx, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
 import s from './results.module.css'
 
 export interface ResultsViewProps {
@@ -99,30 +105,36 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
 
   // ── what is shown ──────────────────────────────────────────────────────────────────────
   const selectedValid = !!selectedId && !!model?.passById.has(selectedId)
-  const viewKey = computing ? 'computing' : selectedValid ? `pass:${selectedId}` : 'overview'
+  // A pass with a photo is the 'photo' view: the gallery persists while the selection moves (owner B).
+  const selectedIsPhoto = selectedValid && !!model?.photoByPass.has(selectedId!)
+  const viewKey = computing ? 'computing' : selectedValid ? (selectedIsPhoto ? 'photo' : `pass:${selectedId}`) : 'overview'
   // Remember where the list was before leaving it.
   useEffect(() => {
-    if (viewKey.startsWith('pass:') && bodyRef.current && !bodyRef.current.querySelector('[data-detail-root]')) listScroll.current = bodyRef.current.scrollTop
+    if (viewKey !== 'overview' && viewKey !== 'computing' && bodyRef.current && !bodyRef.current.querySelector('[data-detail-root]')) listScroll.current = bodyRef.current.scrollTop
   }, [viewKey])
   const staged = useStagedKey(viewKey)
   const shownModel = lastModel.current
-  const shownPass = staged.shown.startsWith('pass:') ? shownModel?.passById.get(staged.shown.slice(5)) : undefined
-  const shownKey = shownPass ? staged.shown : staged.shown === 'computing' && !computing ? 'computing' : staged.shown.startsWith('pass:') ? 'overview' : staged.shown
-  const headerKeyOf = (k: string) => (k.startsWith('pass:') ? k : 'overview')
+  const livePhotoPass = selectedIsPhoto && model ? model.passById.get(selectedId!) : undefined
+  const lastPhotoPass = useRef<Pass | undefined>(undefined)
+  if (livePhotoPass) lastPhotoPass.current = livePhotoPass
+  const shownPass =
+    staged.shown === 'photo' ? (livePhotoPass ?? lastPhotoPass.current) : staged.shown.startsWith('pass:') ? shownModel?.passById.get(staged.shown.slice(5)) : undefined
+  const isDetailKey = (k: string) => k === 'photo' || k.startsWith('pass:')
+  const shownKey = shownPass ? staged.shown : staged.shown === 'computing' && !computing ? 'computing' : isDetailKey(staged.shown) ? 'overview' : staged.shown
+  const headerKeyOf = (k: string) => (isDetailKey(k) ? k : 'overview')
   const headerChanging = headerKeyOf(viewKey) !== headerKeyOf(staged.shown)
   const headerEntering = staged.stage === 'in' && headerKeyOf(staged.prev) !== headerKeyOf(staged.shown)
   const prevPass = staged.prev.startsWith('pass:') ? shownModel?.passById.get(staged.prev.slice(5)) : undefined
   const dir = !shownPass ? -1 : prevPass && prevPass.tClosest > shownPass.tClosest ? -1 : 1
   const handoff = staged.prev === 'computing' && shownKey === 'overview'
 
-  // Scroll: a pass opens at the top; the list comes back where it was. While the new content is
-  // still at opacity ~0 (first frame of its entrance), so the jump is never seen.
+  // Scroll: a pass opens at the top (while its content is still at opacity ~0, so the jump is never seen).
+  // The overview's list position comes back once its sections have mounted (below).
   useLayoutEffect(() => {
     const body = bodyRef.current
-    if (!body) return
-    const target = shownKey === 'overview' ? listScroll.current : 0
+    if (!body || shownKey === 'overview') return
     const id = requestAnimationFrame(() => {
-      body.scrollTop = target
+      body.scrollTop = 0
     })
     return () => cancelAnimationFrame(id)
   }, [shownKey])
@@ -132,16 +144,42 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     if (handoff) useApp.getState().holdMotion(900)
   }, [handoff])
 
-  // Staging (PERF-03): the list, the geostationary frames and the timeline marks mount one frame
-  // after the summary and the hero, in a transition. Once per report.
-  const reportKey = model ? `${model.report.windowEnd}:${model.report.place.lat},${model.report.place.lon}` : ''
+  // Staging (PERF-03, R2R7): the list, the geostationary frames and the compact timeline mount one frame
+  // after the summary, in a transition, on EVERY overview entrance (back from a pass costs one short task).
+  // Keyed on the report SHOWN (R2R8): the outgoing overview keeps its sections through a New search swap-out.
+  const keyOf = (r: { windowEnd: number; place: { lat: number; lon: number } }) => `${r.windowEnd}:${r.place.lat},${r.place.lon}`
+  const reportKey = model ? keyOf(model.report) : ''
+  const shownReportKey = lastModel.current ? keyOf(lastModel.current.report) : ''
+  const entries = useRef({ key: '', n: 0 })
+  if (entries.current.key !== shownKey) {
+    if (shownKey === 'overview') entries.current.n++
+    entries.current.key = shownKey
+  }
+  const fullKey = shownReportKey ? `${shownReportKey}:${entries.current.n}` : ''
   const [fullFor, setFullFor] = useState('')
-  const full = !!reportKey && fullFor === reportKey
+  const full = !!fullKey && fullFor === fullKey
   useEffect(() => {
-    if (!reportKey || fullFor === reportKey) return
-    const id = requestAnimationFrame(() => startTransition(() => setFullFor(reportKey)))
+    if (!fullKey || fullFor === fullKey) return
+    const id = requestAnimationFrame(() => startTransition(() => setFullFor(fullKey)))
     return () => cancelAnimationFrame(id)
-  }, [reportKey, fullFor])
+  }, [fullKey, fullFor])
+  // Back to the overview: the list comes back where the user left it, once its sections are there.
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!full || shownKey !== 'overview' || !body) return
+    if (Math.abs(body.scrollTop - listScroll.current) > 1) body.scrollTop = listScroll.current
+  }, [full, shownKey])
+  // The desktop timeline strip mounts once per report (it persists across a pass and back).
+  const [dockFor, setDockFor] = useState('')
+  useEffect(() => {
+    if (full && reportKey && dockFor !== reportKey) setDockFor(reportKey)
+  }, [full, reportKey, dockFor])
+  const dockFull = !!reportKey && dockFor === reportKey
+
+  // A new report (a new place) starts its gallery on the cover again.
+  useEffect(() => {
+    if (reportKey) useGallery.getState().reset(reportKey)
+  }, [reportKey])
 
   useEffect(() => {
     if (model) rememberPlace(model.report.place)
@@ -163,19 +201,29 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   }, [selectedId, model])
 
   // ── phone sheet: content-measured snaps and the two-beat pass choreography ─────────────
-  const geo = useSheetGeometry(bodyRef, innerRef, mobile, [shownKey, full])
+  const geo = useSheetGeometry(bodyRef, innerRef, mobile, shownKey, [shownKey, full])
+  if (geo && geo.key === 'computing') rememberComputingSnap(Math.min(window.innerHeight * 0.8, geo.top + geo.pad + geo.content + 18))
   const vh = typeof window === 'undefined' ? 800 : window.innerHeight
   const snaps = (() => {
-    if (!geo) return shownKey === 'computing' ? [0.44, TOP] : [0.42, MID, TOP]
+    if (shownKey === 'computing') {
+      // R2R8: the computing snap is measured from the readout; while the outgoing overview is still mounted,
+      // use the readout's last measure, so the sheet glides down once, in one direction.
+      const c = geo && geo.key === 'computing' ? Math.min(vh * 0.8, geo.top + geo.pad + geo.content + 18) : (lastComputingSnapPx() ?? vh * 0.4)
+      return [c, TOP]
+    }
+    if (!geo) return [0.42, MID, TOP]
     const pad = geo.pad
-    if (shownKey === 'computing') return [Math.min(vh * 0.8, geo.top + pad + geo.content + 18), TOP]
     if (shownKey === 'overview') {
       const peek = geo.peekEnd !== undefined ? geo.top + pad + geo.peekEnd + 12 : vh * 0.36
       return [Math.min(peek, vh * (MID - 0.02)), MID, TOP]
     }
-    const flight = geo.top + geo.foot + 2
-    const image = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 12 + geo.foot : vh * 0.7
-    return [Math.min(flight, vh * 0.4), Math.max(Math.min(image, vh * (TOP - 0.02)), Math.min(flight, vh * 0.4) + 40), TOP]
+    const flight = Math.min(geo.top + geo.foot + 2, vh * 0.4)
+    const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 12 + geo.foot : vh * 0.7
+    // R2R3: on a short phone the globe band above the sheet would be under ~120 px: the image step goes to
+    // the top snap (the sheet meets the HUD band; the globe is simply out of view).
+    const band = vh - imageSnap - useApp.getState().uiInsets.top
+    const image = band < 120 ? vh * TOP - 1 : Math.max(Math.min(imageSnap, vh * (TOP - 0.02)), flight + 40)
+    return [flight, image, TOP]
   })()
 
   // Phase / view changes pick the snap.
@@ -189,9 +237,12 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     overviewSnap.current = 0
   }, [placeKey])
 
-  // A pass on phones: flight first (sheet low, the camera and swath visible), then the image.
+  // A pass on phones: flight first (sheet low, the camera and swath visible), then the image. The sheet's
+  // settle is timed to END as the camera lands (R2R3): it starts 650 ms before the flight's eta. A quiet
+  // selection (a gallery swipe) never moves the sheet.
   useEffect(() => {
     if (!mobile || !selectedId) return
+    if (quiet.id === selectedId) return
     if (reduced) {
       setSnap(1)
       return
@@ -199,6 +250,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     setSnap(0)
     let done = false
     let touched = false
+    let lead = 0
+    let lastId = -1
     const sec = sectionRef.current
     const onDown = () => (touched = true)
     sec?.addEventListener('pointerdown', onDown)
@@ -207,22 +260,33 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     const raise = () => {
       if (done) return
       done = true
+      window.clearTimeout(lead)
       if (!touched) setSnap(1)
     }
+    const schedule = (f: CameraFlight) => {
+      if (f.id === lastId) return
+      lastId = f.id
+      window.clearTimeout(lead)
+      lead = window.setTimeout(raise, Math.max(0, f.eta - 650 - performance.now()))
+    }
+    if (start.flying) schedule(start)
     const unsub = useApp.subscribe((st) => {
-      if (st.cameraFlight.flying) sawFlight = true
-      else if (sawFlight) raise()
+      if (st.cameraFlight.flying) {
+        sawFlight = true
+        schedule(st.cameraFlight)
+      } else if (sawFlight) raise()
     })
     // The globe reports flights: if none starts, the camera is already there. Without any report at
     // all (no flight status from the globe), fall back to the 2.8 s cap.
     const known = start.id !== 0 || start.arrivedAt !== 0
-    const quiet = window.setTimeout(() => !sawFlight && known && raise(), 400)
+    const quietT = window.setTimeout(() => !sawFlight && known && raise(), 400)
     const cap = window.setTimeout(raise, 2800)
     return () => {
       done = true
       unsub()
-      window.clearTimeout(quiet)
+      window.clearTimeout(quietT)
       window.clearTimeout(cap)
+      window.clearTimeout(lead)
       sec?.removeEventListener('pointerdown', onDown)
     }
   }, [selectedId, mobile, reduced])
@@ -278,23 +342,23 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     return () => ro.disconnect()
   }, [computing, mobile, continued, shownKey])
 
-  // Desktop pass frame: measure what sits above and below it so the square always fits (R8).
+  // Desktop pass frame: measure what sits above and below it so the square always fits (R8, R2R5): above it
+  // the header and the gallery's bar; below it the caption and credit, the body's 24 px end fade, the footer.
+  // The square shrinks instead of pushing the credit into the fade.
   useLayoutEffect(() => {
     const sec = sectionRef.current
     const body = bodyRef.current
     const inner = innerRef.current
     if (mobile || !sec || !body || !inner || !shownPass) return
     const measure = () => {
-      const frame = inner.querySelector<HTMLElement>('[data-detail-frame]')
+      const frame = inner.querySelector<HTMLElement>('[data-gallery="detail"] [data-current] [data-photo-frame]') ?? inner.querySelector<HTMLElement>('[data-detail-frame]')
       if (!frame) return
       const sr = sec.getBoundingClientRect()
       const foot = body.nextElementSibling as HTMLElement | null
-      // The caption's first line (the product: "SENTINEL-2 L2A · 10 M · 10.0 KM") belongs with the
-      // picture: it must clear the footer too, not end half-cut under the body's fade.
-      const product = frame.closest('figure')?.querySelector('figcaption')?.firstElementChild as HTMLElement | null | undefined
-      const caption = product ? product.offsetHeight + 8 : 0
+      const cap = frame.parentElement?.querySelector('figcaption') as HTMLElement | null
+      const caption = cap ? cap.offsetHeight + 8 : 0
       const above = sr.top + body.offsetTop + 20 + (frame.getBoundingClientRect().top - inner.getBoundingClientRect().top)
-      const below = (foot?.offsetHeight ?? 0) + Math.max(0, window.innerHeight - sr.bottom) + 14 + caption
+      const below = (foot?.offsetHeight ?? 0) + Math.max(0, window.innerHeight - sr.bottom) + caption + 24 + 4
       sec.style.setProperty('--detail-chrome', `${Math.round(above + below)}px`)
     }
     // The observer's first callback (after layout) does the first measure: no forced layout in the
@@ -309,22 +373,31 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     }
   }, [mobile, shownPass, shownKey])
 
-  // A long body ends on a 24 px fade, never on a clipped baseline (desktop: the body's own box).
+  // Scroll edges (R2R5): a long body ends on a 24 px fade, never on a clipped baseline, and once scrolled it
+  // starts on a 16 px fade, so no row is ever hard-cut at the header hairline (desktop: the body's own box).
   useLayoutEffect(() => {
     const body = bodyRef.current
     if (!body || mobile) return
+    let raf = 0
     const update = () => {
+      raf = 0
       const more = body.scrollHeight - body.scrollTop - body.clientHeight > 2
+      const scrolled = body.scrollTop > 0
       if (body.dataset.more !== String(more)) body.dataset.more = String(more)
+      if (body.dataset.scrolled !== String(scrolled)) body.dataset.scrolled = String(scrolled)
+    }
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update)
     }
     if (typeof ResizeObserver === 'undefined') update()
-    body.addEventListener('scroll', update, { passive: true })
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    body.addEventListener('scroll', onScroll, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onScroll) : null
     ro?.observe(body)
     if (innerRef.current) ro?.observe(innerRef.current)
     return () => {
-      body.removeEventListener('scroll', update)
+      body.removeEventListener('scroll', onScroll)
       ro?.disconnect()
+      cancelAnimationFrame(raf)
     }
   }, [mobile, shownKey, full])
 
@@ -339,8 +412,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         setSearching(true)
       }
     : undefined
-  const enterKey = `enter:${reportKey}`
+  const enterKey = `enter:${reportKey || shownReportKey}`
   const dockEnter = useOnce(`${enterKey}:dock`)
+  // R2R10: a share recipient looking at the shared pass is pointed to their own place.
+  const sharedPass = !!shared && !!shownPass && shared.norad === shownPass.norad && shared.tClosest !== undefined && Math.abs(shared.tClosest - shownPass.tClosest) <= 60_000
 
   const header = shownPass && shownModel ? (
     <DetailHeader
@@ -348,6 +423,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       pass={shownPass}
       mobile={mobile}
       onSelect={select}
+      photo={shownKey === 'photo'}
+      shared={shared ? { sat: shared.satName ?? shownModel.meta(shownPass.norad).name, place: shared.placeLabel } : undefined}
       strip={mobile && !!selected && selected.id === shownPass.id}
     />
   ) : (
@@ -368,10 +445,24 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     />
   )
 
-  const footer = shownPass && shownModel ? <DetailFooter model={shownModel} pass={shownPass} mobile={mobile} shared={!!shared} onShare={setSharing} onFindYours={openSearch} onReplay={() => {
-    if (mobile) setSnap(0)
-    focusPass(shownPass)
-  }} /> : undefined
+  const replayShown = useCallback(
+    (p: Pass) => {
+      if (mobile) setSnap(0)
+      focusPass(p)
+    },
+    [mobile],
+  )
+  const footer = shownPass && shownModel ? (
+    <DetailFooter
+      model={shownModel}
+      pass={shownPass}
+      mobile={mobile}
+      sharedPass={sharedPass}
+      onShare={setSharing}
+      onCheckPlace={openSearch}
+      onReplay={() => replayShown(shownPass)}
+    />
+  ) : undefined
 
   const swapClass = staged.stage === 'out' ? s.swapOut : staged.stage === 'in' && !handoff ? s.swapIn : undefined
   const headSwapClass = staged.stage === 'out' && headerChanging ? s.swapOut : headerEntering ? s.swapIn : undefined
@@ -407,6 +498,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         <div ref={innerRef} key={shownKey} className={cx(s.stage, swapClass)} style={dirStyle} data-detail-root={shownPass ? '' : undefined}>
           {shownKey === 'computing' || !lastModel.current ? (
             <ComputingBody t0={t0} tz={placeTz} />
+          ) : shownPass && shownKey === 'photo' ? (
+            <PhotoPassView model={lastModel.current} pass={shownPass} mobile={mobile} />
           ) : shownPass ? (
             <PassDetail key={shownPass.id} model={lastModel.current} pass={shownPass} />
           ) : (
@@ -421,19 +514,20 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
               onShare={setSharing}
               onRetry={onRetry}
               invite={!!shared && !inviteClosed && !searching}
-              onFindYours={openSearch}
+              onCheckPlace={openSearch}
               onCloseInvite={() => setInviteClosed(true)}
             />
           )}
         </div>
       </Sheet>
 
-      {!mobile && !shortLandscape && model && full ? (
+      {!mobile && !shortLandscape && model && dockFull ? (
         <TimelineDock dockRef={timelineRef} className={cx(s.vars, s.timelineDock, dockEnter && s.dockEnter)}>
           <Timeline model={model} selectedId={selectedId} onSelect={select} />
         </TimelineDock>
       ) : null}
 
+      {model ? <Lightbox model={model} mobile={mobile} onReplay={replayShown} /> : null}
       {sharing && model ? <ShareFor pass={sharing} model={model} onClose={closeShare} /> : null}
     </>
   )
@@ -486,28 +580,33 @@ interface OverviewProps {
   onShare: (p: Pass) => void
   onRetry?: () => void
   invite: boolean
-  onFindYours?: () => void
+  onCheckPlace?: () => void
   onCloseInvite: () => void
 }
 
-function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onFindYours, onCloseInvite }: OverviewProps) {
+function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
   const { report } = model
   // Notch indices in reading order (V22): phones have no SUMMARY rule (the summary is the sheet's
   // header and hero), so their first rule is 01 / PASSES.
   const idx = (n: number) => String(mobile ? n - 1 : n).padStart(2, '0')
   const enter = useOnce(`${enterKey}:body`)
-  const best = model.best
-  const hero = best ? (
+  // The summary leads with the photos (owner B): the gallery, photo #1 being the closest look. With no photo
+  // at all, the geostationary imager that sees the place all week.
+  const hero = model.photos.length ? (
     <div data-peek-end className={cx(enter && s.enter)} style={enterStyle(1)}>
-      <BestLook model={model} best={best} onOpen={onSelect} onShare={onShare} />
+      <Gallery model={model} context="hero" mobile={mobile} onReplay={onSelect} onShare={onShare} />
+    </div>
+  ) : model.best?.kind === 'geo' ? (
+    <div data-peek-end className={cx(enter && s.enter)} style={enterStyle(1)}>
+      <GeoLook model={model} best={model.best} />
     </div>
   ) : null
   const inviteBar = invite ? (
     <div className={s.invite}>
       <p className={s.inviteText}>Something photographed you this week too.</p>
-      {onFindYours ? (
-        <Button variant="primary" size="sm" onClick={onFindYours}>
-          Find yours
+      {onCheckPlace ? (
+        <Button variant="primary" size="sm" onClick={onCheckPlace}>
+          Check your place
         </Button>
       ) : null}
       <button type="button" className={s.inviteClose} onClick={onCloseInvite} aria-label="Dismiss">
@@ -522,7 +621,7 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
       {mobile ? (
         <section className={s.section} aria-label="Summary">
           {hero}
-          <div data-peek-end={best ? undefined : ''}>
+          <div data-peek-end={hero ? undefined : ''}>
             <Verdicts model={model} enter={enter} />
           </div>
           {full ? (
@@ -545,10 +644,8 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
           </div>
           {hero}
           <Verdicts model={model} enter={enter} />
-          {compactTimeline && full ? (
-            <div className={s.mTimeline}>
-              <Timeline model={model} selectedId={selectedId} onSelect={onSelect} compact />
-            </div>
+          {compactTimeline ? (
+            <div className={s.mTimeline}>{full ? <Timeline model={model} selectedId={selectedId} onSelect={onSelect} compact /> : null}</div>
           ) : null}
           <Notes model={model} enter={enter} />
         </section>
@@ -574,7 +671,14 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
             </p>
           </section>
         </>
-      ) : null}
+      ) : (
+        // Reserve the passes notch while the sections stage in, so the summary never shifts (A1).
+        <section className={s.section} aria-hidden>
+          <Rule index={idx(2)} className={s.rule}>
+            Passes
+          </Rule>
+        </section>
+      )}
     </>
   )
 }
@@ -585,50 +689,58 @@ function DetailFooter({
   model,
   pass,
   mobile,
-  shared,
+  sharedPass,
   onShare,
   onReplay,
-  onFindYours,
+  onCheckPlace,
 }: {
   model: ResultsModel
   pass: Pass
   mobile: boolean
-  shared: boolean
+  /** A share recipient looking at the shared pass (R2R10) */
+  sharedPass: boolean
   onShare: (p: Pass) => void
   onReplay: () => void
-  onFindYours?: () => void
+  onCheckPlace?: () => void
 }) {
   const capture = captureFor(model.report, pass)
-  const best = model.best
+  const cover = model.cover?.photo
   // A clouded picture: the primary action is the clearest one, not sharing a white square.
-  const clearer = !!capture && isClouded(capture) && best?.kind === 'detailed' && best.pass.id !== pass.id ? best.pass : undefined
-  // With the clearer-look CTA, the secondary actions become icons so the primary's words fit.
-  const iconOnly = !!clearer
-  const third =
-    shared && onFindYours ? (
-      <Button onClick={onFindYours}>Find yours</Button>
-    ) : (
-      <Button onClick={onReplay} title="Replay the pass on the globe" aria-label="Replay the pass" className={cx(iconOnly && s.iconBtn)}>
-        <Glyph name="play" size={12} />
-        {iconOnly ? null : 'Replay'}
-      </Button>
-    )
+  const clearer = !sharedPass && !!capture && isClouded(capture) && cover?.pass && !cover.clouded && cover.pass.id !== pass.id ? cover.pass : undefined
+  // R2R10: the recipient's primary is their own place; Share and Replay become icons.
+  const iconOnly = !!clearer || (sharedPass && !!onCheckPlace)
+  const replay = (
+    <Button onClick={onReplay} title="Replay the pass on the globe" aria-label="Replay the pass" className={cx(iconOnly && s.iconBtn)}>
+      <Glyph name="play" size={12} />
+      {iconOnly ? null : 'Replay'}
+    </Button>
+  )
+  const shareIcon = (
+    <Button onClick={() => onShare(pass)} aria-label="Share this pass" title="Share this pass" className={s.iconBtn}>
+      <Glyph name="share" size={13} />
+    </Button>
+  )
   return (
-    <div className={cx(s.actions, clearer && s.actionsThree)}>
+    <div className={cx(s.actions, iconOnly && s.actionsThree)}>
       {mobile ? (
         <Button onClick={clearPass} aria-label="All passes" className={s.iconBtn}>
           <Glyph name="arrow-left" size={13} />
         </Button>
       ) : null}
-      {clearer ? (
+      {sharedPass && onCheckPlace ? (
+        <>
+          <Button variant="primary" onClick={onCheckPlace} className={s.primary}>
+            <Glyph name="search" size={13} />
+            Check your place
+          </Button>
+          {shareIcon}
+        </>
+      ) : clearer ? (
         <>
           <Button variant="primary" onClick={() => focusPass(clearer)} className={s.primary} aria-label="See the clearest look">
             <span className={s.ctaLead}>See the </span>clearest look
           </Button>
-          <Button onClick={() => onShare(pass)} aria-label="Share this pass" title="Share this pass" className={cx(iconOnly && s.iconBtn)}>
-            <Glyph name="share" size={13} />
-            {iconOnly ? null : 'Share'}
-          </Button>
+          {shareIcon}
         </>
       ) : (
         <Button variant="primary" onClick={() => onShare(pass)} className={s.primary}>
@@ -636,7 +748,7 @@ function DetailFooter({
           Share this pass
         </Button>
       )}
-      {third}
+      {replay}
     </div>
   )
 }
@@ -721,11 +833,20 @@ function useKeys(model: ResultsModel | undefined, selected: Pass | undefined, se
       if (!m || off || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         if (isTyping(e.target)) return
-        const next = stepPass(m.lanes, sel, e.key === 'ArrowRight' ? 1 : -1)
+        const dir = e.key === 'ArrowRight' ? 1 : -1
+        // The photos first (owner B): the gallery on screen walks them (the summary, or a pass with a photo).
+        if (galleryCtl.current && (!sel || m.photoByPass.has(sel.id))) {
+          e.preventDefault()
+          galleryCtl.current.step(dir)
+          return
+        }
+        const next = stepPass(m.lanes, sel, dir)
         if (next && next.id !== sel?.id) {
           e.preventDefault()
           pick(next)
         }
+      } else if ((e.key === 'f' || e.key === 'F') && !isTyping(e.target)) {
+        if (galleryCtl.current?.expand()) e.preventDefault()
       } else if (e.key === ' ' || e.code === 'Space') {
         if (!sel || isTyping(e.target)) return
         // Let focused controls (other than pass rows) keep their native Space.

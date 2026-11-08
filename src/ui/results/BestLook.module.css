@@ -37,26 +37,13 @@
   outline-offset: 2px;
 }
 
-/* the place: a 1px signal cross at the centre, appearing as the scan passes it */
-.mark {
+/* the place: the reticle, centred on the place pixel (R2R2) */
+.centre {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 13px;
-  height: 13px;
-  transform: translate(-50%, -50%) scale(1.6);
-  opacity: 0;
-  background:
-    linear-gradient(var(--signal), var(--signal)) center / 1px 100% no-repeat,
-    linear-gradient(var(--signal), var(--signal)) center / 100% 1px no-repeat;
-  transition:
-    opacity var(--d-sm) var(--ease-out),
-    transform 500ms var(--ease-out);
+  transform: translate(-50%, -50%);
   pointer-events: none;
-}
-.markOn {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
 }
 
 /* ── desktop caption + actions ────────────────────────────────── */
