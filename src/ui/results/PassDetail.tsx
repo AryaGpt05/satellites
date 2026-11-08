@@ -42,12 +42,19 @@ const SCENE_LAG_MS = 48 * 3_600_000
  */
 export function PhotoPassView({ model, pass, mobile, onReplay }: { model: ResultsModel; pass: Pass; mobile: boolean; onReplay?: (p: Pass) => void }) {
   const first = useRef(pass.id)
+  // The body follows the selection in a transition (interruptible, off the swipe's critical path, A3): a quiet
+  // selection's synchronous work is the header, the footer and the gallery, never the whole body.
+  const [bodyPass, setBodyPass] = useState(pass)
+  useEffect(() => {
+    if (pass.id !== bodyPass.id) startTransition(() => setBodyPass(pass))
+  }, [pass, bodyPass.id])
+  const shown = model.passById.get(bodyPass.id) ?? pass
   return (
     <div className={s.detail}>
       <section className={cx(r.section, s.st)} style={st(0)} aria-label="Photos">
         <Gallery model={model} context="detail" mobile={mobile} selectedId={pass.id} onReplay={onReplay} />
       </section>
-      <PassBody key={pass.id} model={model} pass={pass} entering={first.current === pass.id} />
+      <PassBody key={shown.id} model={model} pass={shown} entering={first.current === shown.id} />
     </div>
   )
 }

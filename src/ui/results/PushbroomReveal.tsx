@@ -124,6 +124,8 @@ export function PushbroomReveal({
   /** 'capture': performance.now() of the crossing (0 = not yet), and of the last frame the clock was replaying */
   const capturedAt = useRef(0)
   const replaySeenAt = useRef(0)
+  /** performance.now() since when the clock has not been replaying (0 while it is) */
+  const quietSince = useRef(0)
   const countRef = useRef<HTMLElement>(null)
   const phaseRef = useRef<RevealPhase>('loading')
   phaseRef.current = phase
@@ -326,9 +328,12 @@ export function PushbroomReveal({
       if (startAt === 'capture') {
         if (capturedAt.current) return now
         if (now - mountedAt >= CAPTURE_CAP_MS) return now
-        // Quiet: the clock has not replayed for a while (a gallery swipe, a paused replay, reduced motion).
-        const lastReplay = replaySeenAt.current || (sceneClock.mode === 'replay' ? now : 0)
-        if (now - mountedAt >= QUIET_MS && now - Math.max(lastReplay, mountedAt) >= QUIET_MS) return now
+        // Quiet: the clock has not been in replay for QUIET_MS (a gallery swipe, a paused replay, reduced motion).
+        // Read from the clock's mode now, not from the last frame (a slow frame must not look like a pause).
+        const replaying = sceneClock.mode === 'replay' || useApp.getState().timeMode === 'replay'
+        if (replaying) quietSince.current = 0
+        else if (!quietSince.current) quietSince.current = now
+        if (!replaying && now - quietSince.current >= QUIET_MS) return now
         return undefined
       }
       if (startAt === 'hero') return Math.max(mountedAt + HERO_MIN_MS, f.flying ? f.eta - 200 : 0)

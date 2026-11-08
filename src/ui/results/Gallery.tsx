@@ -354,6 +354,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
               mobile={mobile}
               index={i}
               total={n}
+              position={counterText(i)}
               near={Math.abs(i - idx) <= NEAR}
               current={i === idx}
               cover={model.cover?.photo.key === p.key ? model.cover.why : undefined}
@@ -408,6 +409,8 @@ interface SlideProps {
   mobile: boolean
   index: number
   total: number
+  /** "3 / 27" (the counter's words for this photo) */
+  position: string
   near: boolean
   current: boolean
   cover?: 'closest' | 'lastClear' | 'clouded'
@@ -417,7 +420,7 @@ interface SlideProps {
   onShare?: (pass: Pass) => void
 }
 
-const Slide = memo(function Slide({ photo, model, context, mobile, index, total, near, current, cover, selected, onExpand, onReplay, onShare }: SlideProps) {
+const Slide = memo(function Slide({ photo, model, context, mobile, index, total, position, near, current, cover, selected, onExpand, onReplay, onShare }: SlideProps) {
   const detail = context === 'detail'
   const { capture, pass } = photo
   const meta = model.meta(pass?.norad ?? capture.norad ?? 0)
@@ -426,7 +429,9 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
   const when = pass?.tClosest ?? capture.datetime
   const status = statusWords(photo, mobile)
   const lead = cover === 'closest' ? 'Closest look' : cover === 'lastClear' ? 'Last clear look' : cover === 'clouded' ? 'Clouded over' : undefined
-  const label = `${lead ? `${lead}: ` : ''}${meta.name}, ${t.day} ${t.time}${index >= 0 ? `, photo ${index + 1} of ${total}` : ''}`
+  const [k, of] = position.split(' / ')
+  const label = `${lead ? `${lead}: ` : ''}${meta.name}, ${t.day} ${t.time}${pass && of ? `, photo ${k} of ${of}` : ''}`
+  void total
   const replay = !detail && pass && onReplay ? () => onReplay(pass) : undefined
   const frameRef = useRef<HTMLDivElement>(null)
   const onView = () => {

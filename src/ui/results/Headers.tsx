@@ -236,7 +236,14 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
   }
   const t = model.times(pass)
   // The strip shows once the camera has arrived and the scene is replaying or held (MOB-16).
-  const replayOn = useApp((st) => st.timeMode !== 'live' && !st.cameraFlight.flying)
+  // Once shown in this header, it stays while the scene is in replay time: a quiet selection's short camera
+  // move never blinks it off and on (A1).
+  const live = useApp((st) => st.timeMode === 'live')
+  const flying = useApp((st) => st.cameraFlight.flying)
+  const stripSeen = useRef(false)
+  if (live) stripSeen.current = false
+  else if (!flying) stripSeen.current = true
+  const replayOn = !live && (!flying || stripSeen.current)
   // A quiet selection (a swipe) changes the title in place: a 160 ms fade of the words, never the header.
   const firstId = useRef(pass.id)
   const titleKey = photo ? pass.id : 'one'
@@ -302,7 +309,13 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
           </div>
         </div>
       )}
-      {strip && replayOn ? <ReplayStrip pass={pass} /> : null}
+      {/* Phones: the strip's row is reserved from the start (no header height change, so no layout shift, when the
+          camera lands); it fades in once the scene is replaying or held there (MOB-16). */}
+      {strip ? (
+        <div className={cx(s.stripSlot, replayOn && s.stripOn)} inert={!replayOn || undefined}>
+          <ReplayStrip pass={pass} />
+        </div>
+      ) : null}
     </div>
   )
 }

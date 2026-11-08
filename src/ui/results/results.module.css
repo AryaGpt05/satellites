@@ -436,6 +436,15 @@
   animation: fade 160ms linear backwards;
 }
 
+/* Phones: the replay strip's row, reserved in the pass header; it fades in when the scene replays (MOB-16). */
+.stripSlot {
+  opacity: 0;
+  transition: opacity var(--d-sm) var(--ease-out);
+}
+.stripOn {
+  opacity: 1;
+}
+
 /* Pass header */
 .stepper {
   display: inline-flex;
