@@ -79,8 +79,8 @@
 }
 @media (pointer: coarse) {
   .seg {
-    height: 40px;
-    padding: 0 12px;
+    height: 36px;
+    padding: 0 11px;
   }
 }
 .nav {
@@ -148,14 +148,18 @@
   min-width: 0;
 }
 
-/* The rail: a slim progress line under the photos (position, not a scrollbar). */
+/* The rail: a slim progress line along the top edge of the current photo (position, not a scrollbar). */
 .rail {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
   display: block;
+  width: var(--slide-w);
   height: 2px;
-  margin-top: 10px;
-  background: var(--line);
+  background: rgb(7 8 10 / 0.5);
   overflow: hidden;
+  pointer-events: none;
 }
 .railThumb {
   position: absolute;
@@ -179,16 +183,22 @@
 .square {
   aspect-ratio: 1 / 1;
 }
-/* The summary hero: a wider crop of the same square (the place stays centred). */
+/*
+ * The summary hero: a wider crop of the same square (the place stays centred). Laptops: 3:2 at most, and never
+ * taller than what leaves the caption, the counts strip and the 02 / PASSES notch on the first screen (R2R1):
+ * --hero-chrome is everything else the first screen holds (set on the panel, results.module.css).
+ */
 .heroFrame {
-  aspect-ratio: var(--hero-aspect, 16 / 9);
+  aspect-ratio: 3 / 2;
+  max-height: max(150px, calc(100dvh - var(--hero-chrome, 700px)));
 }
 .mobile .heroFrame {
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 3 / 2;
+  max-height: none;
 }
-@media (min-width: 761px) and (orientation: landscape) and (min-height: 1001px), (min-width: 1101px) and (min-height: 1001px) {
-  .heroFrame {
-    --hero-aspect: 3 / 2;
+@media (max-height: 800px) {
+  .mobile .heroFrame {
+    aspect-ratio: 16 / 9;
   }
 }
 .zoomable {
@@ -518,8 +528,36 @@ b.warn,
   border-left: 1px solid var(--line);
   -webkit-tap-highlight-color: transparent;
 }
-.mReplay:active {
+.mReplay:active,
+.mShare:active {
   background: var(--ink-2);
+}
+.mShare {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 40px;
+  margin-left: -8px;
+  color: var(--bone-2);
+  border-left: 1px solid var(--line);
+  transition: color var(--d-hover) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .mReplay:hover {
+    color: var(--bone);
+  }
+  .mShare:hover {
+    color: var(--signal);
+  }
+}
+.note {
+  font-family: var(--font-sans);
+  font-size: var(--fs-small);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--bone-2);
 }
 .tabletOnly {
   display: none;
@@ -536,12 +574,6 @@ b.warn,
   color: var(--bone-2);
 }
 
-.actions {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  margin-top: 4px;
-}
 
 /* ── pass view: the square never runs under the footer (--detail-chrome is measured by the view) ── */
 .detail .figure {

@@ -18,6 +18,14 @@
   --timeline-clear: calc(var(--timeline-bottom) + var(--timeline-h) + var(--timeline-gap));
   /* Full dock height at results: from under the top readouts to above the timeline strip. */
   --dock-h: calc(100dvh - 2 * var(--bezel-inset) - var(--sheet-clear, 56px) - var(--timeline-clear));
+  /* What sits under the panel (the timeline strip, or just the bottom readouts on short desktops) */
+  --below-panel: var(--timeline-clear);
+  /*
+   * R2R1: the summary's first screen, apart from the hero picture: the top bezel and readouts, the header, the
+   * headline, the gallery's bar, the caption, the counts strip, 48 px of 02 / PASSES, and what is below the
+   * panel. The hero takes what is left (Gallery.module.css).
+   */
+  --hero-chrome: calc(2 * var(--bezel-inset) + var(--sheet-clear, 56px) + var(--below-panel) + 520px);
 }
 @media (max-height: 720px) {
   .vars {
@@ -51,6 +59,7 @@
 @media (min-width: 761px) and (orientation: landscape) and (max-height: 1000px), (min-width: 1101px) and (max-height: 1000px) {
   .vars {
     --dock-h: calc(100dvh - 2 * var(--bezel-inset) - 2 * var(--sheet-clear, 56px));
+    --below-panel: var(--sheet-clear, 56px);
   }
   /* doubled class: must beat the base .timelineDock rule below */
   .vars.timelineDock {

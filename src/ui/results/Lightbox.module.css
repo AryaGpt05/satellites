@@ -346,6 +346,13 @@
 .replay {
   flex: none;
 }
+.mobile .metaText {
+  white-space: normal;
+}
+.mobile .metaRow {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 
 /* ── filmstrip (laptops) ──────────────────────────────────────── */
 .film {
