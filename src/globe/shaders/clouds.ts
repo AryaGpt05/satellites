@@ -3,7 +3,7 @@
  * coverage gradient (so decks read as volume, not a decal), warm at twilight and almost gone at night
  * (a faint dark veil that still dims the city lights beneath).
  */
-import { CLOUD_COVER, COMMON, glsl, OUTPUT, TANGENT_FRAME } from './chunks'
+import { CLOUD_COVER, COMMON, glsl, OUTPUT, PAINT, TANGENT_FRAME } from './chunks'
 
 export const cloudsVertex = glsl`
   varying vec3 vPos;
@@ -19,6 +19,9 @@ export const cloudsFragment = glsl`
   ${COMMON}
   ${TANGENT_FRAME}
   ${CLOUD_COVER}
+  ${PAINT}
+
+  uniform float uCloudFade;     // camera-height fade: the global weather layer steps aside for close views
 
   uniform sampler2D uClouds;
   uniform vec2 uTexel;
@@ -73,6 +76,14 @@ export const cloudsFragment = glsl`
     // Toward the limb clouds sink into the haze rather than outlining the disc.
     float limb = pow(1.0 - max(dot(N, V), 0.0), 4.0);
     alpha *= 1.0 - 0.55 * limb;
+
+    // Where the real image has developed, its own clouds replace this global layer.
+    if (uDecalOn > 0.001) {
+      float fresh;
+      alpha *= 1.0 - decalSample(N, sphereUv(N), fresh).a;
+    }
+    alpha *= uCloudFade;
+    if (alpha < 0.002) discard;
 
     gl_FragColor = vec4(col, alpha);
     ${OUTPUT}

@@ -219,16 +219,18 @@
   }
 }
 
-/* Mobile footer: pinned to the bottom of the *visible* part of the sheet (Sheet.tsx keeps `bottom` in
-   step with the sheet's offset while it moves). */
+/* Mobile footer: pinned to the bottom of the *visible* part of the sheet. Sheet.tsx moves it up by the
+   sheet's offset with a transform in step with the sheet's own (compositor only: no layout per frame,
+   no layout shift). */
 .bottom .foot {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: var(--sheet-hidden, 0px);
+  bottom: 0;
+  transform: translate3d(0, calc(-1 * var(--sheet-hidden, 0px)), 0);
   padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   background: var(--ink-1);
-  transition: bottom var(--d-md) var(--ease-out);
+  transition: transform var(--d-md) var(--ease-out);
   touch-action: none;
 }
 .bottom:has(.foot) .body {

@@ -21,6 +21,13 @@
  *    every frame, so an adaptive-DPR step or a resize never renders a frame without the shift.
  *  - overview: slow westward drift of the camera (the planet appears to turn eastward), north-up; as the boot
  *    curtain lifts, one damped focus dolly (G15).
+ *  - pass, acquisition sequence (owner request C, acquisition.ts): while a fresh replay runs toward closest
+ *    approach the target is the CHASE pose (framing.chasePose: oblique, north-up, halfway between the spacecraft
+ *    and the place), recomputed every frame from the spacecraft's SGP4 position, and the camera follows it exactly
+ *    once it has arrived. A replay started on the pass already in view flies to the chase first. At the capture the
+ *    camera settles (a soft 1.4 s ease that does not hold the replay clock) into the resting view: for an imaged
+ *    pass the near-top-down ACQUIRED view of the image painted onto the globe (framing.acquiredPose), otherwise the
+ *    oblique pass view. Quiet selections (no replay) go straight to the resting view. A gesture ends the chase.
  *  - In idle / results the user can orbit and zoom (controls.ts); input interrupts a flight cleanly, and auto
  *    rotation resumes a few seconds after the last touch.
  *  - Publishes flight status to store.cameraFlight on transitions only (start, arrival, cut, interrupt), and
@@ -58,7 +65,23 @@ import {
 } from './cameraMath'
 import { applyControls, attachControls, createControlInput, createControlState } from './controls'
 import { propagate } from './data'
-import { coarserLevel, fovFor, freeRect, isPhone, minRangeFor, overviewPose, passPose, placePose, satellitePose, type TextureLevel, type Viewport } from './framing'
+import { EARTH_RADIUS_KM as R_KM, latLonToWorld } from '@/lib/geo'
+import type { AcqState } from './acquisition'
+import {
+  acquiredPose,
+  chasePose,
+  coarserLevel,
+  fovFor,
+  freeRect,
+  isPhone,
+  minRangeFor,
+  overviewPose,
+  passPose,
+  placePose,
+  satellitePose,
+  type TextureLevel,
+  type Viewport,
+} from './framing'
 import { createFadeMaterial } from './materials'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
 
@@ -87,6 +110,9 @@ const BOOT_DOLLY_S = 2.4
 const RETARGET_MIN_S = 1.8
 /** A range folded into a flight eases over the rest of it, but never faster than this (ms). */
 const FOLD_MIN_MS = 300
+/** Acquisition: the chase keeps following this long after the capture, then settles over SETTLE_S. */
+const CAPTURE_HOLD_MS = 280
+const SETTLE_S = 1.4
 
 const INTERACTIVE: AppState['phase'][] = ['idle', 'locating', 'results', 'error']
 
@@ -99,6 +125,9 @@ interface Flight {
   ease: (t: number) => number
   /** The boot focus dolly: range is a fixed factor of the LIVE target, so a late re-frame rescales it */
   dolly?: boolean
+  /** A composition move within the same intent (the acquisition settle): it neither holds the replay clock nor
+   *  counts as a flight for the scene, the texture gate or store.cameraFlight */
+  soft?: boolean
 }
 
 function intentKey(intent: CameraIntent, st: AppState, phone: boolean): string {
@@ -138,6 +167,8 @@ function satNow(norad: number, ms: number) {
  * `overviewAt` provides the look-at for overview (continuity with wherever the camera is); `floor` is the
  * texture-resolution near limit.
  */
+const _sat = new Vector3()
+
 function targetFor(
   intent: CameraIntent,
   st: AppState,
@@ -146,6 +177,8 @@ function targetFor(
   floor: number,
   simTime: number,
   overviewAt: { lat: number; lon: number },
+  acq: AcqState,
+  chasing: boolean,
 ): PoseSpec | null {
   switch (intent.kind) {
     case 'overview':
@@ -155,6 +188,13 @@ function targetFor(
     case 'pass': {
       const pass = st.report?.passes.find((p) => p.id === intent.passId) ?? selectSelectedPass(st)
       const place = st.report?.place ?? st.place
+      if (pass && place && acq.passId === pass.id) {
+        if (chasing) {
+          const sat = propagate(pass.norad, simTime)
+          if (sat) return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / R_KM, _sat), place)
+        }
+        if (acq.imaged) return acquiredPose(vp, insets, place, acq.halfKm)
+      }
       if (pass && place) return passPose(vp, insets, pass, place, floor)
       return place ? placePose(vp, insets, place.lat, place.lon, floor) : null
     }
@@ -239,6 +279,11 @@ export function CameraDirector() {
     velDir: new Vector3(), // unit tangent of that motion
     velZoom: 0, // d(log range)/dt
     bootDolly: 'pending' as 'pending' | 'armed' | 'done',
+    /** Acquisition: the armedAt last seen (a new one = a fresh replay), whether the chase ran last frame, and a
+     *  chase flight owed to a replay started on the pass already in view */
+    armedSeen: -Infinity,
+    chasing: false,
+    chaseFlight: false,
   })
   const input = useMemo(createControlInput, [])
   const control = useMemo(createControlState, [])
@@ -298,6 +343,18 @@ export function CameraDirector() {
     const level = lit ? rt.textureLevel : coarserLevel(rt.textureLevel, rt.nightLevel)
     const floor = minRangeFor(vp, level)
 
+    // ── acquisition: chase while a fresh replay runs toward the capture (and a beat after it).
+    const acq = rt.acq
+    const acqPass = intent.kind === 'pass' && intent.passId === acq.passId
+    if (acqPass && acq.armed && acq.armedAt !== s.armedSeen) {
+      s.armedSeen = acq.armedAt
+      s.userTouched = false // a replay is a request to watch
+      s.chaseFlight = true
+    }
+    const chasing =
+      acqPass && !rt.reducedMotion && !s.userTouched && (acq.armed || (s.chasing && now < acq.capturedAt + CAPTURE_HOLD_MS))
+    const chaseEnded = s.chasing && !chasing
+
 
     // ── target spec: recomputed only when an input changed (G13).
     const ik = insetsKeyOf(insets)
@@ -316,7 +373,9 @@ export function CameraDirector() {
       vpChanged ||
       level !== s.level ||
       settledInsets ||
-      intent.kind === 'satellite'
+      intent.kind === 'satellite' ||
+      chasing ||
+      chaseEnded
     let key = s.key
     if (recompute) {
       // Overview look-at: at boot, put the sun ~45° east of centre so the day side faces right and the terminator
@@ -329,7 +388,7 @@ export function CameraDirector() {
         const ll = latLonOfDir(s.pose.d)
         overviewAt = { lat: clamp(ll.lat, -30, 38) * 0.4 + 22 * 0.6, lon: ll.lon }
       }
-      const spec = targetFor(intent, store, vp, insets, floor, rt.simTime, overviewAt)
+      const spec = targetFor(intent, store, vp, insets, floor, rt.simTime, overviewAt, acq, chasing)
       // Only the texture level changed (no layout change): the slower focus move below.
       const focusOnly = level !== s.level && !settledInsets && !vpChanged && intent === s.intent
       s.intent = intent
@@ -344,8 +403,9 @@ export function CameraDirector() {
         s.spec = spec
         key = intentKey(intent, store, phone)
       }
-      // Re-framing of the same intent: range moves smoothly (the shift is tracked below, every frame).
-      if (spec && s.initialized && key === s.key && intent.kind !== 'satellite') {
+      // Re-framing of the same intent: range moves smoothly (the shift is tracked below, every frame). The chase and
+      // its settle move the whole pose instead (below).
+      if (spec && s.initialized && key === s.key && intent.kind !== 'satellite' && !chasing && !chaseEnded) {
         const to = spec.range
         const curTo = s.rangeMove ? Math.exp(s.rangeMove.l1) : s.fold ? s.target.range * Math.exp(s.fold.l1) : s.target.range
         const dl = Math.abs(Math.log(to / curTo))
@@ -380,6 +440,32 @@ export function CameraDirector() {
       wantY = 1 - (f.y0 + f.y1) / Math.max(1, vp.height)
     }
 
+    /** Fly (or cut) from the pose on screen to s.target: a new intent, or a replay's chase on the pass in view. */
+    function startFlight(retarget: boolean) {
+      s.chaseFlight = false
+      const id = ++rt.camera.flightId
+      if (rt.reducedMotion) {
+        copyPose(s.target, s.pose)
+        s.flight = null
+        rt.cutAt = now
+        arrive(rt, id, now, intent.kind)
+        return
+      }
+      copyPose(s.pose, s.from)
+      const plan = planFlight(s.from, s.target)
+      let duration = plan.duration
+      let ease = easeInOut
+      if (retarget) {
+        duration = Math.max(RETARGET_MIN_S, plan.duration * 0.8)
+        // Carry the current visual speed along the new path.
+        ease = easeCarry(carrySpeed(s.from, s.target, { pan: s.velPan, dir: s.velDir, zoom: s.velZoom }, tanHalf, duration))
+      }
+      s.flight = { id, start: now, duration, bump: plan.bump, ease }
+      rt.camera.arrivedAt = -Infinity
+      rt.camera.progress = 0
+      store.setCameraFlight({ id, flying: true, eta: now + duration * 1000, arrivedAt: -1 })
+    }
+
     if (!s.initialized && spec) {
       makePose(spec, s.pose)
       makePose(spec, s.target)
@@ -398,8 +484,8 @@ export function CameraDirector() {
       s.prevD.copy(s.pose.d)
       s.prevRange = s.pose.range
     } else if (key !== s.key && spec) {
-      // New intent: fly (or cut). A flight already under way is a retarget.
-      const retarget = s.flight !== null
+      // New intent: fly (or cut). A flight already under way is a retarget (a soft settle is not).
+      const retarget = s.flight !== null && !s.flight.soft
       s.key = key
       makePose(spec, s.target)
       s.shiftX = s.target.shiftX
@@ -410,32 +496,32 @@ export function CameraDirector() {
       control.spin.set(0, 0, 0)
       control.zoomTarget = null
       s.bootDolly = 'done'
-      const id = ++rt.camera.flightId
-      if (rt.reducedMotion) {
-        copyPose(s.target, s.pose)
-        s.flight = null
-        rt.cutAt = now
-        arrive(rt, id, now, intent.kind)
-      } else {
-        copyPose(s.pose, s.from)
-        const plan = planFlight(s.from, s.target)
-        let duration = plan.duration
-        let ease = easeInOut
-        if (retarget) {
-          duration = Math.max(RETARGET_MIN_S, plan.duration * 0.8)
-          // Carry the current visual speed along the new path.
-          ease = easeCarry(carrySpeed(s.from, s.target, { pan: s.velPan, dir: s.velDir, zoom: s.velZoom }, tanHalf, duration))
-        }
-        s.flight = { id, start: now, duration, bump: plan.bump, ease }
-        rt.camera.arrivedAt = -Infinity
-        rt.camera.progress = 0
-        store.setCameraFlight({ id, flying: true, eta: now + duration * 1000, arrivedAt: -1 })
-      }
+      startFlight(retarget)
       s.drift = 0
     } else if (spec && intent.kind === 'satellite') {
       // Moving target: keep the destination current.
       makePose(spec, s.target)
+    } else if (spec && chasing) {
+      // The chase target moves with the spacecraft (held still while the camera flies: the replay clock waits).
+      makePose(spec, s.target)
+      s.target.shiftX = s.shiftX
+      s.target.shiftY = s.shiftY
+      if (s.chaseFlight && !s.flight) {
+        // A replay started on the pass already in view: fly to the chase first (the clock holds meanwhile).
+        startFlight(false)
+      }
+    } else if (spec && chaseEnded && !s.userTouched && !s.flight) {
+      // The capture: settle into the resting view (soft: the replay clock keeps running, the image keeps painting).
+      makePose(spec, s.target)
+      s.target.shiftX = s.shiftX
+      s.target.shiftY = s.shiftY
+      s.rangeMove = null
+      s.fold = null
+      copyPose(s.pose, s.from)
+      s.flight = { id: rt.camera.flightId, start: now, duration: rt.reducedMotion ? 0.001 : SETTLE_S, bump: 0, ease: easeInOut, soft: true }
     }
+    s.chaseFlight = s.chaseFlight && chasing && !s.flight
+    s.chasing = chasing
 
     // G15: the one focus dolly as the boot curtain lifts (not for URL targets or share boots).
     if (s.bootDolly === 'armed' && store.phase !== 'boot') {
@@ -486,10 +572,10 @@ export function CameraDirector() {
     if (input.gestureId !== s.gestureSeen) {
       s.gestureSeen = input.gestureId
       if (s.flight) {
-        const id = s.flight.id
+        const { id, soft } = s.flight
         s.flight = null
         settleFold(s, now)
-        arrive(rt, id, now, intent.kind)
+        if (!soft) arrive(rt, id, now, intent.kind)
       }
       s.userTouched = true
     }
@@ -501,14 +587,16 @@ export function CameraDirector() {
       interpolatePose(s.from, s.target, e, f.bump, s.pose, tiltProgress(e, s.from.tilt, s.target.tilt))
       if (f.dolly) s.pose.range = s.target.range * (1 + (BOOT_DOLLY_SCALE - 1) * (1 - e))
       else if (s.fold) s.pose.range *= Math.exp(curveAt(s.fold, now))
-      rt.camera.progress = e
+      if (!f.soft) rt.camera.progress = e
       if (t >= 1) {
         s.flight = null
         settleFold(s, now)
-        arrive(rt, f.id, now, intent.kind)
+        if (!f.soft) arrive(rt, f.id, now, intent.kind)
       }
     } else {
-      const moved = applyControls(s.pose, input, control, dt, fov, vp.height, intent.kind === 'overview', s.pose.r > 1.0001 ? 0 : floor)
+      // The acquired view may sit inside the base map's floor (the painted image carries the detail): zoom keeps it.
+      const zoomFloor = acqPass && acq.imaged && s.spec ? Math.min(floor, s.spec.range * 0.7) : floor
+      const moved = applyControls(s.pose, input, control, dt, fov, vp.height, intent.kind === 'overview', s.pose.r > 1.0001 ? 0 : zoomFloor)
       if (moved) s.userTouched = true
 
       if (intent.kind === 'overview') {
@@ -545,6 +633,9 @@ export function CameraDirector() {
         s.pose.shiftX += (s.target.shiftX - s.pose.shiftX) * k
         s.pose.shiftY += (s.target.shiftY - s.pose.shiftY) * k
         orthonormalize(s.pose)
+      } else if (chasing) {
+        // Chasing the spacecraft: the pose IS the (smoothly moving) target.
+        copyPose(s.target, s.pose)
       } else {
         // Settled on a place or pass: the composition follows the (already smoothed) target; user zoom is kept.
         if (!s.userTouched) s.pose.range = s.target.range
@@ -555,7 +646,7 @@ export function CameraDirector() {
 
     // ── apply to the camera
     const alt = applyPoseToCamera(s.pose, camera, vp, fov, tmp.cam)
-    rt.camera.flying = s.flight !== null
+    rt.camera.flying = s.flight !== null && !s.flight.soft
     rt.camera.altitudeKm = alt * EARTH_RADIUS_KM
     rt.inputAt = input.dragging ? now : input.lastInputAt
 

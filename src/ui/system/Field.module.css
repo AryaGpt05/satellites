@@ -220,8 +220,10 @@
   background: var(--bone-2);
   transform: translateX(-100%);
 }
+/* Only a wait you would notice shows it: a quick answer never flashes the segment in and out. */
 .field[data-busy='true'] .scan {
   opacity: 1;
+  transition-delay: 200ms;
 }
 .field[data-busy='true'] .scan::before {
   animation: scan 1.1s var(--ease-in-out) infinite;

@@ -1,14 +1,20 @@
 /**
- * The selected pass (store.report + store.selectedPassId), replay-synced to sim time:
- *  - swath ribbon on the surface (width = profile swath, or the field-of-regard ground range for agile imagers),
- *    built from real great-circle offsets perpendicular to the heading (swath.ts) and clipped to ±700 km
- *    along-track around the place. It reads as a SWEEP: a 1 px front line with a short glow crosses the place as
- *    replay time advances, the fill fades behind it, the edges are bone ahead and the verdict colour behind;
- *  - the satellite at simTime from main-thread SGP4, placed geodetically (latLonToWorld(lat, lon, 1 + h/R)) so it
- *    sits exactly above its own track, drawn as its category glyph with a callout;
- *  - a nadir line to the ground, a fading orbit trail behind it, and for pointable imagers a view line to the
- *    place while the place is within its field of regard;
- *  - when the front crosses the place on an 'imaged' pass, the reticle flashes.
+ * The selected pass (store.report + store.selectedPassId), replay-synced to sim time. Together with the painted image
+ * (Imagery.tsx + the Earth shader), the reticle's capture shockwave (PlaceMarker) and the camera's chase
+ * (CameraDirector) this is the ACQUISITION SEQUENCE (owner request C, acquisition.ts):
+ *  - the spacecraft: a small low-poly model (spacecraft.ts) at its true SGP4 position, placed geodetically
+ *    (latLonToWorld(lat, lon, 1 + h/R)) so it sits exactly above its own track, oriented along its velocity with the
+ *    instrument looking straight down, lit by the real sun unless it is in Earth's shadow, at a constant on-screen
+ *    size; crewed and ambient objects keep their category glyph. A callout labels it;
+ *  - behind it a fading orbit-arc trail, and a faint dashed ring of its whole orbit (inertial, turning with GMST);
+ *  - the sensor's LIGHT CURTAIN while the replay runs: a translucent fan from the spacecraft to the swath's true
+ *    cross-track width on the ground, additive, with bright hairline edges and scan lines streaming down it;
+ *  - the swath ribbon on the surface (width = profile swath, or the field-of-regard ground range for agile imagers),
+ *    built from real great-circle offsets perpendicular to the heading (swath.ts), clipped to ±700 km along-track
+ *    around the place. It is an OUTLINE, not a slab: bone edges ahead, the verdict colour behind, and at its front
+ *    the bright SCAN LINE (where the curtain meets the Earth) with a short fresh-exposure glow behind it;
+ *  - for pointable imagers, a view line to the place while it is within the field of regard; for crewed passes a
+ *    nadir line.
  * Colour follows meaning: signal only where an image exists or is likely; agile "could have" passes are bone
  * (radar: ice) with a dashed field of regard; crewed passes draw the track alone.
  *
@@ -17,24 +23,33 @@
  */
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BufferAttribute, BufferGeometry, Mesh, Vector2, Vector3 } from 'three'
-import { EARTH_RADIUS_KM, latLonToWorld } from '@/lib/geo'
+import { BufferAttribute, BufferGeometry, Matrix4, Mesh, PerspectiveCamera, Vector2, Vector3 } from 'three'
+import { DEG, EARTH_RADIUS_KM, gmst, latLonToWorld } from '@/lib/geo'
 import { easeInOut, easeOut } from '@/lib/ease'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { Pass, SatCategory } from '@/types'
 import { palette } from '@/ui/system/palette'
+import { damp } from './cameraMath'
 import { getSatInfo, groundTrack, propagate } from './data'
 import { Hairline } from './hairline'
-import { createRibbonMaterial, lin, type RibbonLook } from './materials'
+import { createCurtainMaterial, createRibbonMaterial, createSpacecraftMaterial, lin, type RibbonLook } from './materials'
 import { FRAME, useRuntime } from './runtime'
 import { SatGlyph, useSatAnchor, type MarkTone, type SatTrackFn } from './SatMarker'
-import { buildRibbon, fieldModelFor, sweptAcross } from './swath'
+import { buildSpacecraftGeometry, SPACECRAFT_SPAN } from './spacecraft'
+import { buildRibbon, fieldModelFor } from './swath'
 
 /** Trail length behind the satellite (≈ 2,500 km: enough to read the direction, short of the screen edge), and its sampling. */
 const TRAIL_MS = 6 * 60_000
 const TRAIL_STEP_S = 20
-/** A sim-time jump larger than this is a seek, not playback: no flash. */
-const MAX_PLAYBACK_STEP_MS = 5 * 60_000
+/** The dashed full-orbit ring: samples per orbit (dash = one sample on, one off). */
+const RING_SAMPLES = 220
+/** The spacecraft model's wing span on screen (CSS px). */
+const CRAFT_PX = { desktop: 46, phone: 36 }
+/** Light curtain: columns across the swath; ground lift (matches the ribbon). */
+const CURTAIN_COLS = 32
+const CURTAIN_LIFT = 1.0006
+/** After the capture of an imaged pass the curtain bows out: the developed image speaks. */
+const CURTAIN_AFTER_CAPTURE_MS = 900
 /** The ribbon covers this much ground track either side of the place. */
 export const RIBBON_CLIP_KM = 700
 const FADE_IN_MS = 500
@@ -91,6 +106,9 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   const field = useMemo(() => fieldModelFor(info), [info])
   const look = useMemo(() => lookFor(pass, category, field.mode), [pass, category, field.mode])
   const pointable = field.mode === 'regard' || pass.verdict === 'could'
+  // Imaging spacecraft get the model and the curtain; crewed / ambient objects keep their glyph and a nadir line.
+  const imager = category !== 'crewed' && category !== 'other'
+  const curtainOn = imager && field.mode !== 'none'
 
   // ── ribbon
   const ribbon = useMemo(() => {
@@ -120,11 +138,54 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
     return {
       nadir: new Hairline({ capacity: 1, color: lin(palette.bone), opacity: 0.55, uPx: rt.uniforms.uPx }),
       view: new Hairline({ capacity: 1, color: look.color, opacity: 0.75, uPx: rt.uniforms.uPx }),
-      trail: new Hairline({ capacity: trailN, color: look.color, opacity: 0.5, uPx: rt.uniforms.uPx }),
+      trail: new Hairline({ capacity: trailN, color: look.color, opacity: 0.55, uPx: rt.uniforms.uPx }),
       trailPts: Array.from({ length: trailN + 1 }, () => new Vector3()),
       trailAlpha: new Float32Array(trailN + 1),
+      ring: new Hairline({ capacity: RING_SAMPLES, color: lin(palette.bone), opacity: 0.16, uPx: rt.uniforms.uPx }),
+      edges: new Hairline({ capacity: 2, color: look.color.clone().multiplyScalar(1.15), opacity: 0.85, uPx: rt.uniforms.uPx }),
+      edgePts: [new Vector3(), new Vector3(), new Vector3()],
     }
   }, [rt, look])
+
+  // ── the full orbit, as an inertial ring: sampled positions rotated back by GMST at their own time (the mesh then
+  // turns with -GMST every frame, like the stars), so it passes through the spacecraft at any sim time.
+  const orbitRing = useMemo(() => {
+    const periodMs = (2 * Math.PI * Math.sqrt((EARTH_RADIUS_KM + pass.altitudeKm) ** 3 / 398600.4418)) * 1000
+    const pts: Vector3[] = []
+    const alpha = new Float32Array(RING_SAMPLES + 1)
+    const Y = new Vector3(0, 1, 0)
+    for (let i = 0; i <= RING_SAMPLES; i++) {
+      const t = pass.tClosest + (i / RING_SAMPLES - 0.5) * periodMs
+      const st = propagate(pass.norad, t)
+      if (!st) continue
+      pts.push(latLonToWorld(st.lat, st.lon, 1 + st.altKm / EARTH_RADIUS_KM).applyAxisAngle(Y, gmst(t)))
+    }
+    for (let i = 0; i < pts.length; i++) alpha[i] = i % 4 < 2 ? 1 : 0
+    lines.ring.setPoints(pts, alpha)
+    return pts.length > 2
+  }, [pass, lines])
+
+  // ── the spacecraft model and the light curtain
+  const craft = useMemo(() => ({ geometry: buildSpacecraftGeometry(), material: createSpacecraftMaterial(rt.uniforms.uSunDir) }), [rt])
+  const curtain = useMemo(() => {
+    const n = CURTAIN_COLS + 2
+    const g = new BufferGeometry()
+    const pos = new BufferAttribute(new Float32Array(n * 3), 3)
+    pos.setUsage(35048) // DynamicDrawUsage
+    const v = new Float32Array(n)
+    const sAttr = new Float32Array(n)
+    for (let j = 0; j <= CURTAIN_COLS; j++) {
+      v[j + 1] = 1
+      sAttr[j + 1] = (j / CURTAIN_COLS) * 2 - 1
+    }
+    const index: number[] = []
+    for (let j = 0; j < CURTAIN_COLS; j++) index.push(0, j + 1, j + 2)
+    g.setAttribute('position', pos)
+    g.setAttribute('aV', new BufferAttribute(v, 1))
+    g.setAttribute('aS', new BufferAttribute(sAttr, 1))
+    g.setIndex(index)
+    return { geometry: g, material: createCurtainMaterial(look.color.clone()) }
+  }, [look])
 
   useEffect(
     () => () => {
@@ -133,8 +194,14 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
       lines.nadir.dispose()
       lines.view.dispose()
       lines.trail.dispose()
+      lines.ring.dispose()
+      lines.edges.dispose()
+      craft.geometry.dispose()
+      craft.material.dispose()
+      curtain.geometry.dispose()
+      curtain.material.dispose()
     },
-    [ribbon, ribbonMat, lines],
+    [ribbon, ribbonMat, lines, craft, curtain],
   )
 
   // Fade state. `time` is the sim time this scene draws: the clock while selected, frozen once it leaves (the
@@ -142,8 +209,9 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   const fade = useRef(0)
   const anim = useRef({ active: true, from: 0, to: 1, start: performance.now(), dur: FADE_IN_MS, time: rt.simTime, gone: false })
 
-  // Satellite state at the scene's time, shared by the glyph, callout and lines (computed once per frame).
-  const sat = useRef({ at: NaN, ok: false, pos: new Vector3(), ground: new Vector3(), altKm: 0 })
+  // Satellite state at the scene's time, shared by the model, callout and lines (computed once per frame): position,
+  // ground point and the along-track direction (from a second sample 2 s later).
+  const sat = useRef({ at: NaN, ok: false, pos: new Vector3(), ground: new Vector3(), ahead: new Vector3(), altKm: 0 })
   const sample = (ms: number) => {
     const s = sat.current
     if (s.at === ms) return s
@@ -154,6 +222,9 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
       latLonToWorld(st.lat, st.lon, 1 + st.altKm / EARTH_RADIUS_KM, s.pos)
       latLonToWorld(st.lat, st.lon, 1.0004, s.ground)
       s.altKm = st.altKm
+      const b = propagate(pass.norad, ms + 2000)
+      if (b) latLonToWorld(b.lat, b.lon, 1 + b.altKm / EARTH_RADIUS_KM, s.ahead)
+      else s.ahead.copy(s.pos)
     }
     return s
   }
@@ -167,10 +238,17 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   const nadirMesh = useRef<Mesh>(null)
   const viewMesh = useRef<Mesh>(null)
   const trailMesh = useRef<Mesh>(null)
+  const ringMesh = useRef<Mesh>(null)
+  const craftMesh = useRef<Mesh>(null)
+  const curtainMesh = useRef<Mesh>(null)
+  const edgesMesh = useRef<Mesh>(null)
   const trailCache = useRef({ t0: NaN, pts: [] as Vector3[] })
   const twoPts = useMemo(() => [new Vector3(), new Vector3()], [])
+  const tmp = useMemo(() => ({ x: new Vector3(), y: new Vector3(), z: new Vector3(), m: new Matrix4(), g: new Vector3(), right: new Vector3(), q: new Vector3() }), [])
+  const live = useRef(0)
 
-  useFrame((state) => {
+  useFrame((state, dtRaw) => {
+    const dt = Math.min(dtRaw, 0.1)
     const perfNow = performance.now()
     const a = anim.current
     // ── selected or leaving (read every frame, so the frame of the deselect already freezes time)
@@ -205,15 +283,102 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
     lines.trail.setFade(f)
 
     const s = sample(now)
-    const inWindow = now >= pass.track[0].t - 60_000 && now <= pass.track[pass.track.length - 1].t + 60_000
+    const st = useApp.getState()
+    const acq = rt.acq
+    const isAcq = acq.passId === pass.id
 
-    // Nadir line.
-    if (nadirMesh.current) nadirMesh.current.visible = s.ok && f > 0.004
-    if (s.ok) {
+    // ── the sequence is LIVE while the replay runs (or a live sequence is armed). For an imaged pass the curtain bows
+    // out shortly after the capture; and never while the camera sits below the spacecraft (the settled close view).
+    let liveWant = active && (st.timeMode === 'replay' || (isAcq && acq.armed)) ? 1 : 0
+    if (isAcq && acq.imaged && acq.capturedAt > acq.armedAt && perfNow - acq.capturedAt > CURTAIN_AFTER_CAPTURE_MS) liveWant = 0
+    if (s.ok && rt.camera.altitudeKm < s.altKm * 1.15) liveWant = 0
+    live.current += (liveWant - live.current) * damp(dt, rt.reducedMotion ? 0.05 : 0.16)
+    const L = live.current * f
+    u.uRate.value = isAcq ? acq.rate : st.timeMode === 'replay' ? st.replayRate : 0
+    u.uLive.value = live.current
+
+    // Nadir line (glyph objects only: the curtain says it for imagers).
+    if (nadirMesh.current) nadirMesh.current.visible = !curtainOn && s.ok && f > 0.004
+    if (s.ok && !curtainOn) {
       twoPts[0].copy(s.pos)
       twoPts[1].copy(s.ground)
       lines.nadir.setPoints(twoPts)
     }
+
+    // ── spacecraft: along-track X, zenith Z, constant on-screen size, sunlit unless in Earth's shadow.
+    const cm = craftMesh.current
+    if (cm) {
+      cm.visible = imager && s.ok && f > 0.004
+      if (cm.visible) {
+        const { x, y, z } = tmp
+        z.copy(s.pos).normalize()
+        x.copy(s.ahead).sub(s.pos)
+        x.addScaledVector(z, -x.dot(z))
+        if (x.lengthSq() < 1e-14) x.set(0, 1, 0).addScaledVector(z, -z.y)
+        x.normalize()
+        y.crossVectors(z, x)
+        tmp.m.makeBasis(x, y, z)
+        cm.quaternion.setFromRotationMatrix(tmp.m)
+        cm.position.copy(s.pos)
+        const cam = state.camera as PerspectiveCamera
+        const dist = cam.position.distanceTo(s.pos)
+        const worldPerPx = (2 * dist * Math.tan((cam.fov * DEG) / 2)) / Math.max(1, state.size.height)
+        cm.scale.setScalar(((rt.tier.mobile ? CRAFT_PX.phone : CRAFT_PX.desktop) * worldPerPx) / SPACECRAFT_SPAN)
+        // Earth's shadow: a cylinder of radius 1 behind the planet, with a soft penumbra.
+        const sd = rt.sunDir
+        const along = s.pos.dot(sd)
+        const off = tmp.q.copy(s.pos).addScaledVector(sd, -along).length()
+        const lit = along >= 0 ? 1 : Math.min(1, Math.max(0, (off - 0.985) / 0.03))
+        const cu = craft.material.uniforms
+        cu.uLit.value = lit
+        cu.uOpacity.value = f
+      }
+    }
+
+    // ── the light curtain: apex at the spacecraft, foot across the swath through the sub-satellite point.
+    const curt = curtainMesh.current
+    const curtainVisible = curtainOn && s.ok && L > 0.004
+    if (curt) curt.visible = curtainVisible
+    if (edgesMesh.current) edgesMesh.current.visible = curtainVisible
+    if (curtainVisible) {
+      const { g, right, q } = tmp
+      g.copy(s.pos).normalize()
+      const tdir = tmp.x.copy(s.ahead).sub(s.pos)
+      tdir.addScaledVector(g, -tdir.dot(g)).normalize()
+      right.crossVectors(tdir, g).normalize()
+      const delta = Math.max(20, field.halfWidthKm(s.altKm)) / EARTH_RADIUS_KM
+      const attr = curtain.geometry.attributes.position as BufferAttribute
+      const arr = attr.array as Float32Array
+      arr[0] = s.pos.x
+      arr[1] = s.pos.y
+      arr[2] = s.pos.z
+      for (let j = 0; j <= CURTAIN_COLS; j++) {
+        const a = ((j / CURTAIN_COLS) * 2 - 1) * delta
+        q.copy(g).multiplyScalar(Math.cos(a)).addScaledVector(right, Math.sin(a)).multiplyScalar(CURTAIN_LIFT)
+        arr[(j + 1) * 3] = q.x
+        arr[(j + 1) * 3 + 1] = q.y
+        arr[(j + 1) * 3 + 2] = q.z
+        if (j === 0) lines.edgePts[0].copy(q)
+        if (j === CURTAIN_COLS) lines.edgePts[2].copy(q)
+      }
+      attr.needsUpdate = true
+      curtain.geometry.computeBoundingSphere()
+      const cu = curtain.material.uniforms
+      cu.uOpacity.value = L * (field.mode === 'regard' ? 0.5 : 1)
+      cu.uTime.value = perfNow / 1000
+      lines.edgePts[1].copy(s.pos)
+      lines.edges.setPoints(lines.edgePts, EDGE_ALPHA)
+      lines.edges.setResolution(tmpRes.x, tmpRes.y)
+      lines.edges.setFade(L)
+    }
+
+    // ── the full orbit ring (inertial: turns with GMST, as the stars do)
+    if (ringMesh.current) {
+      ringMesh.current.visible = orbitRing && f > 0.004
+      ringMesh.current.rotation.y = -rt.gmst
+    }
+    lines.ring.setResolution(tmpRes.x, tmpRes.y)
+    lines.ring.setFade(f)
 
     // View line to the place, for pointable imagers while the place is in their field of regard.
     const viewOn = pointable && s.ok && !!placePos && now >= pass.tStart && now <= pass.tEnd && f > 0.004
@@ -247,26 +412,30 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
     }
     if (trailMesh.current) trailMesh.current.visible = s.ok && f > 0.004
 
-    // Flash the reticle when the front crosses the place on an imaged pass (the scan line is abeam of the place
-    // at closest approach).
-    if (active && pass.verdict === 'imaged' && inWindow && sweptAcross(rt.prevSimTime, rt.simTime, pass.tClosest, MAX_PLAYBACK_STEP_MS)) {
-      rt.flashAt = perfNow
-    }
   }, FRAME.scene)
 
   useSatAnchor(passAnchorId(pass.id), track)
   return (
     <>
       <mesh geometry={ribbon} material={ribbonMat} renderOrder={3} />
+      <mesh ref={ringMesh} geometry={lines.ring.geometry} material={lines.ring.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={trailMesh} geometry={lines.trail.geometry} material={lines.trail.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={nadirMesh} geometry={lines.nadir.geometry} material={lines.nadir.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={viewMesh} geometry={lines.view.geometry} material={lines.view.material} frustumCulled={false} renderOrder={4} />
-      <SatGlyph category={category} imaged={pass.verdict === 'imaged'} tone={look.tone} track={track} fade={fade} />
+      <mesh ref={curtainMesh} geometry={curtain.geometry} material={curtain.material} frustumCulled={false} renderOrder={4} visible={false} />
+      <mesh ref={edgesMesh} geometry={lines.edges.geometry} material={lines.edges.material} frustumCulled={false} renderOrder={4} visible={false} />
+      {imager ? (
+        <mesh ref={craftMesh} geometry={craft.geometry} material={craft.material} frustumCulled={false} renderOrder={6} visible={false} />
+      ) : (
+        <SatGlyph category={category} imaged={pass.verdict === 'imaged'} tone={look.tone} track={track} fade={fade} />
+      )}
     </>
   )
 }
 
 const tmpRes = new Vector2()
+/** Curtain edge hairlines: bright at the ground, fading toward the spacecraft. */
+const EDGE_ALPHA = [0.9, 0.3, 0.9]
 
 /** The view line fades toward the ground so it reads as a line of sight, not a tether. */
 const VIEW_ALPHA = [0.9, 0.35]

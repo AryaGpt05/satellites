@@ -6,7 +6,7 @@
  * Ordering is fixed by useFrame priorities (see FRAME below).
  */
 import { createContext, useContext } from 'react'
-import { Vector3, type Texture } from 'three'
+import { Vector3, Vector4, type Texture } from 'three'
 import type { CameraIntent, Phase } from '@/state/store'
 import { createAcqState, type AcqState } from './acquisition'
 import type { TextureLevel } from './framing'
@@ -58,6 +58,11 @@ export interface GlobeRuntime {
     /** The cloud map currently bound to the cloud shell (overlays read cloud cover from it); null before load */
     uCloudMap: { value: Texture | null }
   }
+  /**
+   * Regional imagery painted onto the planet (shaders/chunks.ts PAINT), shared by reference by the Earth and the cloud
+   * shell; written by <Imagery/> every frame.
+   */
+  paint: PaintUniforms
   tier: QualityTier
   reducedMotion: boolean
   camera: {
@@ -115,6 +120,38 @@ export interface GlobeRuntime {
   calloutBox: { x0: number; y0: number; x1: number; y1: number; visible: boolean }
 }
 
+export interface PaintUniforms {
+  uCtxMap: { value: Texture | null }
+  uCtxUv: { value: Vector4 }
+  uCtxOn: { value: number }
+  uDecalMap: { value: Texture | null }
+  uDecalUv: { value: Vector4 }
+  uDecalOn: { value: number }
+  uScanT0: { value: Vector3 }
+  uScanS: { value: number }
+  uFull: { value: number }
+  uFreshRad: { value: number }
+  uPanelHalf: { value: number }
+  uCloudFade: { value: number }
+}
+
+export function createPaintUniforms(): PaintUniforms {
+  return {
+    uCtxMap: { value: null },
+    uCtxUv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
+    uCtxOn: { value: 0 },
+    uDecalMap: { value: null },
+    uDecalUv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
+    uDecalOn: { value: 0 },
+    uScanT0: { value: new Vector3(0, 1, 0) },
+    uScanS: { value: 0 },
+    uFull: { value: 1 },
+    uFreshRad: { value: 0.001 },
+    uPanelHalf: { value: 0 },
+    uCloudFade: { value: 1 },
+  }
+}
+
 export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: number): GlobeRuntime {
   const sunDir = new Vector3(1, 0, 0)
   return {
@@ -128,6 +165,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
       uPx: { value: 1 },
       uCloudMap: { value: null },
     },
+    paint: createPaintUniforms(),
     tier,
     reducedMotion,
     camera: { flying: false, arrivedAt: -Infinity, arrivedKind: null, flightId: 0, progress: 1, altitudeKm: 0 },

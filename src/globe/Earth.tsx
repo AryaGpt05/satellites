@@ -12,7 +12,7 @@ import { palette } from '@/ui/system/palette'
 import { atmosphereFragment, atmosphereVertex } from './shaders/atmosphere'
 import { cloudsFragment, cloudsVertex } from './shaders/clouds'
 import { earthFallbackFragment, earthFragment, earthVertex } from './shaders/earth'
-import { FRAME, useRuntime } from './runtime'
+import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
 import type { EarthTextures } from './textures'
 
 import { lin } from './materials'
@@ -38,6 +38,23 @@ export function useSphere(segments: number) {
   const geo = useMemo(() => new SphereGeometry(1, segments, Math.round(segments / 2)), [segments])
   useEffect(() => () => geo.dispose(), [geo])
   return geo
+}
+
+/** The painted-imagery uniforms (chunks.ts PAINT), shared by reference so one write updates both shells. */
+function paintUniforms(rt: GlobeRuntime) {
+  const p = rt.paint
+  return {
+    uCtxMap: p.uCtxMap,
+    uCtxUv: p.uCtxUv,
+    uCtxOn: p.uCtxOn,
+    uDecalMap: p.uDecalMap,
+    uDecalUv: p.uDecalUv,
+    uDecalOn: p.uDecalOn,
+    uScanT0: p.uScanT0,
+    uScanS: p.uScanS,
+    uFull: p.uFull,
+    uFreshRad: p.uFreshRad,
+  }
 }
 
 /** Shader defines for the device tier. */
@@ -67,6 +84,10 @@ export function Earth({ textures, geometry }: { textures: EarthTextures; geometr
           uHazeColor: { value: lin('#b4cde6') },
           uNightTint: { value: new Color(0.86, 0.92, 1.0) },
           uReveal: { value: 0 },
+          ...paintUniforms(rt),
+          uFreshColor: { value: lin(palette.signal) },
+          uPanelHalf: rt.paint.uPanelHalf,
+          uPanelColor: { value: lin(palette.bone) },
         },
       }),
     // Created once; textures are re-bound below.
@@ -132,6 +153,8 @@ export function Clouds({ textures, geometry }: { textures: EarthTextures; geomet
           uTwilightColor: { value: lin(palette.terminator) },
           uNightColor: { value: lin(palette.ink1) },
           uOpacity: { value: 0 },
+          ...paintUniforms(rt),
+          uCloudFade: rt.paint.uCloudFade,
         },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -18,13 +18,17 @@ import { useCatalogBuffers } from './data'
 import { Atmosphere, Clouds, Earth, EarthFallback, useSphere } from './Earth'
 import { Hairline } from './hairline'
 import {
+  createCurtainMaterial,
   createFadeMaterial,
   createGlyphMaterial,
   createReticleMaterial,
   createRibbonMaterial,
   createSatellitesMaterial,
+  createSpacecraftMaterial,
   lin,
 } from './materials'
+import { buildSpacecraftGeometry } from './spacecraft'
+import { Imagery } from './Imagery'
 import { PassOverlay } from './PassOverlay'
 import { PlaceMarker } from './PlaceMarker'
 import { usePost } from './Post'
@@ -68,6 +72,7 @@ export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
       )}
       {textures.state === 'error' && <EarthFallback />}
       {textures.state !== 'loading' && <Atmosphere />}
+      {textures.state === 'ready' && <Imagery />}
       {catalog.state === 'ready' && <SatelliteField data={catalog.data} />}
       <PlaceMarker />
       {catalog.state === 'ready' && <PassOverlay />}
@@ -131,6 +136,8 @@ function ShaderWarmup({ composer }: { composer: EffectComposer }) {
     }
     const ribbonGeo = one()
     for (const a of ['aAlong', 'aSide', 'aU']) ribbonGeo.setAttribute(a, new BufferAttribute(new Float32Array(1), 1))
+    const curtainGeo = one()
+    for (const a of ['aV', 'aS']) curtainGeo.setAttribute(a, new BufferAttribute(new Float32Array(1), 1))
     const satGeo = one()
     for (const a of ['aEl0', 'aEl1', 'aEl2']) satGeo.setAttribute(a, new BufferAttribute(new Float32Array(4), 4))
     satGeo.setAttribute('aMark', new BufferAttribute(new Float32Array(1), 1))
@@ -145,9 +152,13 @@ function ShaderWarmup({ composer }: { composer: EffectComposer }) {
       new Points(one(), createGlyphMaterial(rt.uniforms.uPx, { size: 13, shape: 0, filled: true })),
       new Mesh(new PlaneGeometry(2, 2), createFadeMaterial()),
       new Points(satGeo, createSatellitesMaterial(rt.uniforms.uPx)),
+      // The acquisition sequence's spacecraft (its real geometry: normals and uv are part of the program key) and curtain.
+      new Mesh(buildSpacecraftGeometry(), createSpacecraftMaterial(rt.uniforms.uSunDir)),
+      new Mesh(curtainGeo, createCurtainMaterial(lin('#ffffff'))),
     ]
     for (const o of objects) {
       o.frustumCulled = false
+      o.scale.setScalar(1e-6) // compile and draw, but never cover a pixel
       const m = o.material as Material & { uniforms?: Record<string, { value: unknown }> }
       if (m.uniforms?.uOpacity) m.uniforms.uOpacity.value = 0
       if (m.uniforms?.uReveal) m.uniforms.uReveal.value = 0

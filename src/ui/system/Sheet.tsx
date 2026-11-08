@@ -26,7 +26,8 @@
  * `data-snap` and `data-at-max` for children and tests. Mark anything inside that handles its own
  * vertical drags with `data-sheet-nodrag`.
  *
- * Position is written imperatively (transform + transition on the section, `bottom` on the footer);
+ * Position is written imperatively (transform + transition on the section, and the opposite transform
+ * on the footer, so both moves stay on the compositor and never lay out);
  * React only renders the height and the snap variables.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
@@ -197,7 +198,7 @@ export function Sheet({
     const foot = footRef.current
     if (foot) {
       foot.style.transition = 'none'
-      foot.style.bottom = `${offset}px`
+      foot.style.transform = `translate3d(0, ${-offset}px, 0)`
     }
     pos.current = { max: live.current.max, offset, settle: null }
   }
@@ -212,8 +213,9 @@ export function Sheet({
     el.style.transform = `translate3d(0, ${offset}px, 0)`
     const foot = footRef.current
     if (foot) {
-      foot.style.transition = `bottom ${dur}ms var(--ease-out)`
-      foot.style.bottom = `${offset}px`
+      // The same curve and start as the sheet's: the two composited moves cancel, the footer holds still.
+      foot.style.transition = `transform ${dur}ms var(--ease-out)`
+      foot.style.transform = `translate3d(0, ${-offset}px, 0)`
     }
     const settle: Settle = { from, to: offset, t0: performance.now(), ms: Math.max(1, dur) }
     pos.current = { max: live.current.max, offset, settle }
@@ -242,7 +244,7 @@ export function Sheet({
       el.style.transform = ''
       el.style.transition = ''
       if (footRef.current) {
-        footRef.current.style.bottom = ''
+        footRef.current.style.transform = ''
         footRef.current.style.transition = ''
       }
       pos.current = null

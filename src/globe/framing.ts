@@ -309,6 +309,67 @@ export function passPose(vp: Viewport, insets: Insets, pass: Pass, place: { lat:
   }
 }
 
+// ───────────────────────────── acquisition sequence (owner request C) ─────────────────────────────
+
+/** Chase tilt during the approach (oblique, north-up: a gentle chase, never a yaw swing). */
+export const CHASE_TILT = { stacked: 46 * DEG, desktop: 52 * DEG }
+/** Share of the free rect's limiting span that the spacecraft-to-place distance fills in the chase. */
+const CHASE_FILL = 0.6
+/** Share of the free rect's limiting span the painted image fills in the acquired view. */
+const ACQ_FILL = 0.58
+/** The acquired view's tilt: near top-down, so the globe's image lines up with the panel's (north-up). */
+export const ACQ_TILT = 5 * DEG
+
+const _s = new Vector3()
+const _m = new Vector3()
+
+/**
+ * The approach: an oblique north-up view whose look-at sits halfway between the place (on the ground) and the
+ * spacecraft (in orbit), at the range that fits both, so the spacecraft, its light curtain and the place all read
+ * while the camera glides along with the pass. `satWorld` is the spacecraft's world position (Earth radii).
+ */
+export function chasePose(vp: Viewport, insets: Insets, satWorld: Vector3, place: { lat: number; lon: number }): PoseSpec {
+  const stacked = isPhone(vp)
+  latLonToDir(place.lat, place.lon, _s)
+  _m.copy(_s).add(satWorld).multiplyScalar(0.5)
+  const r = _m.length()
+  const lat = Math.asin(clamp(_m.y / r, -1, 1)) * RAD
+  const lon = Math.atan2(-_m.z, _m.x) * RAD
+  const dKm = _s.distanceTo(satWorld) * EARTH_RADIUS_KM
+  return {
+    lat,
+    lon,
+    r,
+    headingDeg: 0,
+    range: clamp(rangeForGroundKm(vp, freeRect(vp, insets), dKm / CHASE_FILL), 0.1, 1.6),
+    tilt: stacked ? CHASE_TILT.stacked : CHASE_TILT.desktop,
+    ...freeShift(vp, insets),
+  }
+}
+
+/**
+ * The settled view of an imaged pass: near top-down, north-up, centred on the place, framing the image painted onto
+ * the globe (2 × halfKm square). It may come closer than the base map's floor: the painted image (and the regional
+ * basemap patch under it) carry the detail there.
+ */
+export function acquiredPose(vp: Viewport, insets: Insets, place: { lat: number; lon: number }, halfKm: number): PoseSpec {
+  return {
+    lat: place.lat,
+    lon: place.lon,
+    headingDeg: 0,
+    range: clamp(rangeForGroundKm(vp, freeRect(vp, insets), (2 * halfKm) / ACQ_FILL), 0.02, 1.9),
+    tilt: ACQ_TILT,
+    ...freeShift(vp, insets),
+  }
+}
+
+function latLonToDir(lat: number, lon: number, out: Vector3): Vector3 {
+  const la = lat * DEG
+  const lo = lon * DEG
+  const c = Math.cos(la)
+  return out.set(c * Math.cos(lo), Math.sin(la), -c * Math.sin(lo))
+}
+
 /** Chase view: behind and above the satellite, looking along its motion. */
 export function satellitePose(
   vp: Viewport,

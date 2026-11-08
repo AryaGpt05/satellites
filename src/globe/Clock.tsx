@@ -8,7 +8,10 @@
  *    flight (or over 900 ms without one), so the terminator sweeps instead of the planet flipping night↔day (M04);
  *  - drift the clouds (wall time, very slowly; frozen under prefers-reduced-motion);
  *  - track the app phase and when it was entered (texture / DPR gating), when the replay sweep last started (no
- *    texture uploads during it), and publish the device pixel ratio.
+ *    texture uploads during it), and publish the device pixel ratio;
+ *  - run the selected pass's acquisition sequence (acquisition.ts, rt.acq): a fresh replay arms it (rewinding the
+ *    seeded start when the approach would be too short to read), the replay slows around closest approach on an
+ *    imaged pass so the image paints over ~1.6 s, and the crossing of closest approach is the capture moment.
  */
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
@@ -16,9 +19,12 @@ import { Vector3 } from 'three'
 import { gmst, sunDirectionWorld } from '@/lib/geo'
 import { easeInOut } from '@/lib/ease'
 import { sceneClock } from '@/state/sceneClock'
-import { useApp } from '@/state/store'
+import { selectSelectedPass, useApp } from '@/state/store'
+import type { Pass, Report } from '@/types'
+import { approachStart, captureOf, decalSpecFor, scanAt, scanFrame, slowFactor, slowWindowS, type AcqState } from './acquisition'
 import { createClock, stepClock } from './clock'
 import { FRAME, useRuntime } from './runtime'
+import { sweptAcross } from './swath'
 
 /** One full cloud-layer drift every 8 hours of wall time: perceptible only if you stare. */
 const CLOUD_DRIFT_PER_S = 1 / (8 * 3600)
@@ -76,23 +82,62 @@ export function Clock() {
 
     // Replay waits for the camera: the sweep starts on arrival, not mid-flight.
     const hold = st.timeMode === 'replay' && rt.camera.flying
+    // ── acquisition sequence: which pass, and whether this frame starts a fresh one.
+    const acq = rt.acq
+    const pass = st.report && st.selectedPassId ? selectSelectedPass(st) : undefined
+    const passChanged = (pass?.id ?? '') !== acq.passId
+    if (passChanged) resetAcq(acq, pass, st.report, rt.tier.mobile)
+    const c = clock.current
+    const modeEntered = st.timeMode === 'replay' && c.mode !== 'replay'
+    const seeked = st.simTime !== c.lastWritten
+    let storeSimTime = st.simTime
+    if (pass && st.timeMode === 'replay' && seeked && (modeEntered || passChanged) && !rt.reducedMotion && st.simTime < acq.tc) {
+      // A fresh replay of this pass: arm the sequence, and give the approach room to read.
+      storeSimTime = approachStart(st.simTime, acq.tc, acq.halfKm, acq.speedKmS, st.replayRate)
+      if (storeSimTime !== st.simTime) c.lastWriteAt = -Infinity // the rewound start goes back to the store this frame
+      acq.armed = true
+      acq.armedAt = perfNow
+      acq.capturedAt = -Infinity
+      acq.full = 0
+    } else if (acq.armed && (st.timeMode === 'live' || (st.timeMode === 'scrub' && seeked))) {
+      acq.armed = false // the user took the clock: the image settles, the camera rests
+    }
+    const slow =
+      pass && st.timeMode === 'replay' && acq.halfKm > 0 && !rt.reducedMotion
+        ? slowFactor(c.simTime, acq.tc, acq.halfKm, acq.speedKmS, st.replayRate)
+        : 1
     // The sweep (re)starts when replay begins, and again when a hold releases on arrival (a pass picked mid-replay).
     const r = replay.current
     if (st.timeMode === 'replay' && (r.mode !== 'replay' || (r.hold && !hold))) rt.replayStartedAt = perfNow
     r.mode = st.timeMode
     r.hold = hold
-    const { write } = stepClock(clock.current, {
+    const { write } = stepClock(c, {
       mode: st.timeMode,
-      storeSimTime: st.simTime,
+      storeSimTime,
       replayRate: st.replayRate,
-      dt: hold ? 0 : dt,
+      dt: hold ? 0 : dt * slow,
       now,
     })
     rt.prevSimTime = rt.simTime
-    rt.simTime = clock.current.simTime
+    rt.simTime = c.simTime
     sceneClock.simTime = rt.simTime
     sceneClock.mode = st.timeMode
     if (write !== undefined) st.setSimTime(write)
+
+    // The capture moment: playback carries sim time across closest approach.
+    if (pass && st.timeMode === 'replay' && sweptAcross(rt.prevSimTime, rt.simTime, acq.tc)) {
+      acq.capturedAt = perfNow
+      acq.armed = false
+      if (acq.imaged) rt.flashAt = perfNow
+    }
+    acq.rate = st.timeMode === 'replay' && !hold ? st.replayRate * slow : 0
+    acq.scanS = scanAt(rt.simTime, acq.tc, acq.speedKmS)
+    // Development: sweep-driven while the sequence is live (and until the scan line has crossed the whole image
+    // after the capture), otherwise the image is simply there.
+    const painting =
+      acq.armed ||
+      (st.timeMode === 'replay' && acq.capturedAt > acq.armedAt && acq.armedAt > -Infinity && rt.simTime < acq.tc + slowWindowS(acq.halfKm, acq.speedKmS) * 1000)
+    acq.full = painting ? 0 : Math.min(1, acq.full + Math.min(dt, 0.1) / 0.4)
 
     // ── sun, with a glide across time jumps
     const g = glide.current
@@ -149,4 +194,25 @@ export function Clock() {
   }, FRAME.clock)
 
   return null
+}
+
+/** A new selected pass (or none): the sequence starts settled; a fresh replay arms it. */
+function resetAcq(acq: AcqState, pass: Pass | undefined, report: Report | undefined, mobile: boolean) {
+  acq.passId = pass?.id ?? ''
+  acq.armed = false
+  acq.armedAt = -Infinity
+  acq.capturedAt = -Infinity
+  acq.full = 1
+  if (!pass) {
+    acq.imaged = false
+    acq.halfKm = 0
+    return
+  }
+  acq.tc = pass.tClosest
+  acq.speedKmS = pass.groundSpeedKmS > 0 ? pass.groundSpeedKmS : 6.8
+  const cap = pass.verdict === 'imaged' ? captureOf(report, pass) : undefined
+  const spec = cap ? decalSpecFor(cap.collection, mobile) : null
+  acq.imaged = !!spec
+  acq.halfKm = spec ? spec.halfSizeKm : 0
+  scanFrame(pass, acq.p0, acq.t0)
 }

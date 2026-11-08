@@ -25,15 +25,15 @@ export const ribbonVertex = glsl`
 `
 
 /**
- * Reveal model (DESIGN.md §5–6, V11): the swath reads as a SWEEP, not a slab.
- *  - Ahead of the front only the predicted edges show, as bone-4 hairlines.
- *  - The front is a 1 px signal line across the swath with a short trailing glow (uGlowPx CSS px, 30% → 0),
- *    the same mark as the pushbroom reveal in the panel.
- *  - Behind it the fill is freshest at the front and fades along-track over ~400 km to a faint persistent tint;
- *    the edges turn signal at 50%, so the swept corridor stays legible without becoming a block.
- *  - The fill thins over cloud (fill × (1 − 0.6 · cover)) and over unlit ground, so bright cloud never
- *    saturates to salmon. Every value stays ≤ 1.0, under the bloom threshold: the ribbon never blooms.
- * uKind: 0 = fixed swath (solid edges), 1 = field of regard (dashed edges, faint fill), 2 = track only.
+ * The swath as an OUTLINE with a scan line (owner request C: "not an orange slab"):
+ *  - Ahead of the front only the predicted edges show, as faint bone hairlines.
+ *  - The front is the SCAN LINE, where the light curtain meets the Earth: a bright signal core (~1.5 px, above the
+ *    bloom threshold so it glows a touch) with a short soft halo, mostly trailing; dimmer when no replay is running.
+ *  - Right behind it a FRESH-EXPOSURE glow: uFill decaying over ~400 ms of real time (uRate converts sim seconds),
+ *    so the ground looks freshly exposed and settles; no persistent fill (the developed image, or nothing, is what
+ *    remains). Behind the front the edges turn the verdict colour: the swept corridor reads as a hairline outline.
+ *  - Everything thins over cloud and unlit ground and stays modest, so bright cloud never turns salmon.
+ * uKind: 0 = fixed swath (solid edges), 1 = field of regard (dashed edges), 2 = track only.
  * The mesh is clipped to ±700 km along-track around the place (swath.ts clipAlongTrack); vU fades its ends.
  */
 export const ribbonFragment = glsl`
@@ -44,14 +44,17 @@ export const ribbonFragment = glsl`
   uniform int uKind;
   uniform vec3 uColor;        // the verdict's colour (signal / bone / ice)
   uniform vec3 uEdgeColor;    // bone: predicted (unswept) edges
+  uniform vec3 uFrontColor;   // the scan line's core (HDR signal)
   uniform float uFill;
   uniform float uOpacity;
   uniform vec3 uSunDir;
   uniform sampler2D uClouds;
   uniform float uHasClouds;
   uniform float uCloudOffset;
-  uniform float uSpeedKmS;    // ground speed, km/s: turns seconds behind the front into km
-  uniform float uGlowPx;      // trailing glow length, CSS px
+  uniform float uSpeedKmS;    // ground speed, km/s
+  uniform float uGlowPx;      // trailing halo length, CSS px
+  uniform float uRate;        // sim s per real s right now (0 = not playing)
+  uniform float uLive;        // 0..1 the replay / acquisition is running
   varying float vAlong;
   varying float vSide;
   varying float vU;
@@ -86,44 +89,45 @@ export const ribbonFragment = glsl`
     float dashPx = vAlong / max(fwA, 1e-6) / max(uPx, 1.0);
     float dash = step(0.45, fract(dashPx / 11.0));
 
+    // Light thins the marks over unlit ground and over cloud.
+    float daylight = smoothstep(-0.08, 0.2, dot(normalize(vPos), normalize(uSunDir)));
+    float cover = 0.0;
+    if (uHasClouds > 0.5) {
+      vec3 n = normalize(vPos);
+      vec2 uv = vec2(0.5 + atan(-n.z, n.x) / TWO_PI + uCloudOffset, 0.5 + asin(clamp(n.y, -1.0, 1.0)) / PI);
+      // A fixed, blurred LOD: no derivative seam at the antimeridian, and modulation wants soft cloud anyway.
+      cover = cloudCover(textureLod(uClouds, uv, 3.0).r);
+    }
+
     vec4 acc = vec4(uColor, 0.0);
     if (uKind == 2) {
       acc = vec4(uColor, track * mix(0.3, 0.85, swept));
     } else {
-      // ── fill
-      float kmBehind = max(lead, 0.0) * uSpeedKmS;
-      float fresh = 1.0 - smoothstep(0.0, 400.0, kmBehind);
-      // Blending happens in linear light, where a fixed alpha reads far stronger over dark ground: give alpha
-      // back where the surface is unlit, and over cloud.
-      float daylight = smoothstep(-0.08, 0.2, dot(normalize(vPos), normalize(uSunDir)));
-      float cover = 0.0;
-      if (uHasClouds > 0.5) {
-        vec3 n = normalize(vPos);
-        vec2 uv = vec2(0.5 + atan(-n.z, n.x) / TWO_PI + uCloudOffset, 0.5 + asin(clamp(n.y, -1.0, 1.0)) / PI);
-        // A fixed, blurred LOD: no derivative seam at the antimeridian, and modulation wants soft cloud anyway.
-        cover = cloudCover(textureLod(uClouds, uv, 3.0).r);
-      }
-      float fillA = uFill * swept * mix(0.22, 1.0, fresh) * mix(0.5, 1.0, daylight) * (1.0 - 0.6 * cover);
-      // Trailing glow behind the front: uGlowPx CSS px, 30% → 0 (linear), on top of the fill.
-      float leadPx = lead / max(fwA, 1e-6) / max(uPx, 1.0);
-      float glow = swept * clamp(1.0 - leadPx / max(uGlowPx, 1.0), 0.0, 1.0) * 0.3;
-      acc = vec4(uColor, min(1.0, fillA + glow));
+      // ── fresh-exposure glow right behind the front (real-time decay; none when not playing)
+      float realBehind = uRate > 0.001 ? max(lead, 0.0) / uRate : 1e3;
+      float fresh = exp(-realBehind / 0.16) * swept;
+      float fillA = uFill * 3.2 * fresh * mix(0.5, 1.0, daylight) * (1.0 - 0.6 * cover);
+      acc = vec4(uColor, min(1.0, fillA));
 
-      // ── edges: bone-4 ahead of the front, the verdict colour at 50% behind it (dashed for a field of regard)
+      // ── edges: faint bone ahead of the front, the verdict colour behind it (dashed for a field of regard)
       float edgeOn = uKind == 1 ? edge * dash : edge;
       vec3 edgeCol = mix(uEdgeColor, uColor, swept);
-      acc = over(vec4(edgeCol, edgeOn * mix(0.18, 0.5, swept)), acc);
-      // The ground track is quieter than the edges: the ribbon already implies it.
-      float trackA = track * 0.36 * swept * (uKind == 1 ? 1.0 : dash);
+      acc = over(vec4(edgeCol, edgeOn * mix(0.16, 0.6, swept)), acc);
+      // The ground track is quieter than the edges: the outline already implies it.
+      float trackA = track * 0.22 * swept * (uKind == 1 ? 1.0 : dash);
       acc = over(vec4(uColor, trackA), acc);
 
-      // ── the front: a 1 px line across the swath
-      float leading = line(lead, fwA, w);
-      acc = over(vec4(uColor, leading), acc);
+      // ── the scan line: a bright core and a short soft halo, mostly trailing
+      float leadPx = lead / max(fwA, 1e-6) / max(uPx, 1.0);
+      float core = line(lead, fwA, w * 1.5);
+      float halo = leadPx > 0.0 ? exp(-leadPx / max(uGlowPx, 1.0)) : exp(leadPx / 1.5);
+      float frontA = max(core, halo * 0.32) * mix(0.45, 1.0, uLive) * mix(0.75, 1.0, daylight);
+      vec3 frontCol = mix(uColor, uFrontColor, core);
+      acc = over(vec4(frontCol, min(1.0, frontA)), acc);
     }
     float a = acc.a * ends * uOpacity;
     if (a < 0.003) discard;
-    gl_FragColor = vec4(min(acc.rgb, vec3(1.0)), a);
+    gl_FragColor = vec4(acc.rgb, a);
     ${OUTPUT}
   }
 `
@@ -151,7 +155,7 @@ export const reticleFragment = glsl`
   uniform float uRingBase;   // ring radius once locked, CSS px
   uniform float uLock;       // 0 → 1 as the reticle locks in
   uniform float uFlash;      // 1 → 0 after the swath crosses the place
-  uniform float uPulse;      // 0 → 1 expanding ring of the flash
+  uniform float uPulse;      // 0 → 1 linear time of the capture shockwave (0 = none)
   uniform vec3 uColor;
   uniform vec3 uInk;
   uniform float uOpacity;
@@ -188,9 +192,14 @@ export const reticleFragment = glsl`
     float halo = max(strokePx(r - R, fw, w * 4.5), max(dotC, 1.0 - smoothstep(dotR + 1.5, dotR + 3.5, r)));
     halo = max(halo, max(tickH, tickV) * uLock);
 
-    // Flash: the ring flares and a pulse expands from it.
-    float pulseR = R * (1.0 + 2.2 * uPulse);
-    float pulse = strokePx(r - pulseR, fw, w * 1.5) * (1.0 - uPulse) * step(0.001, uPulse);
+    // The capture shockwave: one ring runs out to ~6.5× the locked radius (ease-out), thinning and fading, with a
+    // faint wash inside its front.
+    float k = 1.0 - pow(1.0 - uPulse, 3.0);
+    float pulseR = uRingBase * (1.0 + 6.0 * k);
+    float fadeP = pow(1.0 - uPulse, 1.6) * step(0.001, uPulse);
+    float pulse = strokePx(r - pulseR, fw, w * mix(2.0, 1.0, uPulse)) * fadeP;
+    float wash = smoothstep(pulseR - 22.0, pulseR, r) * (1.0 - smoothstep(pulseR, pulseR + 1.0, r)) * 0.22 * fadeP;
+    pulse = max(pulse, wash);
 
     // The halo matters most when the reticle sits inside a signal swath: ink keeps the ring legible.
     float a = max(mark, halo * 0.55) * uOpacity;

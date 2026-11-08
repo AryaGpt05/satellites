@@ -7,9 +7,12 @@
  *  - cloud shadows: the cloud texture sampled toward the sun by the shell height / N·L
  *  - city lights tinted sodium amber, only on the dark side, dimmed under cloud
  *  - day-side haze toward the limb, matching the atmosphere rim colour
+ *  - regional imagery painted in (chunks.ts PAINT): a sharp basemap patch around the place, and the selected pass's
+ *    real image developing at the scan line, lit and graded like the rest of the planet (its own clouds replace the
+ *    global cloud layer's shadows there), with a hairline square marking the panel photo's extent
  * Output is linear HDR. Only city-light cores exceed 1.0 (so only they reach the bloom threshold).
  */
-import { CLOUD_COVER, COMMON, glsl, OUTPUT, TANGENT_FRAME } from './chunks'
+import { CLOUD_COVER, COMMON, glsl, OUTPUT, PAINT, TANGENT_FRAME } from './chunks'
 
 export const earthVertex = glsl`
   varying vec3 vPos;
@@ -25,6 +28,11 @@ export const earthFragment = glsl`
   ${COMMON}
   ${TANGENT_FRAME}
   ${CLOUD_COVER}
+  ${PAINT}
+
+  uniform vec3 uFreshColor;     // fresh-exposure tint (signal)
+  uniform float uPanelHalf;     // the panel photo's half extent, in decal patch units (0 = none)
+  uniform vec3 uPanelColor;
 
   uniform sampler2D uDay;
   uniform sampler2D uNight;
@@ -63,9 +71,19 @@ export const earthFragment = glsl`
     tangentFrame(N, E, Nn);
     float cosLat = max(length(N.xz), 0.04);
 
+    // ── painted imagery (uniform branches: no cost when nothing is painted)
+    vec2 suv = sphereUv(N);
+    vec4 ctx = vec4(0.0);
+    if (uCtxOn > 0.001) ctx = contextSample(suv);
+    float fresh = 0.0;
+    vec4 decal = vec4(0.0);
+    if (uDecalOn > 0.001) decal = decalSample(N, suv, fresh);
+    float painted = decal.a;
+
     // ── data: elevation (R) + ocean mask (G)
     vec4 data = texture2D(uData, vUv);
-    float ocean = smoothstep(0.35, 0.65, data.g);
+    // The real image carries its own water, relief and clouds.
+    float ocean = smoothstep(0.35, 0.65, data.g) * (1.0 - painted);
     float land = 1.0 - ocean;
 
     // ── relief: central differences over 1.5 texels, converted to slope per radian on the sphere.
@@ -81,13 +99,13 @@ export const earthFragment = glsl`
     float hS = texture2D(uData, vUv - dv).r;
     vec2 slope = vec2((hE - hW) / (2.0 * du.x * TWO_PI * cosLat), (hN - hS) / (2.0 * dv.y * PI));
     // The elevation source is soft at coastlines: keep relief off the sea and fade it out at the poles' pinch.
-    float reliefMask = land * smoothstep(0.02, 0.12, cosLat);
+    float reliefMask = land * smoothstep(0.02, 0.12, cosLat) * (1.0 - painted);
     vec3 Nb = normalize(N - uBump * reliefMask * (slope.x * E + slope.y * Nn));
   #endif
 
     // ── clouds (for shadows and to dim lights / glint)
     vec2 cloudUv = vUv + vec2(uCloudOffset, 0.0);
-    float cloudHere = cloudCover(texture2D(uClouds, cloudUv).r);
+    float cloudHere = cloudCover(texture2D(uClouds, cloudUv).r) * (1.0 - painted);
   #ifdef LITE
     // One fetch: the shadow sits under its cloud (the sun-ward offset is a few pixels at phone scale).
     float cloudShadow = cloudHere;
@@ -95,11 +113,13 @@ export const earthFragment = glsl`
     // The cloud above a surface point P that shades it sits toward the sun, displaced by h / N·L.
     vec2 sunT = vec2(dot(L, E), dot(L, Nn));
     vec2 shift = sunT * (uCloudHeight / max(NdL, 0.12)) * vec2(1.0 / (TWO_PI * cosLat), 1.0 / PI);
-    float cloudShadow = cloudCover(texture2D(uClouds, cloudUv + shift).r);
+    float cloudShadow = cloudCover(texture2D(uClouds, cloudUv + shift).r) * (1.0 - painted);
   #endif
 
     // ── day
     vec3 dayTex = texture2D(uDay, vUv).rgb;
+    dayTex = mix(dayTex, ctx.rgb, ctx.a);
+    dayTex = mix(dayTex, decal.rgb, painted);
     // A touch of contrast in linear light: deeper mid-tones, highlights kept.
     vec3 albedo = pow(gradeDay(dayTex, ocean), vec3(1.12)) * 1.06;
     // Soft terminator: the sun is a disc and the atmosphere scatters past the geometric line.
@@ -146,6 +166,21 @@ export const earthFragment = glsl`
     vec3 night = nightBase + city * lightsOn;
 
     vec3 col = mix(night, day, dayMix);
+
+    // ── the developing image: a short over-exposed band right behind the scan line, settling to true colour
+    col += (col * 1.6 + uFreshColor * 0.06) * fresh * painted;
+    // ── the panel photo's extent: a 1 px hairline square at the place, once it is big enough to mean something
+    if (uPanelHalf > 0.0 && painted > 0.01) {
+      vec2 p = patchCoord(suv, uDecalUv) - 0.5;
+      vec2 fwq = max(fwidth(p), vec2(1e-7));
+      float sidePx = 2.0 * uPanelHalf / max(fwq.x, fwq.y);
+      vec2 d = abs(abs(p) - uPanelHalf) / fwq;
+      float onX = 1.0 - smoothstep(0.5, 1.5, d.x);
+      float onY = 1.0 - smoothstep(0.5, 1.5, d.y);
+      float within = step(max(abs(p.x), abs(p.y)), uPanelHalf + 2.0 * max(fwq.x, fwq.y));
+      float sq = max(onX * step(abs(p.y), uPanelHalf), onY * step(abs(p.x), uPanelHalf)) * within;
+      col = mix(col, uPanelColor, sq * 0.75 * painted * smoothstep(18.0, 40.0, sidePx) * (1.0 - fresh));
+    }
 
     // ── twilight: the faintest warm glow just past the terminator (the dark side is nearly ink, so this is tiny)
     float dusk = exp(-pow((NdL + 0.035) / 0.05, 2.0));

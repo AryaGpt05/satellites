@@ -1,12 +1,14 @@
 /**
  * Shared material factories for every overlay the choreography reveals mid-motion: the place reticle, the swath
- * ribbon, screen-space hairlines, the satellite glyph and the reduced-motion fade. The real components AND the
+ * ribbon, screen-space hairlines, the satellite glyph, the acquisition sequence's spacecraft and light curtain, and
+ * the reduced-motion fade. The real components AND the
  * boot-time shader warm-up (Scene.tsx <ShaderWarmup/>) build their materials here, so the programs compiled
  * under the boot curtain are exactly the ones used later (three caches programs by shader source + parameters),
  * and nothing links synchronously on frame 1 of the place or pass flight (PERF-02).
  */
-import { Color, ShaderMaterial, Vector2, type Texture, type Vector3 } from 'three'
+import { AdditiveBlending, Color, DoubleSide, ShaderMaterial, Vector2, type Texture, type Vector3 } from 'three'
 import { palette } from '@/ui/system/palette'
+import { curtainFragment, curtainVertex, spacecraftFragment, spacecraftVertex } from './shaders/acquisition'
 import { hairlineFragment, hairlineVertex, reticleFragment, reticleVertex, ribbonFragment, ribbonVertex } from './shaders/overlay'
 import { glyphFragment, glyphVertex, satellitesFragment, satellitesVertex } from './shaders/points'
 
@@ -74,7 +76,46 @@ export function createRibbonMaterial(
       uHasClouds: { value: shared.uCloudMap.value ? 1 : 0 },
       uCloudOffset: shared.uCloudOffset,
       uSpeedKmS: { value: sweep.speedKmS },
-      uGlowPx: { value: sweep.frontGlowPx ?? 6 },
+      uGlowPx: { value: sweep.frontGlowPx ?? 9 },
+      uRate: { value: 0 },
+      uLive: { value: 0 },
+      uFrontColor: { value: look.color.clone().multiplyScalar(1.7) },
+    },
+  })
+}
+
+/** The spacecraft model (shaders/acquisition.ts): lit by the shared sun uniform. */
+export function createSpacecraftMaterial(uSunDir: U<Vector3>): ShaderMaterial {
+  return new ShaderMaterial({
+    vertexShader: spacecraftVertex,
+    fragmentShader: spacecraftFragment,
+    transparent: true,
+    depthWrite: true,
+    side: DoubleSide,
+    uniforms: {
+      uSunDir,
+      uLit: { value: 1 },
+      uBone: { value: lin(palette.bone) },
+      uInk: { value: lin(palette.ink1) },
+      uSignal: { value: lin(palette.signal).multiplyScalar(1.2) },
+      uOpacity: { value: 0 },
+    },
+  })
+}
+
+/** The sensor's light curtain (shaders/acquisition.ts): additive, very faint. */
+export function createCurtainMaterial(color: Color): ShaderMaterial {
+  return new ShaderMaterial({
+    vertexShader: curtainVertex,
+    fragmentShader: curtainFragment,
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    blending: AdditiveBlending,
+    uniforms: {
+      uColor: { value: color },
+      uOpacity: { value: 0 },
+      uTime: { value: 0 },
     },
   })
 }
