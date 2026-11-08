@@ -226,6 +226,10 @@ export interface Report {
   passes: Pass[]
   captures: Capture[]
   geo: GeoWatcher[]
+  /** Plain sentences about degraded data (archive outages etc.), shown as bone-3 footnotes */
+  notes?: string[]
+  /** True while archive/GIBS verification is still streaming in */
+  partial?: boolean
   counts: {
     satellitesConsidered: number
     passes: number

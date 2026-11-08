@@ -7,7 +7,7 @@
  */
 import { useApp } from '@/state/store'
 import type { Place, Report } from '@/types'
-import { computeReport, loadCatalog } from '@/engine'
+import { computeReport, loadCatalog, warmPassWorkers } from '@/engine'
 import { getShare, recordLookup } from '@/lib/backend'
 
 let inflight: AbortController | null = null
@@ -18,6 +18,8 @@ export async function boot() {
   try {
     await loadCatalog()
     s.setCatalogReady(true)
+    // Spin up pass workers now so the first report doesn't pay their start-up cost.
+    warmPassWorkers()
   } catch (e) {
     console.error(e)
     s.setPhase('error', 'Could not load the orbit catalog. Check your connection and reload.')
@@ -81,6 +83,28 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   if (place.source !== 'url') void recordLookup(place).catch(() => undefined)
 
   const started = performance.now()
+  // Results are shown as soon as the partial report lands (passes + Sentinel-2/Landsat matches, ~1 s),
+  // then replaced by the final report once NASA weather mosaics are verified. A minimum dwell lets the
+  // camera arrive and the readout breathe, so it never feels instant-but-janky.
+  let finalApplied = false
+  let shown = false
+  const show = async (r: Report, isFinal: boolean) => {
+    const wait = 1800 - (performance.now() - started)
+    if (wait > 0) await sleep(wait)
+    if (inflight !== ctrl) return
+    if (!isFinal && finalApplied) return
+    if (isFinal) finalApplied = true
+    const st = useApp.getState()
+    st.setReport(r)
+    if (!shown) {
+      shown = true
+      st.setPhase('results')
+      const pre = pickPreselect(r, opts)
+      if (pre) st.selectPass(pre)
+    } else if (st.selectedPassId && !r.passes.some((p) => p.id === st.selectedPassId)) {
+      st.selectPass(undefined)
+    }
+  }
   try {
     const report = await computeReport(place, {
       now: opts.now,
@@ -88,18 +112,11 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
       onProgress: (e) => {
         if (inflight === ctrl) useApp.getState().setProgress(e)
       },
+      onPartial: (r) => void show(r, false),
     })
     if (inflight !== ctrl) return
-    // Let the camera finish arriving and the readout breathe; never feel instant-but-janky.
-    const minDwell = 1800 - (performance.now() - started)
-    if (minDwell > 0) await sleep(minDwell)
-    if (inflight !== ctrl) return
-    const st = useApp.getState()
-    st.setReport(report)
-    st.setProgress({ stage: 'done', message: 'Report ready' })
-    st.setPhase('results')
-    const pre = pickPreselect(report, opts)
-    if (pre) st.selectPass(pre)
+    await show(report, true)
+    if (inflight === ctrl) useApp.getState().setProgress({ stage: 'done', message: 'Report ready' })
   } catch (e) {
     if (ctrl.signal.aborted) return
     console.error(e)
