@@ -350,8 +350,12 @@ function scheduleArchiveRetry(place: Place, opts: RunOpts, ctrl: AbortController
     try {
       const { computeReport } = await loadEngine()
       const r = await computeReport(place, { now: windowEnd ?? opts.now, signal: ctrl.signal })
-      if (inflight !== ctrl || r.archiveFailed) return
+      if (inflight !== ctrl || r.archiveFailed || r.partial) return
       const st = useApp.getState()
+      const cur = st.report
+      // Only ever swap in a strictly better, final report: never fewer photographs than the user already saw
+      // (a GIBS budget cut on the retry can verify fewer weather mosaics than the first run did).
+      if (cur && r.counts.imaged < cur.counts.imaged) return
       st.setReport(r)
       if (st.selectedPassId && !r.passes.some((p) => p.id === st.selectedPassId)) st.selectPass(undefined)
     } catch {

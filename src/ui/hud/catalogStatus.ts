@@ -12,7 +12,8 @@ export type CatalogStatus =
   | { state: 'error' }
   | { state: 'ready'; count: number; fetchedAt: string; source: string }
 
-const ready = (c: LoadedCatalog): CatalogStatus => ({ state: 'ready', count: c.sats.length, fetchedAt: c.fetchedAt, source: c.source })
+// `count`, not `sats.length`: reading `sats` would materialise every SatInfo (17k objects) on the main thread.
+const ready = (c: LoadedCatalog): CatalogStatus => ({ state: 'ready', count: c.count, fetchedAt: c.fetchedAt, source: c.source })
 
 export function useCatalogStatus(): CatalogStatus {
   const catalogReady = useApp((s) => s.catalogReady)

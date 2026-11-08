@@ -275,6 +275,7 @@ export function sharePayload(input: CreateShareInput): Record<string, unknown> |
           datetime: capture.datetime,
           cloudCoverPct: optNum(capture.cloudCoverPct),
           gsdM: optNum(capture.gsdM),
+          spot: capture.spot,
         }
       : undefined,
   }
