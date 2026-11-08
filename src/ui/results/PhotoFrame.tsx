@@ -11,7 +11,7 @@
  *    sweeps over the visible picture, nothing is hidden or reloaded;
  *  - the reticle marks the place at the centre; the expand control (and a click on the image) opens it large.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cx, fmtLat, fmtLon, useReducedMotion } from '@/ui/system'
 import { useCaptureMoment } from './capture'
 import { decodedPhoto, loadPhoto } from './images'
@@ -45,12 +45,14 @@ export interface PhotoFrameProps {
   gateOnVisible?: boolean
   onExpand?: (frame: HTMLElement) => void
   className?: string
+  /** A one-line note on the picture (the last clear look: why it leads) */
+  note?: string
 }
 
 /** The useOnce key a capture's first showing is recorded under (shared with the shared-link picture). */
 export const seenKeyOf = (p: Photo) => `capture:${p.capture.itemId}`
 
-export function PhotoFrame({ photo, model, load, current, reveal, chips, echo, reticle, gateOnVisible, onExpand, className }: PhotoFrameProps) {
+export function PhotoFrame({ photo, model, load, current, reveal, chips, echo, reticle, gateOnVisible, onExpand, className, note }: PhotoFrameProps) {
   const reduced = useReducedMotion()
   const { capture, pass } = photo
   const url = cardUrl(capture)
@@ -187,6 +189,7 @@ export function PhotoFrame({ photo, model, load, current, reveal, chips, echo, r
           </span>
         </span>
       ) : null}
+      {note ? <span className={cx(s.chip, s.noteChip)}>{note}</span> : null}
       {onExpand ? (
         <button
           type="button"
@@ -243,12 +246,3 @@ function playEcho(frame: HTMLElement | null, echo: HTMLElement | null, headingDe
 
 /** "43.4723°N 80.5449°W": the coordinate format the globe's place label uses. */
 export const coordsOf = (lat: number, lon: number) => `${fmtLat(lat, 4)} ${fmtLon(lon, 4)}`
-
-/** Keep a stable callback identity for layout effects that only need the latest value. */
-export function useLatest<T>(v: T) {
-  const r = useRef(v)
-  useLayoutEffect(() => {
-    r.current = v
-  })
-  return r
-}

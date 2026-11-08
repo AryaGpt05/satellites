@@ -25,7 +25,7 @@
    * headline, the gallery's bar, the caption, the counts strip, 48 px of 02 / PASSES, and what is below the
    * panel. The hero takes what is left (Gallery.module.css).
    */
-  --hero-chrome: calc(2 * var(--bezel-inset) + var(--sheet-clear, 56px) + var(--below-panel) + 548px);
+  --hero-chrome: calc(2 * var(--bezel-inset) + var(--sheet-clear, 56px) + var(--below-panel) + 580px);
 }
 @media (max-height: 720px) {
   .vars {
@@ -64,6 +64,19 @@
   /* doubled class: must beat the base .timelineDock rule below */
   .vars.timelineDock {
     right: calc(var(--bezel-inset) + var(--margin) + var(--panel-w) + var(--gutter));
+  }
+}
+/* Laptops up to 860 px tall (1280×800, 1536×864): a slightly smaller headline buys the photo room. */
+@media (min-width: 761px) and (orientation: landscape) and (max-height: 860px), (min-width: 1101px) and (max-height: 860px) {
+  .vars {
+    --hero-chrome: calc(2 * var(--bezel-inset) + 2 * var(--sheet-clear, 56px) + 568px);
+  }
+  .headline {
+    font-size: 30px;
+  }
+  .headlineMore {
+    font-size: 20px;
+    margin-top: 8px;
   }
 }
 /* …and on narrow ones a slightly narrower panel keeps ≥ 60 px per day in the strip. */

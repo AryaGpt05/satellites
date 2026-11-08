@@ -135,12 +135,15 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   /** performance.now() of the last user input on the gallery (a scroll the browser makes on its own, a re-snap after
    * a layout change, is not the user's: it never selects a pass or marks the gallery touched) */
   const userAt = useRef(-Infinity)
+  /** The programmatic scroll in flight was asked for by the user (‹ ›, ← →) */
+  const targetUser = useRef(false)
   const goTo = useCallback(
     (i: number, smooth = true, user = true) => {
       const track = trackRef.current
       const k = Math.min(n - 1, Math.max(0, i))
       if (!track || !geo.current.stride) return
       if (user) userAt.current = performance.now()
+      targetUser.current = user
       target.current = k
       const left = k * geo.current.stride
       if (Math.abs(track.scrollLeft - left) < 1) return settleRef.current()
@@ -157,12 +160,15 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     const g = geo.current
     if (!track || !g.stride) return
     const i = Math.min(n - 1, Math.max(0, Math.round(track.scrollLeft / g.stride)))
+    // A smooth scroll still travelling to its target (a slow frame let the settle timer fire): wait for it.
+    if (target.current !== null && i !== target.current && Math.abs(track.scrollLeft - target.current * g.stride) > 2) return
+    const user = (target.current !== null && targetUser.current) || performance.now() - userAt.current < 2500
     target.current = null
+    targetUser.current = false
     if (i !== idxRef.current) setIdx(i)
     paintChrome(i)
     const p = items[i]
     if (!p) return
-    const user = performance.now() - userAt.current < 2500
     useGallery.getState().setKey(p.key, user)
     window.clearTimeout(selectTimer.current)
     if (user && detail && p.pass && p.pass.id !== selectedId) {
@@ -201,7 +207,11 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
       window.clearTimeout(timer)
       settleRef.current()
     }
-    const onInput = () => (userAt.current = performance.now())
+    const onInput = () => {
+      // The user takes over: whatever programmatic glide was running is theirs to end.
+      userAt.current = performance.now()
+      target.current = null
+    }
     track.addEventListener('scroll', onScroll, { passive: true })
     track.addEventListener('scrollend', onEnd)
     track.addEventListener('pointerdown', onInput, { passive: true })
@@ -442,7 +452,9 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
   } else {
     // The summary card: two lines and one tap target (Replay this pass on the globe; the last clear look, which
     // has no pass, opens large instead). Laptops add Share.
-    const note = cover === 'lastClear' ? (model.windowPhotos ? 'This week’s passes saw mostly cloud.' : 'Here’s the last clear look.') : undefined
+    // The last clear look from before the window: two caption lines like every card; why it leads rides on the
+    // picture (a note chip), so the caption never grows a line when it arrives (no layout shift, A1).
+    const note = cover === 'lastClear'
     caption = (
       <figcaption className={s.mCap}>
         <span className={s.mLines}>
@@ -471,7 +483,6 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
             </span>
             {status ? <span className={cx(photo.clouded && s.warn)}> · {status}</span> : null}
           </span>
-          {note ? <span className={cx(s.mLine, s.note)}>{note}</span> : null}
         </span>
         {replay ? (
           <button type="button" className={s.mReplay} onClick={replay} tabIndex={current ? 0 : -1} aria-label={`Replay this pass on the globe: ${meta.name}, ${t.day} ${t.time}`}>
@@ -508,6 +519,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
           gateOnVisible={mobile}
           onExpand={(el) => onExpand(photo, el)}
           className={detail ? s.square : s.heroFrame}
+          note={!detail && cover === 'lastClear' ? (model.windowPhotos ? 'This week’s passes saw mostly cloud' : 'Here’s the last clear look') : undefined}
         />
         {caption}
       </div>

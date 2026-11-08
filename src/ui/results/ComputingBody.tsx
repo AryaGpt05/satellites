@@ -129,7 +129,7 @@ export function ComputingBody({ t0, tz }: { t0: number; tz?: string }) {
     <div className={s.body} role="status" aria-live="polite">
       <p className="sr-only">{announce}</p>
       {shared ? <SharedPicture tz={tz} /> : null}
-      <div aria-hidden className={s.readout}>
+      <div aria-hidden className={s.readout} data-readout>
         <ol className={s.lines}>
           {STAGES.map(({ stage, idle, done }, i) => {
             const l = lines[stage]

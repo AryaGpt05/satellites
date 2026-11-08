@@ -222,6 +222,8 @@
 .tr {
   top: 10px;
   right: 10px;
+  min-width: 14ch;
+  justify-content: flex-end;
 }
 .br {
   bottom: 10px;
@@ -328,6 +330,8 @@
 }
 .status {
   flex: none;
+  min-width: 14ch;
+  text-align: right;
   color: var(--bone-2);
 }
 .warn,

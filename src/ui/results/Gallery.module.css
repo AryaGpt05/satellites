@@ -49,6 +49,9 @@
 .counter {
   color: var(--bone-2);
   margin-right: 6px;
+  /* a stable width: the nav never shifts as the number changes (A1) */
+  min-width: 7.5ch;
+  text-align: right;
 }
 .filter {
   display: inline-flex;
@@ -201,7 +204,7 @@
  */
 .heroFrame {
   aspect-ratio: 3 / 2;
-  max-height: max(150px, calc(100dvh - var(--hero-chrome, 700px)));
+  max-height: max(130px, calc(100dvh - var(--hero-chrome, 700px)));
 }
 .mobile .heroFrame {
   aspect-ratio: 3 / 2;
@@ -365,6 +368,15 @@
 .tl {
   top: 8px;
   left: 8px;
+}
+.noteChip {
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--bone);
+  pointer-events: none;
 }
 .br {
   bottom: 8px;
@@ -595,6 +607,13 @@ b.warn,
   width: 100%;
 }
 @media (min-width: 600px) and (max-width: 1100px) and (orientation: portrait) {
+  .detail.mobile {
+    --slide-w: 100%;
+    --slide-gap: 16px;
+  }
+  .detail.mobile .track::after {
+    display: none;
+  }
   .detail .figure,
   .detail.mobile .figure {
     width: min(100%, 520px);

@@ -20,12 +20,20 @@ export type GeoFrameState = { kind: 'loading' } | { kind: 'ok'; url: string; tim
  * The newest frame NASA GIBS actually has pixels for at the place (probed), else the best static
  * guess. Shared by the list's small frames and the summary's geostationary best-look fallback.
  */
+/** Probe results this session, so a remount (back from a pass) shows the frame at once, never "Probing…" (A2). */
+const probed = new Map<string, GeoFrameState>()
+/** Frame URLs already shown: a remount draws them without the fade. */
+export const shownGeoFrames = new Set<string>()
+
 export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSizeKm: number; px: number }): GeoFrameState {
   const gibs = watcher.gibs && isGibsCollection(watcher.gibs.collection) ? watcher.gibs.collection : undefined
-  const [state, setState] = useState<GeoFrameState>(() => (gibs ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
   const { halfSizeKm, px } = spec
+  const key = `${gibs}|${place.lat},${place.lon}|${halfSizeKm}|${px}`
+  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (gibs ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
   useEffect(() => {
     if (!gibs) return
+    const hit = probed.get(key)
+    if (hit) return setState(hit)
     const ctl = new AbortController()
     setState({ kind: 'loading' })
     const opts = { halfSizeKm, px }
@@ -33,15 +41,17 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
       .then((r) => {
         if (ctl.signal.aborted) return
         // Nothing with pixels in the last two hours (e.g. a visible-only band at night): say so.
-        if (r) setState({ kind: 'ok', url: r.url, time: r.time })
-        else setState({ kind: 'none', reason: 'Dark side: no visible frame' })
+        const v: GeoFrameState = r ? { kind: 'ok', url: r.url, time: r.time } : { kind: 'none', reason: 'Dark side: no visible frame' }
+        probed.set(key, v)
+        setState(v)
       })
       .catch(() => {
         if (ctl.signal.aborted) return
         setState({ kind: 'ok', url: geoImageUrl(gibs, place, Date.now(), opts) })
       })
     return () => ctl.abort()
-  }, [gibs, place, halfSizeKm, px])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
   return state
 }
 
@@ -77,10 +87,10 @@ export function GeoWatchers({ watchers, place, days }: { watchers: GeoWatcher[];
 }
 
 function Frame({ watcher, place }: { watcher: GeoWatcher; place: Place }) {
-  const probed = useGeoFrame(watcher, place, FRAME)
+  const frame = useGeoFrame(watcher, place, FRAME)
   const [failed, setFailed] = useState(false)
-  const [loaded, setLoaded] = useState(false)
-  const state: GeoFrameState = failed ? { kind: 'none', reason: 'Frame unavailable' } : probed
+  const state: GeoFrameState = failed ? { kind: 'none', reason: 'Frame unavailable' } : frame
+  const [loaded, setLoaded] = useState(() => state.kind === 'ok' && shownGeoFrames.has(state.url))
 
   return (
     <div className={s.frameCol}>
@@ -91,7 +101,10 @@ function Frame({ watcher, place }: { watcher: GeoWatcher; place: Place }) {
             alt={`${watcher.name}: latest frame around the place`}
             crossOrigin="anonymous"
             decoding="async"
-            onLoad={() => setLoaded(true)}
+            onLoad={() => {
+              shownGeoFrames.add(state.url)
+              setLoaded(true)
+            }}
             onError={() => setFailed(true)}
           />
         ) : (

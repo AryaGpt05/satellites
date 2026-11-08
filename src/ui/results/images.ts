@@ -9,6 +9,7 @@
 import { preloadImage } from '@/imagery'
 
 const decoded = new Map<string, HTMLImageElement>()
+const inflight = new Map<string, Promise<HTMLImageElement>>()
 const MAX = 72
 
 /** The decoded element for `url`, if it has been loaded this session. */
@@ -20,14 +21,32 @@ export function decodedPhoto(url: string | undefined): HTMLImageElement | undefi
 export function loadPhoto(url: string, signal?: AbortSignal): Promise<HTMLImageElement> {
   const hit = decoded.get(url)
   if (hit) return Promise.resolve(hit)
-  count(url, 'requested')
-  return preloadImage(url, { signal }).then((img) => {
-    if (!decoded.has(url)) {
-      decoded.set(url, img)
-      count(url, 'decoded')
-      if (decoded.size > MAX) decoded.delete(decoded.keys().next().value as string)
-    }
-    return img
+  let p = inflight.get(url)
+  if (!p) {
+    count(url, 'requested')
+    p = preloadImage(url).then(
+      (img) => {
+        inflight.delete(url)
+        if (!decoded.has(url)) {
+          decoded.set(url, img)
+          count(url, 'decoded')
+          if (decoded.size > MAX) decoded.delete(decoded.keys().next().value as string)
+        }
+        return img
+      },
+      (err) => {
+        inflight.delete(url)
+        throw err
+      },
+    )
+    inflight.set(url, p)
+  }
+  if (!signal) return p
+  // A caller that stops waiting never cancels the shared load (another view may need the same photo).
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    p!.then(resolve, reject)
   })
 }
 

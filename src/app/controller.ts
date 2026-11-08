@@ -70,6 +70,8 @@ const MAX_CAMERA_WAIT_MS = 6000
 const FINAL_RACE_MS = 600
 /** The hero image gets at most this much extra time to decode. */
 const HERO_RACE_MS = 1200
+/** Background report patches are applied at most once per this window (trailing). */
+const UPDATE_BATCH_MS = 400
 /** A clear cover that arrives after the results gets this long to decode before it is shown anyway. */
 const COVER_RACE_MS = 6000
 /** An archive outage is retried once, this long after the report landed. */
@@ -276,14 +278,15 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   s.setPhase('computing')
   s.setTimeMode('live')
   s.setCamera({ kind: 'place', lat: place.lat, lon: place.lon })
-  // R2K3: the address bar and the lookup count are not on the submit frame (history.replaceState and a fetch
-  // cost the keydown task several ms on a phone). Skipped if a newer search started or anything wrote the
-  // address bar since (a pass selection writing ?p=).
+  // R2K3: the address bar and the lookup count are not in the submit task (history.replaceState and a fetch
+  // cost the keydown task several ms on a phone): they go out in a task of their own right after it (~1 ms;
+  // queued now, so no frame or panel mount can hold them back). The URL write is skipped if a newer search
+  // started or anything wrote the address bar since (a pass selection writing ?p=).
   const urlWritesBefore = urlWrites
-  whenIdle(() => {
+  setTimeout(() => {
     if (inflight === ctrl && urlWrites === urlWritesBefore) writeUrl(place)
     if (place.source !== 'url') void recordLookup(place).catch(() => undefined)
-  }, 500)
+  }, 0)
 
   const started = performance.now()
   let finalReport: Report | undefined
@@ -310,6 +313,7 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     if (inflight !== ctrl) return
     const best = finalReport ?? r
     if (best !== r) heroP = preloadHero(best, opts) // usually the same URL: an instant cache hit
+    if (best.clearCover) coverSeen = best.clearCover.id // the hero preload covers it (or the preselected pass leads)
     // (4) The hero image, decoded, or at most 1.2 s more.
     await raceTimeout(heroP, HERO_RACE_MS)
     mark('hero-ready')
@@ -319,12 +323,38 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     if (inflight !== ctrl) return
     const st = useApp.getState()
     shown = true
+    mark('set-report')
     // One tick: report, preselection and phase together (the results view retargets the camera from here).
     st.setReport(finalReport ?? best)
     const pre = pickPreselect(finalReport ?? best, opts)
     if (pre) st.selectPass(pre)
     st.setPhase('results')
     mark('results')
+  }
+
+  /**
+   * The newest background patch, applied once its model is built in idle time (the swap's render only reads
+   * the cache) and, for a clear cover that arrives late (owner D), once its photo is decoded, so it cross-fades
+   * in, never blank. A newer patch that lands meanwhile supersedes it.
+   */
+  let updateTimer: ReturnType<typeof setTimeout> | undefined
+  const flushUpdate = () => {
+    updateTimer = undefined
+    const next = finalReport
+    if (!next || inflight !== ctrl) return
+    // Never mid-entrance: the results' handoff holds motion (~900 ms); the patch lands right after it, in place.
+    const busy = useApp.getState().motionBusyUntil - performance.now()
+    if (busy > 16) {
+      updateTimer = setTimeout(flushUpdate, busy + 32)
+      return
+    }
+    void ready(next).then(() => finalReport === next && apply(next))
+  }
+  /** `r` can be swapped in without a flash: its model is built, and a clear cover new to this run is decoded. */
+  const ready = (r: Report): Promise<unknown> => {
+    const cover = r.clearCover && r.clearCover.id !== coverSeen ? raceTimeout(preloadCover(r), COVER_RACE_MS) : undefined
+    if (r.clearCover) coverSeen = r.clearCover.id
+    return Promise.all([prewarmModel(r), cover])
   }
 
   /** Every later report (final after partial, background patches) applies at once. */
@@ -339,6 +369,13 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
 
   const progress = progressWriter(ctrl)
   try {
+    // R2K3: the engine's synchronous start (archive requests, catalog targets, worker posts: ~40 ms on a 4×
+    // throttled phone) runs in the first task after the next frame, so the submit task carries only the phase
+    // flip, and the first frame of the landing's exit and the camera's flight paints without it. That task is
+    // queued from the frame's first rAF callback, ahead of the panel's mount (Main sets panelReady from a later
+    // one), so the archive requests never wait on the panel.
+    await afterNextFrame()
+    if (inflight !== ctrl) return
     const { computeReport } = await loadEngine()
     if (inflight !== ctrl) return
     const report = await computeReport(place, {
@@ -357,11 +394,8 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
       // Background verification after the final report: counts only ever go up.
       onUpdate: (r) => {
         finalReport = r
-        // Built in idle time first, so the swap's render only reads the cache; a newer update supersedes it.
-        // A clear cover that arrives late (owner D) is decoded first too, so it cross-fades in, never blank.
-        const cover = r.clearCover && r.clearCover.id !== coverSeen ? raceTimeout(preloadCover(r), COVER_RACE_MS) : undefined
-        if (r.clearCover) coverSeen = r.clearCover.id
-        void Promise.all([prewarmModel(r), cover]).then(() => finalReport === r && apply(r))
+        // Background patches come in bursts (a dozen GIBS answers within ~100 ms): one swap per burst.
+        if (updateTimer === undefined) updateTimer = setTimeout(flushUpdate, UPDATE_BATCH_MS)
       },
     })
     if (inflight !== ctrl) return
@@ -372,8 +406,10 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     void prewarmModel(report)
     if (firstShow) {
       await firstShow
-      await raceTimeout(prewarmModel(finalReport), 400)
-      apply(finalReport)
+      // The final report after a partial one (a clear cover may have arrived with it) goes through the same
+      // path as the background patches: after the results' entrance, ready (model built, new cover decoded),
+      // then swapped in place; a newer patch supersedes it.
+      if (updateTimer === undefined) flushUpdate()
     } else await showFirst(report)
     if (inflight !== ctrl) return
     progress.cancel()
@@ -461,12 +497,15 @@ function prewarmModel(r: Report): Promise<void> {
       (m) =>
         new Promise<void>((resolve) =>
           whenIdle(() => {
+            mark('model-prewarm')
             try {
               m.prewarmResultsModel(r)
             } catch (err) {
               console.error(err)
             }
-            resolve()
+            mark('model-ready')
+            // Resolve in a task of its own: whoever awaits it (the report swap) never shares this one.
+            setTimeout(resolve, 0)
           }, 300),
         ),
       () => undefined,
@@ -620,6 +659,28 @@ function mark(name: string) {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Resolve in the first task after the next frame (a message posted from that frame's rAF callback: it runs
+ * before work queued by later callbacks), or after 100 ms if no frame comes (a hidden tab).
+ */
+function afterNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false
+    const go = () => {
+      if (done) return
+      done = true
+      const mc = new MessageChannel()
+      mc.port1.onmessage = () => {
+        mc.port1.close()
+        resolve()
+      }
+      mc.port2.postMessage(0)
+    }
+    requestAnimationFrame(go)
+    setTimeout(go, 100)
+  })
 }
 
 function waitFor(pred: () => boolean): Promise<void> {

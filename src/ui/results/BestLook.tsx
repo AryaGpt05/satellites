@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { cx } from '@/ui/system'
 import { Ago } from './Ago'
-import { useGeoFrame } from './GeoWatchers'
+import { shownGeoFrames, useGeoFrame } from './GeoWatchers'
 import { Reticle } from './Reticle'
 import type { BestLook as Best } from './lib/bestLook'
 import type { ResultsModel } from './model'
@@ -23,7 +23,7 @@ export function GeoLook({ model, best }: { model: ResultsModel; best: Extract<Be
   const probed = useGeoFrame(w, model.report.place, GEO_FRAME)
   const [failed, setFailed] = useState(false)
   const state = failed ? ({ kind: 'none', reason: 'The latest frame did not load' } as const) : probed
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded] = useState(() => state.kind === 'ok' && shownGeoFrames.has(state.url))
   const coll = w.gibs?.collection ?? ''
   return (
     <div className={s.hero}>
@@ -35,7 +35,10 @@ export function GeoLook({ model, best }: { model: ResultsModel; best: Extract<Be
             crossOrigin="anonymous"
             decoding="async"
             className={cx(s.geoImg, loaded && s.geoImgOn)}
-            onLoad={() => setLoaded(true)}
+            onLoad={() => {
+              if (state.kind === 'ok') shownGeoFrames.add(state.url)
+              setLoaded(true)
+            }}
             onError={() => setFailed(true)}
           />
         ) : (

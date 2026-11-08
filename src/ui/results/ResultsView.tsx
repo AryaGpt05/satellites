@@ -334,7 +334,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       // A 1-2 px difference must not restart the height transition already gliding there.
       const cur = parseFloat(sec.style.getPropertyValue('--computing-h'))
       if (!(Math.abs(cur - h) < 3)) sec.style.setProperty('--computing-h', `${h}px`)
-      lastComputingH = h
+      // The next search starts from the readout itself, without this run's slow-archive note (which appears
+      // late, and only sometimes): the panel shrinks to it in one glide (A1).
+      const readout = inner.querySelector<HTMLElement>('[data-readout]')
+      lastComputingH = readout ? Math.round(chrome + 20 + readout.offsetTop + readout.offsetHeight + 22) : h
     }
     measure()
     const ro = new ResizeObserver(measure)
@@ -647,7 +650,6 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
           {compactTimeline ? (
             <div className={s.mTimeline}>{full ? <Timeline model={model} selectedId={selectedId} onSelect={onSelect} compact /> : null}</div>
           ) : null}
-          <Notes model={model} enter={enter} />
         </section>
       )}
       {full ? (
@@ -665,6 +667,8 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
             <GeoWatchers watchers={report.geo} place={report.place} days={model.windowDays} />
           </section>
           <section className={s.section}>
+            {/* Laptops: the caveats close the overview, so the passes notch shows on the first screen (R2R1). */}
+            {mobile ? null : <Notes model={model} />}
             <p className={s.footnote}>
               Pass times are when each satellite was closest to {report.place.label}, computed from public orbital elements
               {report.catalogFetchedAt ? ` (fetched ${report.catalogFetchedAt.slice(0, 16).replace('T', ' ')}Z)` : ''}. Local times are {model.tzLabel}.

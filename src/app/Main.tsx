@@ -11,8 +11,10 @@
  *             for its chunk before setting aboutOpen (the globe pauses on aboutOpen), so the globe never freezes
  *             on an empty frame while the chunk downloads (R2K4)
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { useApp, type Phase } from '@/state/store'
+import type { Place } from '@/types'
+import type { ResultsViewProps } from '@/ui/results'
 import { isStacked } from '@/lib/layout'
 import { Hud } from '@/ui/hud'
 import { BootScreen, Landing } from '@/ui/landing'
@@ -90,6 +92,11 @@ function prefetchChunks() {
 let aboutPending = false
 function openAbout() {
   if (aboutPending || useApp.getState().aboutOpen) return
+  // Already in (prefetched): open in this very event, so the page commits in the tap's own task.
+  if (loadAbout.loaded) {
+    useApp.getState().setAboutOpen(true)
+    return
+  }
   aboutPending = true
   void loadAbout().then(
     () => {
@@ -101,6 +108,22 @@ function openAbout() {
     },
   )
 }
+
+/**
+ * The globe and the results panel render through memoised slots with stable props: Main re-renders on phase,
+ * error, About and chunk arrivals, and none of those may re-render the 3D scene's React tree or the whole
+ * results panel (opening About re-rendered the panel: ~1.2 s on a 4× throttled phone before its dialog could
+ * commit, with the globe already paused).
+ */
+const GlobeSlot = memo(function GlobeSlot({ View }: { View: ComponentType<{ className?: string }> }) {
+  return <View className={s.scene} />
+})
+const searchFromPanel = (p: Place) => void runReport(p)
+const searchFromLanding = (p: Place) => void runReport(p)
+const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<ResultsViewProps> }) {
+  return <View onBack={resetToLanding} onRetry={retryReport} onSearch={searchFromPanel} />
+})
+const closeAbout = () => useApp.getState().setAboutOpen(false)
 
 /** Landing entrance delay after `prev` (K5): it starts after the boot curtain, quickly after a results exit. */
 function enterDelayAfter(prev: Phase): number {
@@ -155,11 +178,13 @@ export default function Main() {
     return () => document.removeEventListener('focusin', onFocus)
   }, [])
 
-  // Keep ?p=<passId> in sync with the selection so links are always shareable.
+  // Keep ?p=<passId> in sync with the selection so links are always shareable (including a pass preselected by
+  // a share or deep link, which is selected in the same tick as the phase turns to results).
   useEffect(
     () =>
       useApp.subscribe((st, prev) => {
-        if (st.selectedPassId !== prev.selectedPassId && st.place && st.phase === 'results') writeUrl(st.place, st.selectedPassId)
+        if (!st.place || st.phase !== 'results') return
+        if (st.selectedPassId !== prev.selectedPassId || (prev.phase !== 'results' && st.selectedPassId)) writeUrl(st.place, st.selectedPassId)
       }),
     [],
   )
@@ -183,7 +208,6 @@ export default function Main() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const closeAbout = () => useApp.getState().setAboutOpen(false)
   const panel = phase === 'computing' || phase === 'results'
   // R2K3: the results panel mounts one frame after the phase change, so the submit task carries only the
   // landing's exit and the camera's new intent; the panel's mount commit runs in the next frame's task (one
@@ -203,11 +227,11 @@ export default function Main() {
 
   return (
     <div className={s.root}>
-      {GlobeCanvas ? <GlobeCanvas className={s.scene} /> : null}
+      {GlobeCanvas ? <GlobeSlot View={GlobeCanvas} /> : null}
       <div className={s.layer}>
-        {(phase === 'idle' || phase === 'locating') && <Landing onSubmit={(place) => void runReport(place)} enterDelay={enterDelay.current} />}
+        {(phase === 'idle' || phase === 'locating') && <Landing onSubmit={searchFromLanding} enterDelay={enterDelay.current} />}
         {/* One persistent panel from computing through results (decision #10): the same instance survives the phase change. */}
-        {panel && panelReady && ResultsView ? <ResultsView key="results" onBack={resetToLanding} onRetry={retryReport} onSearch={(p) => void runReport(p)} /> : null}
+        {panel && panelReady && ResultsView ? <ResultsSlot key="results" View={ResultsView} /> : null}
         {phase === 'error' && <ErrorNotice message={error} onRetry={retryReport} onBack={resetToLanding} />}
       </div>
       <Hud onAbout={openAbout} />
