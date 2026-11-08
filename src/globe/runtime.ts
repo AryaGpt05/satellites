@@ -8,6 +8,7 @@
 import { createContext, useContext } from 'react'
 import { Vector3, type Texture } from 'three'
 import type { CameraIntent, Phase } from '@/state/store'
+import { createAcqState, type AcqState } from './acquisition'
 import type { TextureLevel } from './framing'
 import type { QualityTier } from './quality'
 
@@ -101,6 +102,8 @@ export interface GlobeRuntime {
   timeJump: { id: number; at: number; fromSimTime: number }
   /** performance.now() of the last "swath crossed the place" event, for the reticle flash */
   flashAt: number
+  /** The acquisition sequence of the selected pass (written by <Clock/>; see acquisition.ts) */
+  acq: AcqState
   /** performance.now() of the last reduced-motion camera cut, for the 300 ms fade */
   cutAt: number
   /** NORAD the pass overlay draws itself; the ambient field hides its own point for it (-1 = none) */
@@ -138,6 +141,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     replayStartedAt: -Infinity,
     timeJump: { id: 0, at: -Infinity, fromSimTime: now },
     flashAt: -Infinity,
+    acq: createAcqState(),
     cutAt: -Infinity,
     overlayNorad: -1,
     anchors: new Map(),

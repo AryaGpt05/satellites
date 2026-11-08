@@ -17,7 +17,7 @@
  * every second, SunValue every ~24 s, CatalogAge every minute); the shell renders when the phase, the
  * catalog or the clock mode changes.
  */
-import { memo, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import { timeZoneAt, tzReady } from '@/imagery'
 import { subsolarPoint } from '@/lib/geo'
 import { useApp } from '@/state/store'
@@ -117,6 +117,12 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
   const topLeft = useRef<HTMLDivElement>(null)
   const topRight = useRef<HTMLDivElement>(null)
   useTopInset(topLeft, topRight)
+  // The stacked sun line gives way to the scene time during a replay and comes back after it: its
+  // wipe plays with the HUD's first entrance only, never again on its return (one entrance per element).
+  const sunEntered = useRef(false)
+  useEffect(() => {
+    if (live) sunEntered.current = true
+  }, [live])
 
   return (
     <div ref={rootRef} className={s.hud} data-scene={scene}>
@@ -145,7 +151,7 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
         {live ? null : <SceneTime />}
         {/* stacked: the sun joins the clock (bottom corners are hidden); a replay's scene time takes its place */}
         {live ? (
-          <Reveal axis="x" duration={480} delay={120} as="div" className={cx(s.line, s.mob)}>
+          <Reveal axis="x" duration={480} delay={120} skip={sunEntered.current} as="div" className={cx(s.line, s.mob)}>
             <SunValue />
           </Reveal>
         ) : null}

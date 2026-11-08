@@ -37,9 +37,13 @@
   justify-items: start;
   text-align: left;
 }
+/* Right corners hold a fixed box (their widest allowed measure) and align their lines to its right
+   edge: a line that grows, appears or goes (the scene time during a replay) then never moves the box's
+   left edge, so nothing shifts (CLS) and the other lines stay exactly where they were. */
 .tr,
 .br {
   right: calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-right, 0px));
+  width: calc(50vw - var(--bezel-inset) - var(--margin) - 12px);
   justify-items: end;
   text-align: right;
 }
