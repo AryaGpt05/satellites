@@ -79,7 +79,12 @@ export function GlobeCanvas({ className }: { className?: string }) {
             camera={{ fov: 30, near: 0.01, far: 400, position: [0, 0, 6] }}
             // Tone mapping happens in the post chain (Post.tsx); the renderer itself stays linear.
             flat
-            onCreated={({ gl }) => {
+            onCreated={({ gl, camera }) => {
+              // The CameraDirector owns the projection (aspect + an off-axis lens shift) and rewrites it every frame.
+              // Without `manual`, R3F recomputes the projection synchronously whenever size or DPR changes, and an
+              // adaptive-DPR step taken mid-frame then renders ONE frame without the lens shift: the globe flashes
+              // to the centre of the screen and back. Manual cameras are never touched by R3F.
+              ;(camera as typeof camera & { manual?: boolean }).manual = true
               gl.setClearColor(new Color(palette.ink0), 1)
               // Program info-log round trips on every link are a development aid, not a production cost.
               gl.debug.checkShaderErrors = import.meta.env.DEV
