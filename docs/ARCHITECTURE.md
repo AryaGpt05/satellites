@@ -87,7 +87,10 @@ export function preloadImage(url: string): Promise<HTMLImageElement>
 ### globe → `src/globe/index.ts`
 `export function GlobeCanvas(props: { className?: string }): JSX.Element`: a full-bleed canvas that reads the store. It renders:
 Earth (real sun), clouds, atmosphere, stars, the whole catalog as GPU points, the place reticle, and the selected pass
-(ground track, swath ribbon, satellite with callout, replay-synced), plus a camera director for `store.camera` intents. It sets `globeReady` once first textures are on screen.
+(ground track, swath ribbon, satellite with callout, replay-synced), plus a camera director for `store.camera` intents.
+Store writes: `globeReady`, `hoveredNorad`, `simTime`, `cameraFlight`, `dayMapSharp`. It sets `globeReady` once first textures are on screen, and
+`dayMapSharp` once, when the first day-map upgrade above the boot level (2k on the phone tier, 4k on the desktop tier) has been
+fully uploaded and swapped in, or at first light when the tier plan has no such step. `reset()` does not clear `dayMapSharp`.
 It must also accept the engine's `ElementBuffer` (loaded internally via `loadCatalog` + `buildElementBuffer`).
 
 ### ui-shell → `src/ui/hud/index.ts`, `src/ui/landing/index.ts`, `src/ui/pages/index.ts`
@@ -96,13 +99,25 @@ It must also accept the engine's `ElementBuffer` (loaded internally via `loadCat
 ### ui-results → `src/ui/results/index.ts`, `src/ui/share/index.ts`
 `<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>`.
 
+`prewarmResultsModel(report: Report): void`, exported from `src/ui/results/index.ts`: builds and caches the
+`ResultsModel` for that `Report` object. The controller calls it in idle time, and only through a dynamic
+`import('@/ui/results')` (never a static import, so the results chunk stays out of the boot bundle).
+
 ### backend
 - `supabase/migrations/*.sql`: tables `lookups`, `shares`; RLS on, no direct anon table access; `security definer` RPCs `record_lookup`, `create_share`, `get_share`, `get_stats`.
 - `src/lib/backend.ts`: browser client wrappers (`recordLookup`, `createShare`, `getShare`, `getStats`) using `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. These must **no-op gracefully** when env vars are missing.
-- `api/og.tsx`: 1200×630 share card (`@vercel/og`) in the Instrument style. `api/s.ts`: share page HTML with OG tags that boots the app at `/?s=<id>`. `vercel.json`: rewrites `/s/:id` and caching headers.
+- `api/og.tsx`: 1200×630 share card (`@vercel/og`) in the Instrument style. Runtime cards are returned as `image/jpeg`
+  (under 250 KB; PNG decoded with `fast-png`, encoded with `jpeg-js`, both pure JS so `vercel.json` `includeFiles` is
+  unchanged). `public/og-default.png` stays PNG. `api/s.ts`: share page HTML with OG tags that boots the app at `/?s=<id>`. `vercel.json`: rewrites `/s/:id` and caching headers.
+- **Share fallback deep link** (used when a share row can't be created): `/?q=<lat>,<lon>&n=<label>&p=<passId>`, plus
+  optional pass facts `sat`, `norad`, `verdict`, `t` (ms), `alt` (km), `off` (°), `hdg` (°), `collection`, `item`,
+  `cloud` (%), `gsd` (m), `spot`. Coordinates are always rounded to 0.01°. `api/s.ts` unfurls it as the pass card.
+  `controller.readUrlTarget` re-centres the 7-day window on `t` when `t` is more than 6 days old.
 
 ## App flow (integrator)
 `boot` (textures + catalog) → `idle` (hero + search over the spinning globe) → `locating` → `computing`
 (camera flies to place; progress readouts) → `results` (panel + timeline; selecting a pass frames it and replays the
 swath sweep; captured images reveal pushbroom-style) → share.
-URL state: `/?q=<lat>,<lon>&n=<label>` deep-links straight to results; `/?s=<shareId>` opens a shared pass.
+URL state: `/?q=<lat>,<lon>&n=<label>` deep-links straight to results; adding `&p=<passId>` and the optional pass facts
+(`sat, norad, verdict, t, alt, off, hdg, collection, item, cloud, gsd, spot`; see the share fallback deep link under backend)
+opens that pass; `/?s=<shareId>` opens a shared pass.

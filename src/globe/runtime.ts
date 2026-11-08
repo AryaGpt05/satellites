@@ -13,6 +13,8 @@ import type { QualityTier } from './quality'
 
 /** useFrame priorities. Negative = before R3F's default (0); the post-processing composer renders at 1. */
 export const FRAME = {
+  /** Adaptive DPR: a resize lands before the clock reads the pixel ratio and the camera applies pose + lens shift */
+  dpr: -40,
   clock: -30,
   camera: -20,
   scene: -10,
@@ -83,6 +85,16 @@ export interface GlobeRuntime {
   phase: Phase
   phaseEnteredAt: number
   /**
+   * store.motionBusyUntil as it stood when the current phase began: a hold left by the previous phase's UI (the
+   * landing's entrance, when a search is submitted early). The computing upload windows ignore it; that UI is gone.
+   */
+  phaseBusyFloor: number
+  /**
+   * performance.now() when the replay sweep last started: timeMode entering 'replay', or the clock's hold
+   * releasing as the camera arrives. Texture uploads wait out the first 10 s of a sweep (the signature moment).
+   */
+  replayStartedAt: number
+  /**
    * Sim-time jumps (|Δ| > 5 min in one frame: a pass selected or deselected, a seek): a counter bumped by
    * <Clock/>, and the sim time just before the jump. The sun glides across the jump; the point cloud dims.
    */
@@ -122,6 +134,8 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     nightLevel: '1k',
     phase: 'boot',
     phaseEnteredAt: 0,
+    phaseBusyFloor: 0,
+    replayStartedAt: -Infinity,
     timeJump: { id: 0, at: -Infinity, fromSimTime: now },
     flashAt: -Infinity,
     cutAt: -Infinity,

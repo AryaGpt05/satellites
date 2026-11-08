@@ -51,7 +51,10 @@ function storedShare(report: Report, pass: Pass) {
 
 const strip = (s: CardSpec) => {
   const out = structuredClone(s) as CardSpec
-  if (out.plate.kind === 'image') delete out.plate.imageUrl
+  if (out.plate.kind === 'image') {
+    delete out.plate.imageUrl
+    delete out.plate.source // client only: the pass view's decoded crop
+  }
   return out
 }
 
@@ -91,9 +94,10 @@ describe('share card spec', () => {
     const srv = buildSummarySpec({ ...input, timeZone: shareTimeZone(sum), host: 'overflight.app' })
     expect(strip(srv)).toEqual(strip(client))
     expect(client.lead).toMatch(/^\d+ satellites photographed$/)
+    expect(`${client.place}${client.tail}`).toBe('Waterloo in detail.')
     expect(client.readouts.map((r) => r.label)).toEqual(['Photo', 'Likely', 'Could', 'Overhead'])
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, passes: 1800, best: { satName: 'Sentinel-2C', altitudeKm: 795 } })).toBe(
-      '7 satellites photographed Waterloo this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething photographed you this week too.',
+      '7 satellites photographed Waterloo in detail this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething photographed you this week too.',
     )
   })
 
@@ -108,12 +112,15 @@ describe('share card spec', () => {
       expect(spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
       expect(spec.plate.chip.segs[0].text).toBe('Sentinel-2C · MSI · 10 m')
       expect(spec.plate.imageUrl).toMatch(/\/630x630\.jpg\?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101/)
+      // The plate is cut from the pass view's 1024 px crop (R2SH1).
+      expect(spec.plate.source?.url).toMatch(/\/1024x1024\.jpg\?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101/)
       expect(spec.plate.clouded).toBeUndefined()
     }
+    // 81 % of the scene: mostly cloud, never "only cloud" (R2SH3).
     const cloudy = report.passes.find((p) => p.captureId?.startsWith('S2B_MSIL2A_20261030'))!
     const cs = cardSpec(cloudy, report, metaFor(cloudy), 'America/Toronto', 'overflight.app', { clouded: true })
-    expect(cs.sub).toBe('Clouded over. It saw only cloud.')
-    expect(cs.plate.kind === 'image' && cs.plate.clouded?.segs[0].text).toBe('Clouded over · 81%')
+    expect(cs.sub).toBe('Mostly cloud: 81% of the scene.')
+    expect(cs.plate.kind === 'image' && cs.plate.clouded?.segs[0].text).toBe('Mostly cloud · 81%')
   })
 
   it('puts viewfinder ticks only in corners no chip holds, on the chips’ 24px inset', async () => {

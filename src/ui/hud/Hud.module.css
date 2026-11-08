@@ -161,20 +161,16 @@
 }
 
 /* Responsive pieces:
-     .desk / .mobInline   the full and compact date forms (phones: ≤ 760px)
+     .desk                desktop-only parts (the dates, key caps); phones (≤ 760px) drop them
      .wideOnly            the bottom corners (gone where a bottom panel lives: stacked, short landscape)
      .mob                 the sun line that joins the TR block when the bottom corners are gone */
-.mob,
-.mobInline {
+.mob {
   display: none !important;
 }
 
 @media (max-width: 760px) {
   .desk {
     display: none !important;
-  }
-  .mobInline {
-    display: inline !important;
   }
 }
 @media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (max-height: 540px) {
@@ -199,6 +195,15 @@
       color-mix(in srgb, var(--ink-0) 80%, transparent) calc(var(--bezel-inset) + 48px + env(safe-area-inset-top, 0px)),
       transparent
     );
+  }
+}
+
+/* The landing's search mode on stacked layouts dims the globe from the app layer, which sits above the
+   HUD: while it is up, the chrome (bezel, readouts) rises above that dim and stays legible. The search
+   band starts below the top readouts, so nothing overlaps. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  :global(body:has([data-searching='true'])) .hud {
+    z-index: calc(var(--z-panel) + 1);
   }
 }
 

@@ -17,6 +17,7 @@
  */
 import { Vector3, type PerspectiveCamera } from 'three'
 import { clamp, DEG, lerp, RAD } from '@/lib/geo'
+import { easeInOut } from '@/lib/ease'
 
 export interface Pose {
   d: Vector3
@@ -317,6 +318,44 @@ export function easeCarry(v0: number): (t: number) => number {
     const t3 = t2 * t
     return 3 * t2 - 2 * t3 + v * (t3 - 2 * t2 + t)
   }
+}
+
+// ───────────────────────────── range curves ─────────────────────────────
+
+/**
+ * A move in log-range from l0 to l1 over [start, start + dur] ms. With no initial slope it follows --ease-in-out;
+ * with one (v0, log units per ms: a move that replaces a running one) it is a cubic Hermite that starts at that
+ * slope and ends at rest, so back-to-back changes stay velocity-continuous.
+ */
+export interface RangeCurve {
+  l0: number
+  l1: number
+  v0: number
+  start: number
+  dur: number
+}
+
+export function curveAt(c: RangeCurve, now: number): number {
+  const u = clamp((now - c.start) / c.dur, 0, 1)
+  if (c.v0 === 0) return c.l0 + (c.l1 - c.l0) * easeInOut(u)
+  const u2 = u * u
+  const u3 = u2 * u
+  return (2 * u3 - 3 * u2 + 1) * c.l0 + (u3 - 2 * u2 + u) * c.v0 * c.dur + (3 * u2 - 2 * u3) * c.l1
+}
+
+/** Slope of a curve at `now` (log units per ms), 0 once it has finished. */
+export function curveSlope(c: RangeCurve, now: number): number {
+  if (now >= c.start + c.dur) return 0
+  const h = 2
+  const a = Math.max(c.start, now - h)
+  const b = Math.min(c.start + c.dur, now + h)
+  return b > a ? (curveAt(c, b) - curveAt(c, a)) / (b - a) : 0
+}
+
+/** A curve from (l0, slope v0) to l1: the slope is bounded so the move can't overshoot wildly. */
+export function makeCurve(l0: number, l1: number, v0: number, start: number, dur: number): RangeCurve {
+  const lim = (3 * Math.abs(l1 - l0) + 0.02) / dur
+  return { l0, l1, v0: clamp(v0, -lim, lim), start, dur }
 }
 
 /** Frame-rate independent exponential approach factor for a time constant tau (s). */

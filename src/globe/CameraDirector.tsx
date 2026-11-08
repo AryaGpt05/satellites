@@ -9,10 +9,16 @@
  *    new flight starts at the camera's current speed and eases out (easeCarry), so it never brakes mid-air.
  *  - prefers-reduced-motion → cut, with a 300 ms fade from ink.
  *  - Framing follows store.uiInsets (framing.ts). Lens shift tracks the free rect every frame (τ 0.12 s, so the
- *    globe glides with a dragged sheet); range changes wait until the insets have been still for 150 ms, then
- *    move over 600 ms (--ease-in-out). During a flight the target is updated in place, so it lands framed.
+ *    globe glides with a dragged sheet). Outside a flight, range changes wait until the insets have been still
+ *    for 150 ms, then move over 600 ms (--ease-in-out). DURING a flight, a new range (an inset change, a sharper
+ *    texture's floor) folds into the flight at once: a log-range correction eased over the rest of the flight
+ *    (velocity-continuous across repeated changes), so the camera makes ONE move and lands framed, with no pop
+ *    and no second move after arrival.
  *  - The near limit follows the loaded day texture (framing.minRangeFor, decision 6), for poses and user zoom.
- *    When a sharper map lands the floor relaxes and the view comes in with a slower focus move (0.9–1.9 s).
+ *    When a sharper map lands while parked the floor relaxes and the view comes in with a slower focus move
+ *    (0.9–1.9 s).
+ *  - The camera is `manual` for R3F: its projection (aspect from the live viewport, lens shift) is applied here
+ *    every frame, so an adaptive-DPR step or a resize never renders a frame without the shift.
  *  - overview: slow westward drift of the camera (the planet appears to turn eastward), north-up; as the boot
  *    curtain lifts, one damped focus dolly (G15).
  *  - In idle / results the user can orbit and zoom (controls.ts); input interrupts a flight cleanly, and auto
@@ -22,7 +28,7 @@
  * Target specs are recomputed only when their inputs change (intent, report, viewport, insets, texture level).
  */
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Mesh, PerspectiveCamera, PlaneGeometry, Vector3 } from 'three'
 import { bearingDeg, clamp, DEG, EARTH_RADIUS_KM, subsolarPoint } from '@/lib/geo'
 import { easeInOut, easeOut } from '@/lib/ease'
@@ -31,6 +37,8 @@ import {
   applyPoseToCamera,
   copyPose,
   createPose,
+  curveAt,
+  curveSlope,
   damp,
   dirFromLatLon,
   carrySpeed,
@@ -38,6 +46,7 @@ import {
   eastNorth,
   interpolatePose,
   latLonOfDir,
+  makeCurve,
   makePose,
   orthonormalize,
   planFlight,
@@ -45,6 +54,7 @@ import {
   signedAngle,
   tiltProgress,
   type PoseSpec,
+  type RangeCurve,
 } from './cameraMath'
 import { applyControls, attachControls, createControlInput, createControlState } from './controls'
 import { propagate } from './data'
@@ -75,6 +85,8 @@ const BOOT_DOLLY_SCALE = 1.12
 const BOOT_DOLLY_S = 2.4
 /** Retargets keep at least this duration (s) and run at 80% of a fresh flight's. */
 const RETARGET_MIN_S = 1.8
+/** A range folded into a flight eases over the rest of it, but never faster than this (ms). */
+const FOLD_MIN_MS = 300
 
 const INTERACTIVE: AppState['phase'][] = ['idle', 'locating', 'results', 'error']
 
@@ -161,6 +173,30 @@ function arrive(rt: GlobeRuntime, id: number, now: number, kind: CameraIntent['k
   useApp.getState().setCameraFlight({ id, flying: false, eta: now, arrivedAt: now })
 }
 
+/** Range moves and folds, for probe scripts (dev and inspect builds only; compiled out of production). */
+function logRange(kind: 'move' | 'fold' | 'settle', now: number, from: number, to: number, dur: number) {
+  if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
+  const w = window as unknown as { __rangeLog?: unknown[] }
+  ;(w.__rangeLog ??= []).push({ kind, t: Math.round(now), from: +from.toFixed(4), to: +to.toFixed(4), dur: Math.round(dur) })
+}
+
+/**
+ * A flight ended (arrival, or a gesture took over): its range correction becomes the target range. A correction
+ * that started within FOLD_MIN_MS of arrival finishes as a range move on the same curve (same value and slope).
+ */
+function settleFold(s: { fold: RangeCurve | null; rangeMove: RangeCurve | null; target: { range: number } }, now: number) {
+  const fd = s.fold
+  if (!fd) return
+  s.fold = null
+  const base = Math.log(s.target.range)
+  s.target.range = Math.exp(base + fd.l1)
+  if (now < fd.start + fd.dur) {
+    s.rangeMove = makeCurve(base + curveAt(fd, now), base + fd.l1, curveSlope(fd, now), now, fd.start + fd.dur - now)
+    s.target.range = Math.exp(s.rangeMove.l0)
+    logRange('settle', now, s.target.range, Math.exp(base + fd.l1), s.rangeMove.dur)
+  }
+}
+
 export function CameraDirector() {
   const rt = useRuntime()
   const camera = useThree((s) => s.camera) as PerspectiveCamera
@@ -186,8 +222,13 @@ export function CameraDirector() {
     insetsKey: -1,
     insetsAt: 0,
     rangeDirty: false,
-    /** Range re-frame in progress (log-space, --ease-in-out) */
-    rangeMove: null as null | { from: number; to: number; start: number; dur: number },
+    /** Range re-frame in progress outside a flight: s.target.range follows it (log-space) */
+    rangeMove: null as RangeCurve | null,
+    /**
+     * Range folded into the running flight: a log-range CORRECTION on top of the flight's own interpolation (whose
+     * end range stays s.target.range), reaching l1 = log(new range / s.target.range) by arrival.
+     */
+    fold: null as RangeCurve | null,
     /** Lens shift the target follows (smoothed) */
     shiftX: 0,
     shiftY: 0,
@@ -202,6 +243,12 @@ export function CameraDirector() {
   const input = useMemo(createControlInput, [])
   const control = useMemo(createControlState, [])
   const vp = useMemo<Viewport>(() => ({ width: 1, height: 1 }), [])
+
+  // The projection is ours (applyPoseToCamera, every frame): R3F must not reset it on a DPR step or a resize, or
+  // that frame would render without the lens shift.
+  useLayoutEffect(() => {
+    ;(camera as PerspectiveCamera & { manual?: boolean }).manual = true
+  }, [camera])
 
   // Pointer / wheel controls on the canvas.
   useEffect(() => {
@@ -260,7 +307,8 @@ export function CameraDirector() {
       s.rangeDirty = true
     }
     const vpChanged = vp.width !== s.vpW || vp.height !== s.vpH
-    const settledInsets = s.rangeDirty && now - s.insetsAt >= INSETS_SETTLE_MS
+    // During a flight an inset change re-frames at once: it folds into the landing (no settle wait).
+    const settledInsets = s.rangeDirty && (s.flight !== null || now - s.insetsAt >= INSETS_SETTLE_MS)
     const recompute =
       !s.spec ||
       intent !== s.intent ||
@@ -299,11 +347,23 @@ export function CameraDirector() {
       // Re-framing of the same intent: range moves smoothly (the shift is tracked below, every frame).
       if (spec && s.initialized && key === s.key && intent.kind !== 'satellite') {
         const to = spec.range
-        const curTo = s.rangeMove ? s.rangeMove.to : s.target.range
+        const curTo = s.rangeMove ? Math.exp(s.rangeMove.l1) : s.fold ? s.target.range * Math.exp(s.fold.l1) : s.target.range
         const dl = Math.abs(Math.log(to / curTo))
         if (dl > 0.004) {
-          const dur = focusOnly ? clamp(RANGE_FOCUS_MS.min + RANGE_FOCUS_MS.perLog * dl, RANGE_FOCUS_MS.min, RANGE_FOCUS_MS.max) : RANGE_MOVE_MS
-          s.rangeMove = { from: s.target.range, to, start: now, dur }
+          if (s.flight && !s.flight.dolly) {
+            // Fold into the running flight: it lands at the new range, in one move.
+            const f = s.flight
+            const c0 = s.fold ? curveAt(s.fold, now) : 0
+            const v0 = s.fold ? curveSlope(s.fold, now) : 0
+            const dur = Math.max(FOLD_MIN_MS, f.start + f.duration * 1000 - now)
+            s.fold = makeCurve(c0, Math.log(to / s.target.range), v0, now, dur)
+            logRange('fold', now, s.target.range * Math.exp(c0), to, dur)
+          } else {
+            const dur = focusOnly ? clamp(RANGE_FOCUS_MS.min + RANGE_FOCUS_MS.perLog * dl, RANGE_FOCUS_MS.min, RANGE_FOCUS_MS.max) : RANGE_MOVE_MS
+            const l0 = Math.log(s.target.range)
+            s.rangeMove = makeCurve(l0, Math.log(to), s.rangeMove ? curveSlope(s.rangeMove, now) : 0, now, dur)
+            logRange('move', now, s.target.range, to, dur)
+          }
         }
         // Overview look-at continuity: only the composition changes, never the look-at.
         s.target.tilt = spec.tilt ?? 0
@@ -345,6 +405,7 @@ export function CameraDirector() {
       s.shiftX = s.target.shiftX
       s.shiftY = s.target.shiftY
       s.rangeMove = null
+      s.fold = null // the new flight starts from the pose on screen, correction included
       s.userTouched = false
       control.spin.set(0, 0, 0)
       control.zoomTarget = null
@@ -389,6 +450,7 @@ export function CameraDirector() {
         s.target.shiftX = s.shiftX = now0.shiftX ?? 0
         s.target.shiftY = s.shiftY = now0.shiftY ?? 0
         s.rangeMove = null
+        s.fold = null
         s.rangeDirty = false
         s.pose.range = now0.range * BOOT_DOLLY_SCALE
         s.pose.shiftX = s.target.shiftX
@@ -414,9 +476,9 @@ export function CameraDirector() {
       s.target.shiftY = s.shiftY
       if (s.rangeMove) {
         const m = s.rangeMove
-        const u = rt.reducedMotion ? 1 : clamp((now - m.start) / m.dur, 0, 1)
-        s.target.range = Math.exp(Math.log(m.from) + (Math.log(m.to) - Math.log(m.from)) * easeInOut(u))
-        if (u >= 1) s.rangeMove = null
+        const done = rt.reducedMotion || now >= m.start + m.dur
+        s.target.range = Math.exp(done ? m.l1 : curveAt(m, now))
+        if (done) s.rangeMove = null
       }
     }
 
@@ -426,6 +488,7 @@ export function CameraDirector() {
       if (s.flight) {
         const id = s.flight.id
         s.flight = null
+        settleFold(s, now)
         arrive(rt, id, now, intent.kind)
       }
       s.userTouched = true
@@ -437,9 +500,11 @@ export function CameraDirector() {
       const e = f.ease(t)
       interpolatePose(s.from, s.target, e, f.bump, s.pose, tiltProgress(e, s.from.tilt, s.target.tilt))
       if (f.dolly) s.pose.range = s.target.range * (1 + (BOOT_DOLLY_SCALE - 1) * (1 - e))
+      else if (s.fold) s.pose.range *= Math.exp(curveAt(s.fold, now))
       rt.camera.progress = e
       if (t >= 1) {
         s.flight = null
+        settleFold(s, now)
         arrive(rt, f.id, now, intent.kind)
       }
     } else {

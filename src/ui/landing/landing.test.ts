@@ -55,9 +55,18 @@ describe('example places', () => {
 })
 
 describe('window label', () => {
-  it('formats the trailing 7-day window in UTC', () => {
-    expect(windowLabel(Date.UTC(2026, 10, 8, 4, 0))).toBe('01 NOV → 08 NOV 2026 UTC')
-    expect(windowLabel(Date.UTC(2027, 0, 3, 12, 0))).toBe('27 DEC 2026 → 03 JAN 2027 UTC')
+  it('formats the trailing 7-day window in UTC, in the one date style', () => {
+    // same month: written once; days never zero-padded
+    expect(windowLabel(Date.UTC(2026, 10, 8, 4, 0))).toBe('1 → 8 NOV 2026 UTC')
+    // across a month
+    expect(windowLabel(Date.UTC(2026, 10, 5, 12, 0))).toBe('29 OCT → 5 NOV 2026 UTC')
+    // across a year: the year on both ends
+    expect(windowLabel(Date.UTC(2027, 0, 5, 12, 0))).toBe('29 DEC 2026 → 5 JAN 2027 UTC')
+    expect(windowLabel(Date.UTC(2027, 0, 3, 12, 0))).toBe('27 DEC 2026 → 3 JAN 2027 UTC')
+  })
+  it('uses the UTC day, whatever the hour', () => {
+    expect(windowLabel(Date.UTC(2026, 10, 8, 23, 59))).toBe('1 → 8 NOV 2026 UTC')
+    expect(windowLabel(Date.UTC(2026, 10, 9, 0, 0))).toBe('2 → 9 NOV 2026 UTC')
   })
 })
 

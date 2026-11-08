@@ -2,10 +2,16 @@
  * <Landing onSubmit enterDelay/>: phases 'idle' and 'locating'. The hero, the place search, "Use my
  * location", curated example places and a live stats footnote, laid out so the globe stays the hero:
  *
- *   wide            a text column on the left of the 12-column grid; the globe frames to its right
+ *   wide            a text column on the left of the 12-column grid; the globe frames to its right.
+ *                   When suggestions open, the copy fades and the field lifts to the headline's place,
+ *                   so all five rows fit above the bottom readouts (Esc, blur or clearing puts it back).
  *   stacked         a compact ink panel in the bottom ~47%; the whole globe sits above it (decision 4).
- *                   Focusing the search lifts the field to the top, clear of the keyboard.
+ *                   Focusing the search lifts the field to the top, clear of the keyboard, over a
+ *                   dimmed globe.
  *   short landscape copy in the right half, the globe on the left
+ *
+ * Narrow phones (≤ 400 px) offer "Use my location" as a labelled "Near me" chip at the head of the
+ * example row, so the field keeps its full width for "Search a place".
  *
  * It publishes what it covers (store.uiInsets) so the camera frames the globe in what is left.
  *
@@ -92,6 +98,7 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const headlineRef = useRef<HTMLHeadingElement>(null)
   const searchRef = useRef<HTMLDivElement>(null)
   const notesRef = useRef<HTMLDivElement>(null)
   const locate = useLocate(onSubmit)
@@ -117,10 +124,16 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
     onSubmit(p)
   }
 
-  // ── search mode (stacked) ──────────────────────────────────────────────────────────────
-  // FLIP: the field glides from where it was to where it goes (320 ms ease-out); entering, the hero
-  // copy fades out on a frozen copy (160 ms); leaving, it fades back in.
+  // ── search mode ────────────────────────────────────────────────────────────────────────
+  // Stacked (and short landscape): focusing the field lifts it to the top, clear of the keyboard. FLIP:
+  // the field glides from where it was to where it goes (320 ms ease-out); entering, the hero copy fades
+  // out on a frozen copy (160 ms); leaving, it fades back in.
+  // Wide: the suggestion list opening lifts the field to the headline's place with a transform and the
+  // copy fades (Landing.module.css), so all five rows fit above the bottom readouts. Esc, focus leaving
+  // the search block or an empty field put it back; a list that briefly empties while typing does not.
   const flipFrom = useRef<number | null>(null)
+  const liftRef = useRef(0)
+  const listOpenRef = useRef(false)
   const enterSearch = () => {
     if (!liftable || searchingRef.current) return
     flipFrom.current = searchRef.current?.getBoundingClientRect().top ?? null
@@ -136,12 +149,48 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
     searchingRef.current = true
     flushSync(() => setSearching(true))
   }
+  /** Wide: how far the field rises (layout offsets: the entrance transforms don't count). */
+  const measureLift = () => {
+    const column = columnRef.current
+    const block = searchRef.current
+    const headline = headlineRef.current
+    if (!column || !block || !headline) return
+    liftRef.current = Math.max(0, block.offsetTop - headline.offsetTop)
+    column.style.setProperty('--search-lift', `${liftRef.current}px`)
+  }
+  const enterWideSearch = () => {
+    if (liftable || searchingRef.current) return
+    measureLift()
+    // Ends the entrance if it is still playing: its rise would hold the field's transform.
+    setEntered(true)
+    searchingRef.current = true
+    setSearching(true)
+  }
   const leaveSearch = () => {
     if (!searchingRef.current) return
-    flipFrom.current = searchRef.current?.getBoundingClientRect().top ?? null
+    if (liftable) flipFrom.current = searchRef.current?.getBoundingClientRect().top ?? null
     searchingRef.current = false
     setSearching(false)
   }
+  // A layout change mid-search (a tablet rotated): take up the new layout's search mode, or leave it.
+  const wasLiftable = useRef(liftable)
+  useLayoutEffect(() => {
+    if (wasLiftable.current === liftable) return
+    wasLiftable.current = liftable
+    if (!searchingRef.current) return
+    searchingRef.current = false
+    setSearching(false)
+    if (!liftable && listOpenRef.current) enterWideSearch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liftable])
+  // Wide search: the lift follows the viewport (the column's rhythm is in vh).
+  useEffect(() => {
+    if (!searching || liftable) return
+    const onResize = () => measureLift()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searching, liftable])
   useLayoutEffect(() => {
     const from = flipFrom.current
     flipFrom.current = null
@@ -209,7 +258,7 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
       ref={rootRef}
       className={s.landing}
       style={rootStyle}
-      data-searching={liftable && searching ? 'true' : undefined}
+      data-searching={searching ? 'true' : undefined}
       data-note={locate.state.kind !== 'idle' ? 'true' : undefined}
       data-entered={entered ? '' : undefined}
       data-return={first ? undefined : ''}
@@ -218,7 +267,7 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
         <div ref={contentRef} className={s.content}>
           <Kicker delay={delay} skip={!first} />
 
-          <h1 id="landing-headline" className={s.headline} data-hero-copy>
+          <h1 ref={headlineRef} id="landing-headline" className={s.headline} data-hero-copy>
             <Reveal as="span" className={s.hl} delay={delay + 140} skip={!first}>
               Something
             </Reveal>
@@ -237,7 +286,19 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
             </span>
           </Reveal>
 
-          <div ref={searchRef} className={cx(s.searchBlock, s.rise, s.riseSearch)} data-search-block>
+          <div
+            ref={searchRef}
+            className={cx(s.searchBlock, s.rise, s.riseSearch)}
+            data-search-block
+            // Wide search mode ends on Esc, or when focus leaves the search block (not when it moves
+            // from the field to its own clear / go buttons).
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && !liftable) leaveSearch()
+            }}
+            onBlur={(e) => {
+              if (!liftable && !e.currentTarget.contains(e.relatedTarget as Node | null)) leaveSearch()
+            }}
+          >
             <SearchBox
               onSubmit={submit}
               metaHidden={liftable && !searching && locate.state.kind === 'idle'}
@@ -247,8 +308,16 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
                   enterSearch()
                   // Turning to the search is moving on from a location fault.
                   locate.dismiss()
-                } else leaveSearch()
+                } else if (liftable) leaveSearch()
               }}
+              onListChange={(open) => {
+                listOpenRef.current = open
+                if (open) enterWideSearch()
+              }}
+              onQueryChange={(q) => {
+                if (!q && !liftable) leaveSearch()
+              }}
+              liftedBy={() => (searchingRef.current && !liftable ? liftRef.current : 0)}
               statusOverride={locate.state.kind === 'locating' ? <LocatingStatus state={locate.state} /> : undefined}
               idleTrailing={
                 locating ? (
@@ -263,7 +332,8 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
                   </button>
                 ) : (
                   // The visible label is the accessible name: "Locate me" on phones; where the button is
-                  // icon-only (≤ 400 px) the long form is visually hidden but still names it.
+                  // icon-only (small landscape phones) the long form is visually hidden but still names
+                  // it. At ≤ 400 px it gives way to the "Near me" chip.
                   <button type="button" className={s.locateInline} onPointerDown={(e) => e.preventDefault()} onClick={locate.start}>
                     <Glyph name="locate" size={14} />
                     <span className={s.locateLabel}>Use my location</span>
@@ -277,7 +347,7 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
             </div>
           </div>
 
-          <Examples onPick={submit} disabled={locating} />
+          <Examples onPick={submit} disabled={locating} locate={locate} />
           {/* A nicety: it steps aside while a locate note needs the room. */}
           <StatsLine hidden={locate.state.kind !== 'idle'} />
         </div>
@@ -375,7 +445,7 @@ function useBalance(
   return pad > 0 ? { paddingTop: pad } : pad < 0 ? { paddingBottom: -pad } : undefined
 }
 
-/** "── LAST 7 DAYS · 01 NOV → 08 NOV 2026 UTC" — the exact window "this week" means. */
+/** "── LAST 7 DAYS · 1 → 8 NOV 2026 UTC" — the exact window "this week" means. */
 function Kicker({ delay, skip }: { delay: number; skip: boolean }) {
   // Live: a page left open past midnight UTC shows the window a search would actually use. The label
   // re-renders only when the day changes, not every second.
@@ -423,7 +493,8 @@ function LocatingStatus({ state }: { state: Extract<LocateState, { kind: 'locati
   )
 }
 
-function Examples({ onPick, disabled }: { onPick: (p: Place) => void; disabled?: boolean }) {
+function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; disabled?: boolean; locate: ReturnType<typeof useLocate> }) {
+  const locating = locate.state.kind === 'locating'
   const [hover, setHover] = useState<ExamplePlace | null>(null)
   // Swipeable row (stacked): the edge fade that says "more" lifts once the row is scrolled to its end.
   const listRef = useRef<HTMLUListElement>(null)
@@ -466,6 +537,20 @@ function Examples({ onPick, disabled }: { onPick: (p: Place) => void; disabled?:
         {/* Stacked: the label leads the swipeable row instead of taking a line of its own. */}
         <li className={s.chipLead} aria-hidden>
           Or try
+        </li>
+        {/* Narrow phones (≤ 400 px, CSS): "Use my location" as the first chip, labelled, in the chips' own
+            box and type. Locating, it reads "Locating…" and a second tap cancels. Always in the DOM, so
+            the column never changes height after mount. */}
+        <li className={s.nearMe}>
+          <button
+            type="button"
+            className={cx(s.chip, s.chipLocate)}
+            onClick={locating ? locate.cancel : locate.start}
+            aria-label={locating ? 'Cancel locating' : 'Use my location'}
+          >
+            <Glyph name="locate" size={12} />
+            {locating ? 'Locating…' : 'Near me'}
+          </button>
         </li>
         {EXAMPLE_PLACES.map((p) => (
           <li key={p.chip}>

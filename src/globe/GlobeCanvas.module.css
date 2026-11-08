@@ -127,11 +127,12 @@
 .calloutSignal .calloutName {
   color: var(--signal);
 }
-/* Stacked layouts: one line, name · altitude (NORAD and imaged time are in the sheet). */
+/* Stacked layouts: one line, name · altitude (NORAD and imaged time are in the sheet). The gap before the dot is
+   real box space (a leading space in the meta would collapse at the flex item's edge). */
 .calloutCompact .calloutBox {
   flex-direction: row;
   align-items: baseline;
-  gap: 0;
+  gap: 0.5em;
   max-width: 60vw;
   padding: 6px 8px 5px;
 }

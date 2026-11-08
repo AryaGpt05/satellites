@@ -6,7 +6,8 @@
  *
  * Stacked layouts (and short landscape phones) would collide the bottom corners with the landing
  * panel and the bottom sheet, so those are hidden and the sun joins the top-right block.
- * When the scene is not showing live time (replay / scrub), the TR block adds the scene time.
+ * When the scene is not showing live time (replay / scrub), the TR block adds the scene time, in the
+ * place's own zone like every other time on the pass (the live clock stays UTC).
  *
  * Over a scene (results, a pass) functional ink scrims sit behind the readouts so they stay legible
  * over bright cloud (decision 5); the landing keeps the pure view. The HUD publishes the height it
@@ -16,10 +17,13 @@
  * every second, SunValue every ~24 s, CatalogAge every minute); the shell renders when the phase, the
  * catalog or the clock mode changes.
  */
-import { memo, useLayoutEffect, useRef, type RefObject } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
+import { timeZoneAt, tzReady } from '@/imagery'
 import { subsolarPoint } from '@/lib/geo'
 import { useApp } from '@/state/store'
 import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync } from '@/ui/system'
+// The pure time module, never the lazy '@/ui/results' index (that would pull the results chunk in).
+import { fmtLocalDay, fmtLocalTime, zoneAbbr } from '@/ui/results/lib/time'
 import { useCatalogStatus } from './catalogStatus'
 import { useSecondClock, useSecondDerived } from './clock'
 import { fmtAge, fmtGmst, fmtObjects, fmtSource, fmtStampZ, fmtSun, isStale } from './readouts'
@@ -31,21 +35,25 @@ export const VERSION = 'v0.1'
 const TOP_GAP = 8
 
 /**
- * The scene clock, when the globe isn't on live time (replay / scrub). Its own subscriber: a replay at
- * 60× changes the scene second every frame, and only this line should re-render for it.
- * Phones get the compact form ("11-05 06:54:20") so it clears the top-left readout.
+ * The scene clock, when the globe isn't on live time (replay / scrub), at the place: the same clock and
+ * date style as the pass header ("Scene Sun 1 Nov 11:21:13 EST"; phones drop the day so it clears the
+ * top-left readout: "Scene 11:21:13 EST"). The zone always shows. UTC until the place's zone is known.
+ * Its own subscriber: a replay at 60× changes the scene second every frame, and only this line should
+ * re-render for it.
  */
 function SceneTime() {
   const sceneSecond = useApp((st) => Math.floor(st.simTime / 1000))
-  const [date, time] = fmtUtc(sceneSecond * 1000).split(' ')
+  const lat = useApp((st) => st.place?.lat)
+  const lon = useApp((st) => st.place?.lon)
+  const ready = tzReady()
+  const tz = useMemo(() => (lat !== undefined && lon !== undefined && ready ? timeZoneAt(lat, lon) : 'UTC'), [lat, lon, ready])
+  const t = sceneSecond * 1000
   return (
     <span className={cx(s.line, s.dim)}>
       Scene
       <span className={s.sceneValue}>
-        <span className={s.desk}>{date} </span>
-        <span className={s.mobInline}>{date.slice(5)} </span>
-        {time}
-        <span className={s.desk}> UTC</span>
+        <span className={s.desk}>{fmtLocalDay(t, tz)} </span>
+        {fmtLocalTime(t, tz, true)} {zoneAbbr(t, tz)}
       </span>
     </span>
   )

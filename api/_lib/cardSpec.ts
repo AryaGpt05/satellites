@@ -135,12 +135,31 @@ export type Prim =
     }
   | { t: 'circle'; cx: number; cy: number; r: number; fill?: string; stroke?: string; width?: number }
 
+/**
+ * Client only (share R2SH1): the card's square cut out of a larger picture the app has already
+ * decoded (the pass view's crop), in that picture's pixels. The rect is the card crop centred on the
+ * ROUNDED share point; nothing outside it is ever drawn. The server never reads this.
+ */
+export interface PlateSource {
+  /** The decoded picture (the pass view's display URL) */
+  url: string
+  /** The card's square inside it, source pixels: left, top, width, height */
+  sx: number
+  sy: number
+  sw: number
+  sh: number
+  /** The source picture's side, px */
+  px: number
+}
+
 export interface ImagePlate {
   kind: 'image'
   /** The crop to draw (centred on the rounded share point). */
   crop: CardCrop
   /** Filled in by each side (client: imagery endpoints; server: cropPlan). */
   imageUrl?: string
+  /** Client only: the same square cut from the picture already on screen (see PlateSource). */
+  source?: PlateSource
   chip: Chip
   credit: Chip
   scale: ScaleBar
@@ -174,7 +193,7 @@ export interface CardSpec {
   place: string
   /** "." after the place, or "" when the place was cut short with an ellipsis */
   tail: string
-  /** Clouded: "Clouded over. It saw only cloud." */
+  /** Clouded: cloudWords().sub, e.g. "Mostly cloud: 81% of the scene." */
   sub?: string
   /** Headline font size, px */
   size: number
@@ -239,9 +258,46 @@ export const FOOT_LEFT = 'See what photographed you'
 /** og:image:alt for the default (root link) card: index.html uses the same words (core K9). */
 export const DEFAULT_CARD_ALT =
   'A real Sentinel-2 satellite photograph of Palm Jumeirah, Dubai, beside the line: Something photographed you this week. Enter any place on Earth.'
+/** The card's sub-line when the scene is ≥ OVERCAST_PCT cloud (cloudWords' strongest case). */
 export const CLOUDED_LINE = 'Clouded over. It saw only cloud.'
 /** Scene cloud cover at or above which the card calls the picture clouded (as results' isClouded). */
 export const CLOUDED_PCT = 70
+/** Scene cloud cover at or above which "it saw only cloud" is true (as PassDetail's overcast line). */
+export const OVERCAST_PCT = 90
+
+/** The spot classes a capture can carry (results' SpotCloud). */
+export type SpotCloudLike = 'clear' | 'cirrus' | 'cloud' | 'shadow' | 'unknown'
+
+export interface CloudWords {
+  /** The card's sub-line under the headline */
+  sub: string
+  /** The warn chip over the picture */
+  chip: string
+  /** Appended to the post text after "…from 795 km up on Sun 1 Nov at 11:21 local." */
+  post: string
+  /** The og:description sentence */
+  desc: string
+}
+
+/**
+ * One rule for clouded words (share R2SH3), so the card, the PNG, /api/og, the share page and the post
+ * say what the picture shows: only cloud (≥ 90 %), mostly cloud (70–89 %), or cloud over the spot itself
+ * (the place's pixel is cloud while the scene is clearer). Undefined when the picture isn't clouded.
+ */
+export function cloudWords(pct?: number, spot?: SpotCloudLike | string): CloudWords | undefined {
+  const known = pct !== undefined && Number.isFinite(pct)
+  const p = known ? Math.round(pct) : 0
+  if (known && pct >= OVERCAST_PCT) {
+    return { sub: CLOUDED_LINE, chip: `Clouded over · ${p}%`, post: 'It saw only cloud.', desc: `It saw only cloud (${p}%).` }
+  }
+  if (known && pct >= CLOUDED_PCT) {
+    return { sub: `Mostly cloud: ${p}% of the scene.`, chip: `Mostly cloud · ${p}%`, post: `It saw mostly cloud (${p}%).`, desc: `It saw mostly cloud (${p}%).` }
+  }
+  if (spot === 'cloud') {
+    return { sub: 'Cloud over the spot itself.', chip: 'Cloud over the spot', post: 'Cloud covered the spot.', desc: 'Cloud covered the spot.' }
+  }
+  return undefined
+}
 
 const PLACE_MAX = 48
 
@@ -672,11 +728,13 @@ export function buildCardSpec(input: CardInput): CardSpec {
   const h = headlineParts(input.verdict, input.satName, input.placeLabel)
   const c = input.capture
   const clouded = input.verdict === 'imaged' && !!c && (input.clouded ?? isCloudedCapture(c))
+  // The words for a clouded picture (R2SH3). A caller that calls it clouded on evidence the capture
+  // doesn't carry gets the most modest wording: cloud over the spot.
+  const words = clouded ? (cloudWords(c?.cloudCoverPct, c?.spot) ?? cloudWords(undefined, 'cloud')) : undefined
   let plate: Plate
   if (input.verdict === 'imaged' && c && input.imageMiss !== 'permanent') {
     const crop = cardCrop(c)
     const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection] ?? crop.metresPerPx
-    const pct = c.cloudCoverPct
     const chip = plateChip(`${input.satName} · ${sensorName(c)} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
     const credit = plateChip(creditFor(c, input.tClosest), { left: INSET, bottom: INSET }, 'bone2', CARD_FS.micro)
     const scale = scaleFor(crop.metresPerPx)
@@ -686,9 +744,7 @@ export function buildCardSpec(input: CardInput): CardSpec {
       chip,
       credit,
       scale,
-      clouded: clouded
-        ? plateChip(pct !== undefined && pct >= CLOUDED_PCT ? `Clouded over · ${int(pct)}%` : 'Cloud over your spot', { left: INSET, bottom: INSET + 38 }, 'warn')
-        : undefined,
+      clouded: words ? plateChip(words.chip, { left: INSET, bottom: INSET + 38 }, 'warn') : undefined,
       overlay: imageOverlay([chip, credit], scale),
       fallback: planPlate(input, planNote('imaged', 'transient')),
     }
@@ -703,7 +759,7 @@ export function buildCardSpec(input: CardInput): CardSpec {
     lead: h.lead,
     place: h.place,
     tail: h.tail,
-    sub: clouded ? CLOUDED_LINE : undefined,
+    sub: words?.sub,
     size: headlineSize(h.lead, h.place),
     readouts: readoutsFor(input),
     footLeft: FOOT_LEFT,
@@ -719,7 +775,7 @@ export interface SummaryInput {
   /** The rounded share point (2 decimals) */
   lat: number
   lon: number
-  /** Distinct satellites that photographed the place */
+  /** Distinct satellites that photographed the place in detail (Sentinel-2 / Landsat; weather mosaics don't count) */
   satellites: number
   counts: { imaged: number; likely: number; could: number; overhead: number }
   /** End of the 7-day window, epoch ms */
@@ -732,14 +788,16 @@ export interface SummaryInput {
 
 const SHORT: Record<Verdict, string> = { imaged: 'Photo', likely: 'Likely', could: 'Could', overhead: 'Overhead' }
 
-/** "7 satellites photographed Waterloo." over the week's best picture, with the four verdict counts. */
+/** "2 satellites photographed Waterloo in detail." over the week's best picture, with the four verdict counts. */
 export function buildSummarySpec(i: SummaryInput): CardSpec {
   const n = Math.max(0, Math.round(i.satellites))
   const cps = Array.from(i.placeLabel)
   const place = cps.length > PLACE_MAX ? `${cps.slice(0, PLACE_MAX - 1).join('').trimEnd()}…` : i.placeLabel
   const passes = i.counts.likely + i.counts.could + i.counts.overhead
-  // A week with no picture says so plainly, in the summary post's words.
+  // A week with no picture says so plainly, in the summary post's words. The count is of detailed
+  // pictures (Sentinel-2 / Landsat), worded as the results headline: "… photographed Waterloo in detail."
   const lead = n > 0 ? `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} photographed` : `${int(passes)} satellite ${passes === 1 ? 'pass' : 'passes'} crossed`
+  const tail = place.endsWith('…') ? '' : n > 0 ? ' in detail.' : '.'
   let plate: Plate
   const c = i.best?.capture
   if (c && i.best) {
@@ -760,9 +818,10 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
     coords: fmtCoords(i.lat, i.lon),
     lead,
     place,
-    tail: place.endsWith('…') ? '' : '.',
+    tail,
     sub: n > 0 ? undefined : 'None caught a clear picture.',
-    size: headlineSize(lead, place),
+    // The tail sets on the place line, so it counts toward what the place line must hold.
+    size: headlineSize(lead, `${place}${tail}`),
     readouts,
     // Four columns of 116px: a six-character count ("12,345") steps down so it clears the next rule.
     readoutSize: readouts.some((r) => r.value.length > 5) ? 21 : 26,

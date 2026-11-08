@@ -7,10 +7,11 @@
  *    or deselected: days of sim time in one frame) the sun GLIDES from where it was, in step with the camera
  *    flight (or over 900 ms without one), so the terminator sweeps instead of the planet flipping night↔day (M04);
  *  - drift the clouds (wall time, very slowly; frozen under prefers-reduced-motion);
- *  - track the app phase and when it was entered (texture / DPR gating), and publish the device pixel ratio.
+ *  - track the app phase and when it was entered (texture / DPR gating), when the replay sweep last started (no
+ *    texture uploads during it), and publish the device pixel ratio.
  */
 import { useFrame } from '@react-three/fiber'
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Vector3 } from 'three'
 import { gmst, sunDirectionWorld } from '@/lib/geo'
 import { easeInOut } from '@/lib/ease'
@@ -40,6 +41,7 @@ export function slerpUnit(a: Vector3, b: Vector3, t: number, out: Vector3): Vect
 export function Clock() {
   const rt = useRuntime()
   const clock = useRef(createClock(useApp.getState().simTime, useApp.getState().timeMode, Date.now()))
+  const replay = useRef({ mode: useApp.getState().timeMode, hold: false })
   const glide = useRef({
     active: false,
     from: new Vector3(),
@@ -54,6 +56,14 @@ export function Clock() {
     wallAt: 0,
   })
 
+  // The UI hold standing at the instant the phase changes belongs to the previous phase's UI (exact, not a frame late).
+  useEffect(() => {
+    rt.phaseBusyFloor = useApp.getState().motionBusyUntil
+    return useApp.subscribe((s, prev) => {
+      if (s.phase !== prev.phase) rt.phaseBusyFloor = prev.motionBusyUntil
+    })
+  }, [rt])
+
   useFrame((state, dt) => {
     const st = useApp.getState()
     const now = Date.now()
@@ -66,6 +76,11 @@ export function Clock() {
 
     // Replay waits for the camera: the sweep starts on arrival, not mid-flight.
     const hold = st.timeMode === 'replay' && rt.camera.flying
+    // The sweep (re)starts when replay begins, and again when a hold releases on arrival (a pass picked mid-replay).
+    const r = replay.current
+    if (st.timeMode === 'replay' && (r.mode !== 'replay' || (r.hold && !hold))) rt.replayStartedAt = perfNow
+    r.mode = st.timeMode
+    r.hold = hold
     const { write } = stepClock(clock.current, {
       mode: st.timeMode,
       storeSimTime: st.simTime,

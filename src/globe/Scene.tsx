@@ -1,6 +1,7 @@
 /**
  * Scene composition. Order of work each frame is fixed by useFrame priorities (runtime.ts FRAME):
- *   Clock (sim time, sun, GMST, texture-upload slices) → CameraDirector → scene components → post composer.
+ *   AdaptiveDpr → Clock (sim time, sun, GMST, texture-upload slices) → CameraDirector → scene components → post
+ *   composer.
  *
  * Also owns the frame-rate policy: adaptive DPR that only changes while nothing choreographed is moving
  * (PERF-08), no rendering at all behind the About page or in a hidden tab (PERF-10), and the boot-time shader
@@ -44,12 +45,13 @@ export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
   // One sphere for the planet and its cloud shell (scaled).
   const sphere = useSphere(runtime.tier.sphereSegments)
 
-  // Development hook for screenshot scripts and perf probes (never in production builds).
+  // Hook for screenshot scripts and perf probes: dev and `vite build --mode inspect` only, never in production.
   const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
   useEffect(() => {
-    if (!import.meta.env.DEV) return
-    ;(window as unknown as { __globe?: unknown }).__globe = { rt: runtime, gl, scene, useApp }
-  }, [gl, runtime, scene])
+    if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
+    ;(window as unknown as { __globe?: unknown }).__globe = { rt: runtime, gl, scene, camera, useApp }
+  }, [gl, runtime, scene, camera])
 
   return (
     <RuntimeContext.Provider value={runtime}>
@@ -322,6 +324,16 @@ function AdaptiveDpr() {
 
   useEffect(() => {
     setDpr(ctl.levels[ctl.index])
+    // Probe hook (dev / inspect builds only): queue a DPR step through the real policy, as a frame-rate change would.
+    if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
+    ;(window as unknown as { __forceDpr?: (dpr: number) => void }).__forceDpr = (dpr: number) => {
+      let best = 0
+      ctl.levels.forEach((v, i) => {
+        if (Math.abs(v - dpr) < Math.abs(ctl.levels[best] - dpr)) best = i
+      })
+      ctl.want = best
+      ctl.flips = 0
+    }
   }, [ctl, setDpr])
 
   useFrame(() => {
@@ -375,6 +387,8 @@ function AdaptiveDpr() {
         }
       }
     }
-  })
+    // Before the clock and the camera: the drawing buffer resizes first, then this frame's pose and lens shift are
+    // applied to it (the camera is manual, so R3F's resize never resets the projection).
+  }, FRAME.dpr)
   return null
 }

@@ -298,11 +298,6 @@
   margin-top: var(--gap-examples);
   width: var(--search-w);
 }
-/* While suggestions are open they cover this block; where the chip row is wider than the list, a
-   stray chip would peek out beside it. */
-.landing:has([role='option']) .examples {
-  visibility: hidden;
-}
 /* "02 / Or try" left, the hovered place right: the same row as the field's label + status */
 .examplesHead {
   display: flex;
@@ -392,6 +387,13 @@
 .locateLabelShort {
   display: none;
 }
+/* The "Near me" chip is the narrow phones' form of "Use my location" (≤ 400 px, below). */
+.nearMe {
+  display: none;
+}
+.chipLocate {
+  gap: 8px;
+}
 
 @media (hover: hover) and (pointer: fine) {
   .locateInline:hover,
@@ -402,6 +404,42 @@
     color: var(--bone);
     border-color: var(--bone-3);
     background: var(--ink-2);
+  }
+}
+
+/*
+ * ── search mode, wide ─────────────────────────────────────────────
+ * When suggestions open, the copy fades and the field rises to the headline's place (--search-lift,
+ * measured by Landing.tsx), so five rows fit above the bottom readouts. Leaving, the field settles
+ * back first and the copy returns after it. The camera holds still throughout.
+ * Query: WIDE minus SHORT_LANDSCAPE (short landscape has the stacked search mode, below).
+ */
+@media (min-width: 761px) and (orientation: landscape) and (min-height: 541px), (min-width: 1101px) and (min-height: 541px), (min-width: 1101px) and (orientation: portrait) {
+  .column :is(.kicker, .headline, .sub, .examples, .stats) {
+    transition: opacity 240ms var(--ease-out) 120ms;
+  }
+  .searchBlock {
+    transition: transform 240ms var(--ease-in-out);
+  }
+  .landing[data-searching='true'] .column :is(.kicker, .headline, .sub, .examples, .stats) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms var(--ease-out);
+  }
+  .landing[data-searching='true'] .searchBlock {
+    transform: translateY(calc(-1 * var(--search-lift, 0px)));
+    transition: transform 480ms var(--ease-out);
+  }
+  /* Reduced motion: the field cuts to its place; the copy fades. */
+  @media (prefers-reduced-motion: reduce) {
+    .searchBlock,
+    .landing[data-searching='true'] .searchBlock {
+      transition: none;
+    }
+    .column :is(.kicker, .headline, .sub, .examples, .stats),
+    .landing[data-searching='true'] .column :is(.kicker, .headline, .sub, .examples, .stats) {
+      transition: opacity 200ms var(--ease-out);
+    }
   }
 }
 
@@ -544,6 +582,31 @@
   }
 }
 
+/* Search mode, stacked: a flat dim over the globe (no blur, no gradient) so the field and the list
+   read alone; the HUD chrome stays above it (Hud.module.css). The field band and the list run bezel to
+   bezel (portrait tablets cap the resting measure). */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  .landing::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: var(--ink-0);
+    opacity: 0;
+    transition: opacity 240ms var(--ease-out);
+    pointer-events: none;
+  }
+  .landing[data-searching='true']::before {
+    opacity: 0.9;
+  }
+  .column {
+    z-index: 1;
+  }
+  .landing[data-searching='true'] .column:not([data-ghost]) .content {
+    max-width: none;
+  }
+}
+
 /* Search mode (stacked and short landscape): the field rises to the top, clear of the keyboard. The
    frozen copy that fades out on entry (data-ghost) keeps the resting layout. */
 @media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (max-height: 540px) {
@@ -613,10 +676,20 @@
   }
 }
 
-/* Narrow phones (and the half-width column of a small landscape phone): "Use my location" becomes a
-   44 × 44 icon so "Search a place" fits in full. The long label stays as the button's (visually
-   hidden) name. */
-@media (max-width: 400px), (orientation: landscape) and (max-height: 540px) and (max-width: 760px) {
+/* Narrow phones: "Use my location" leaves the field (so "Search a place" has the whole line) and leads
+   the example row as a labelled "Near me" chip, in the chips' own box, type and hairline. */
+@media (max-width: 400px) {
+  .locateInline {
+    display: none;
+  }
+  .nearMe {
+    display: block;
+  }
+}
+
+/* The half-width column of a small landscape phone: "Use my location" becomes a 44 × 44 icon so
+   "Search a place" fits in full. The long label stays as the button's (visually hidden) name. */
+@media (orientation: landscape) and (max-height: 540px) and (max-width: 760px) {
   .locateInline {
     justify-content: center;
     width: 44px;
@@ -724,6 +797,23 @@
 @media (pointer: coarse) {
   .locateInline {
     height: 44px;
+  }
+}
+/* Touch, swipeable chip row: the 40 px chips take 44 px taps. The row gains 2 px of padding above and
+   below (and gives it back in margin, so nothing moves) for the hit box to extend into: a scroller
+   clips what overflows its padding box. */
+@media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px) {
+  .chips {
+    margin-block: -2px;
+    padding-block: 2px;
+  }
+  .chip {
+    position: relative;
+  }
+  .chip::after {
+    content: '';
+    position: absolute;
+    inset: -2px 0;
   }
 }
 

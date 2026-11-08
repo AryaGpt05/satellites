@@ -40,8 +40,19 @@ export interface ExitOptions<T extends HTMLElement> {
 /**
  * Clone `node` as an inert, frozen copy and insert it right after `node` (so it paints in the same
  * place in the stacking order). Scroll positions are carried over. Returns the clone.
+ *
+ * The copy is never made to lay out here: the scroll offsets are read from the live tree before the
+ * clone is inserted (its layout is current then, so the reads are free), and only the non-zero ones are
+ * written to the clone afterwards. With nothing scrolled, the clone is first laid out with the next
+ * frame, not inside the event that unmounted it.
  */
 export function insertFrozenClone<T extends HTMLElement>(node: T, prepare?: (clone: T) => void): T {
+  const src = node.querySelectorAll<HTMLElement>('*')
+  const scrolls: [number, number, number][] = []
+  if (node.scrollTop || node.scrollLeft) scrolls.push([-1, node.scrollTop, node.scrollLeft])
+  src.forEach((el, i) => {
+    if (el.scrollTop || el.scrollLeft) scrolls.push([i, el.scrollTop, el.scrollLeft])
+  })
   const clone = node.cloneNode(true) as T
   clone.setAttribute('aria-hidden', 'true')
   clone.removeAttribute('role')
@@ -50,7 +61,9 @@ export function insertFrozenClone<T extends HTMLElement>(node: T, prepare?: (clo
   clone.inert = true
   clone.style.pointerEvents = 'none'
   clone.style.animation = 'none'
-  clone.querySelectorAll<HTMLElement | SVGElement>('*').forEach((el) => {
+  // Same document order as `src`: `prepare` runs after this list is taken, so the indexes still match.
+  const dst = clone.querySelectorAll<HTMLElement>('*')
+  dst.forEach((el) => {
     el.style.animation = 'none'
     el.removeAttribute('id')
   })
@@ -60,25 +73,14 @@ export function insertFrozenClone<T extends HTMLElement>(node: T, prepare?: (clo
     /* a failed cosmetic patch must never break the unmount */
   }
   node.parentNode?.insertBefore(clone, node.nextSibling)
-  copyScroll(node, clone)
-  return clone
-}
-
-/** Carry every non-zero scroll offset in `from`'s subtree over to the same element in `to`'s. */
-function copyScroll(from: Element, to: Element) {
-  if (from.scrollTop || from.scrollLeft) {
-    to.scrollTop = from.scrollTop
-    to.scrollLeft = from.scrollLeft
-  }
-  const a = from.querySelectorAll('*')
-  const b = to.querySelectorAll('*')
-  for (let i = 0; i < a.length && i < b.length; i++) {
-    const el = a[i]
-    if (el.scrollTop || el.scrollLeft) {
-      b[i].scrollTop = el.scrollTop
-      b[i].scrollLeft = el.scrollLeft
+  for (const [i, top, left] of scrolls) {
+    const el = i < 0 ? clone : dst[i]
+    if (el) {
+      el.scrollTop = top
+      el.scrollLeft = left
     }
   }
+  return clone
 }
 
 /** Animate a clone out and remove it when done (or after a safety timeout in a background tab). */

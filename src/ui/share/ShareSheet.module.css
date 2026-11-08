@@ -137,6 +137,19 @@
   width: 100%;
   height: 48px;
   font-size: var(--fs-label, 10.5px);
+  transition:
+    background-color var(--d-sm) var(--ease-out),
+    border-color var(--d-sm) var(--ease-out),
+    color var(--d-sm) var(--ease-out);
+}
+/* "Preparing image…": inert for the moment the PNG takes. A signal fill, not yet lit; it lights up
+   (the full signal) when the card is ready to go. */
+.native[aria-disabled='true'],
+.native[aria-disabled='true']:active {
+  background: var(--signal-2);
+  border-color: var(--signal-2);
+  color: var(--signal);
+  cursor: default;
 }
 .secondary {
   display: grid;

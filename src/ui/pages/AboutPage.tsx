@@ -6,6 +6,10 @@
  * Motion: an ink curtain. Opening, it drops from the top (360 ms ease-in-out) and the title wipes in
  * under it; closing, the text clears (120 ms) and the curtain lifts away downward (480 ms), on a
  * frozen copy that keeps the reading position. Reduced motion: 160 ms fades.
+ *
+ * First frame: the sections lay out only as they come near the viewport (content-visibility, in the
+ * stylesheet), so opening costs the intro, not the whole page. A jump from the index re-aims once the
+ * scroll settles, since sections it passed may have grown or shrunk from their placeholder height.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { DUR, EASE } from '@/lib/ease'
@@ -19,6 +23,7 @@ import { fmtStampZ } from '@/ui/hud/readouts'
 import s from './AboutPage.module.css'
 
 const SECTIONS = [
+  { id: 'isnt', index: '00', title: 'What it isn’t' },
   { id: 'method', index: '01', title: 'How a pass is computed' },
   { id: 'words', index: '02', title: 'What the words mean' },
   { id: 'accuracy', index: '03', title: 'What we can’t see' },
@@ -28,6 +33,47 @@ const SECTIONS = [
 ] as const
 
 type SectionId = (typeof SECTIONS)[number]['id']
+
+/** A jumped-to section's top lands this far below the top of the reading area. */
+const JUMP_MARGIN = 32
+/** A jump that lands further than this from its target is re-aimed once. */
+const JUMP_TOLERANCE = 8
+
+/**
+ * Calls `done` once `el` has stopped scrolling (scrollend where supported; else a few still frames),
+ * on the frame after. Not at all if the reader takes over the scroll first (wheel, touch, keys).
+ */
+function afterScroll(el: HTMLElement, done: () => void) {
+  let finished = false
+  let raf = 0
+  let last = -1
+  let still = 0
+  const takeOver = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+  const stop = () => {
+    finished = true
+    el.removeEventListener('scrollend', finish)
+    takeOver.forEach((t) => el.removeEventListener(t, stop))
+    cancelAnimationFrame(raf)
+    window.clearTimeout(cap)
+  }
+  const finish = () => {
+    if (finished) return
+    stop()
+    // Check on the next frame, once the sections the scroll reached have laid out.
+    requestAnimationFrame(done)
+  }
+  el.addEventListener('scrollend', finish, { once: true })
+  takeOver.forEach((t) => el.addEventListener(t, stop, { once: true, passive: true }))
+  const poll = () => {
+    const y = el.scrollTop
+    still = y === last ? still + 1 : 0
+    last = y
+    if (still >= 3) finish()
+    else raf = requestAnimationFrame(poll)
+  }
+  raf = requestAnimationFrame(poll)
+  const cap = window.setTimeout(finish, 2000)
+}
 
 /** Copernicus attribution year(s): the 7-day window can straddle New Year. */
 function copernicusYears(now = Date.now()): string {
@@ -40,7 +86,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
-  const [current, setCurrent] = useState<SectionId>('method')
+  const [current, setCurrent] = useState<SectionId>(SECTIONS[0].id)
   const catalog = useCatalogStatus()
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -133,6 +179,15 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
     delay: 120,
     easing: EASE.inOut,
     reducedKeyframes: [{ opacity: 1 }, { opacity: 0 }],
+    // The copy's sections have no remembered size yet: give each the live one's height, so the carried
+    // scroll offset shows the same lines (and the sections out of view still skip layout).
+    prepare: (clone) => {
+      const live = rootRef.current?.querySelectorAll<HTMLElement>('section')
+      clone.querySelectorAll<HTMLElement>('section').forEach((sec, i) => {
+        const h = live?.[i]?.offsetHeight
+        if (h) sec.style.containIntrinsicSize = `auto ${h}px`
+      })
+    },
     onStart: (clone, reduced) => {
       if (reduced) return
       clone.querySelectorAll<HTMLElement>('[data-about-content]').forEach((el) =>
@@ -142,10 +197,18 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
   })
 
   const jump = (id: SectionId) => {
-    const el = scrollRef.current?.querySelector<HTMLElement>(`#about-${id}`)
-    if (!el || !scrollRef.current) return
+    const root = scrollRef.current
+    const el = root?.querySelector<HTMLElement>(`#about-${id}`)
+    if (!el || !root) return
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    scrollRef.current.scrollTo({ top: el.offsetTop - 32, behavior: reduce ? 'auto' : 'smooth' })
+    const target = () => Math.max(0, Math.min(el.offsetTop - JUMP_MARGIN, root.scrollHeight - root.clientHeight))
+    root.scrollTo({ top: target(), behavior: reduce ? 'auto' : 'smooth' })
+    // The sections it passed rendered on the way and replaced their placeholder heights: if that moved
+    // the target, aim once more (from close by, so the correction is short).
+    afterScroll(root, () => {
+      const t = target()
+      if (Math.abs(root.scrollTop - t) > JUMP_TOLERANCE) root.scrollTo({ top: t, behavior: reduce ? 'auto' : 'smooth' })
+    })
   }
 
   const years = copernicusYears()
@@ -199,6 +262,19 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
               </Reveal>
             </header>
 
+            <Section id="isnt" index="00" title="What it isn’t">
+              <Facts
+                rows={[
+                  ['Live', 'No. Archives publish scenes hours to days after the pass. The newest passes may not have pictures yet.'],
+                  ['A camera on you', 'No. At 10 m per pixel a car is at most one pixel, and a person is invisible. Nothing here can identify anyone.'],
+                  [
+                    'Everything',
+                    'No. Military and intelligence satellites are largely absent from public catalogs, and commercial operators don’t publish where they pointed.',
+                  ],
+                ]}
+              />
+            </Section>
+
             <Section id="method" index="01" title="How a pass is computed">
               <p>
                 We start from the public catalog of orbital elements that{' '}
@@ -222,7 +298,10 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 rows={[
                   ['Fixed swath', 'Pushbroom imagers see a fixed strip beneath them: about 290 km for Sentinel-2, 185 km for Landsat 8 and 9. The place has to fall inside it.'],
                   ['Field of regard', 'Agile commercial imagers can tilt, typically 30–45° off nadir. The place has to be within reach of that tilt.'],
-                  ['Daylight', 'Optical cameras need the sun. We compute the sun’s elevation at the place for every pass; a pass in darkness is never counted as an optical photograph.'],
+                  [
+                    'Daylight',
+                    'Optical cameras need the sun: a pass in darkness never counts as a photograph. Weather imagers also see heat at night; those passes count as likely.',
+                  ],
                   ['Geostationary', 'Weather satellites parked over the equator image the whole disk every 10 minutes or so. If the place is on their disk, it is in every frame.'],
                 ]}
               />

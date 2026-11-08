@@ -5,8 +5,17 @@
  * 1200 × 630 (OG size). Left: the real crop, centred on the ROUNDED place (privacy), with the reticle,
  * source chip, scale bar and the archive's credit; or the pass geometry when there is no picture.
  * Right: wordmark + local time, verdict row, headline, three readouts, the invitation footer.
+ *
+ * The plate (share R2SH1): the pass view has already decoded a larger crop of the same scene around the
+ * searched point (1024 px, ±5 km for Sentinel-2). The card's square, centred on the rounded share point,
+ * lies inside it, so `cardSource` maps that square into the decoded picture's pixels and the preview and
+ * the PNG cut it out: no second render from the archive, no "Acquiring" plate, a PNG ready in well under
+ * a second. Only that rect is ever drawn (the DOM preview clips to it too), so the card shows exactly the
+ * ground a fresh crop centred on the rounded point would show. When the pass view's picture isn't in
+ * the cache (a summary's best look, a recipient's first look), the same rect is loaded and faded in.
  */
 import { gibsWmsUrl, pcCropUrl, preloadImage } from '@/imagery'
+import { bboxAround } from '@/lib/geo'
 import type { Capture, Pass, Report } from '@/types'
 import {
   CARD_COLOR as C,
@@ -28,15 +37,16 @@ import {
   type CardSpec,
   type Chip,
   type PlanPlate,
+  type PlateSource,
   type Prim,
   type ScaleBar,
 } from '../../../api/_lib/cardSpec'
 import { pickBestLook } from '../results/lib/bestLook'
-import { captureFor } from '../results/lib/captures'
+import { captureFor, cropSpec, displayUrl, isDetailed } from '../results/lib/captures'
 import type { SatMeta } from '../results/lib/meta'
 import { roundedPlace, type SummaryLinkInput } from './links'
 
-export { CARD_H, CARD_W, PLATE, type CardSpec }
+export { CARD_H, CARD_W, PLATE, type CardSpec, type PlateSource }
 
 export interface CardOptions {
   /** The picture is mostly cloud (results' isClouded): the clouded variant. */
@@ -59,6 +69,44 @@ export function cropUrlFor(capture: Pick<Capture, 'provider' | 'collection' | 'i
   } catch {
     return undefined
   }
+}
+
+/** Display URLs whose pixels map linearly to a lon/lat box: Planetary Computer bbox crops and GIBS WMS (EPSG:4326). */
+const LINEAR_CROP = /^https:\/\/(planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/|gibs\.earthdata\.nasa\.gov\/wms\/epsg4326\/[^?]*\?.*BBOX=)/
+
+/**
+ * Where the card's square sits inside the picture the pass view decoded (share R2SH1).
+ *
+ * The pass view shows displayUrl(capture, cropSpec(collection)): a `spec.px` square over
+ * bboxAround(exact, spec.halfSizeKm), rendered in plain lon/lat (EPSG:4326), so source pixels are linear
+ * in longitude and latitude. The card's crop is bboxAround(rounded, crop.halfSizeKm). Undefined when that
+ * box leaves the source on any side, or when the capture has no such crop (an Earth Search thumbnail).
+ */
+export function cardSource(
+  capture: Pick<Capture, 'collection' | 'cropUrl'>,
+  exact: { lat: number; lon: number },
+  rounded: { lat: number; lon: number },
+  crop: Pick<CardCrop, 'halfSizeKm'>,
+): PlateSource | undefined {
+  const spec = cropSpec(capture.collection)
+  let url: string
+  try {
+    url = displayUrl(capture, spec)
+  } catch {
+    return undefined
+  }
+  if (!url || !LINEAR_CROP.test(url)) return undefined
+  const D = bboxAround(exact.lat, exact.lon, spec.halfSizeKm)
+  const Cb = bboxAround(rounded.lat, rounded.lon, crop.halfSizeKm)
+  const kx = spec.px / (D[2] - D[0])
+  const ky = spec.px / (D[3] - D[1])
+  const sx = (Cb[0] - D[0]) * kx
+  const sy = (D[3] - Cb[3]) * ky
+  const sw = (Cb[2] - Cb[0]) * kx
+  const sh = (Cb[3] - Cb[1]) * ky
+  const ok = (v: number) => Number.isFinite(v) && v >= 0 && v <= spec.px
+  if (!ok(sx) || !ok(sy) || !ok(sx + sw) || !ok(sy + sh) || sw <= 0 || sh <= 0) return undefined
+  return { url, sx, sy, sw, sh, px: spec.px }
 }
 
 /** The card for a pass, as the sharer sees it (the server builds the same from the stored share). */
@@ -89,17 +137,27 @@ export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: st
     clouded: opts.clouded,
     host,
   })
-  if (spec.plate.kind === 'image' && capture) spec.plate.imageUrl = cropUrlFor(capture, spec.plate.crop, r.lat, r.lon)
+  if (spec.plate.kind === 'image' && capture) {
+    spec.plate.imageUrl = cropUrlFor(capture, spec.plate.crop, r.lat, r.lon)
+    // report.place is the exact searched point (ShareSheet swaps only its label): the pass view's crop is centred there.
+    spec.plate.source = cardSource(capture, report.place, r, spec.plate.crop)
+  }
   return spec
 }
 
-/** The week at a place (share SH6): distinct satellites that photographed it, the four counts, the best look. */
+/**
+ * The week at a place (share SH6): the four counts, the best look, and the satellites that photographed
+ * it in detail (R2SH5): distinct satellites with a detailed picture (Sentinel-2 / Landsat), as the
+ * results headline counts them. Weather mosaics (250–375 m) don't count.
+ */
 export function summaryFacts(report: Report, placeLabel: string, satName: (norad: number) => string): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { altitudeKm: number; capture: Capture } } {
   const counts = { imaged: 0, likely: 0, could: 0, overhead: 0 }
   const photographed = new Set<number>()
   for (const p of report.passes) {
     counts[p.verdict]++
-    if (p.verdict === 'imaged') photographed.add(p.norad)
+    if (p.verdict !== 'imaged') continue
+    const c = captureFor(report, p)
+    if (c && isDetailed(c)) photographed.add(p.norad)
   }
   const look = pickBestLook(report)
   const best =
@@ -133,7 +191,10 @@ export function summaryCardSpec(report: Report, placeLabel: string, satName: (no
     best: f.best && c ? { satName: f.best.satName, tClosest: f.best.tClosest, capture: { collection: c.collection, itemId: c.itemId, gsdM: c.gsdM } } : undefined,
     host,
   })
-  if (spec.plate.kind === 'image' && c) spec.plate.imageUrl = cropUrlFor(c, spec.plate.crop, r.lat, r.lon)
+  if (spec.plate.kind === 'image' && c) {
+    spec.plate.imageUrl = cropUrlFor(c, spec.plate.crop, r.lat, r.lon)
+    spec.plate.source = cardSource(c, report.place, r, spec.plate.crop)
+  }
   return spec
 }
 
@@ -333,24 +394,37 @@ function rowText(ctx: Ctx, text: string, x: number, box: readonly [number, numbe
   return w
 }
 
+/** The picture for the plate: the pass view's decoded crop when there is one (a cache hit), else the card's own crop. */
+async function plateImage(spec: CardSpec): Promise<{ img: HTMLImageElement; rect?: PlateSource } | null> {
+  if (spec.plate.kind !== 'image') return null
+  const { source, imageUrl } = spec.plate
+  if (source) {
+    const img = await preloadImage(source.url).catch(() => null)
+    if (img) return { img, rect: source }
+  }
+  const img = imageUrl ? await preloadImage(imageUrl).catch(() => null) : null
+  return img ? { img } : null
+}
+
 /**
  * Render the card to a PNG blob on a canvas (fonts are the page's own web fonts; the crop is CORS-clean
  * because every archive sends `Access-Control-Allow-Origin: *` and preloadImage asks anonymously).
+ *
+ * The canvas is CPU-backed (`willReadFrequently`), so toBlob encodes from memory, off the main thread's
+ * critical path, instead of first reading the whole card back from the GPU (a long task on phones).
  */
 export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   const fontsToLoad = [`560 84px ${SANS}`, `400 24px ${SANS}`, `350 13px ${MONO}`, `500 16px ${MONO}`, `italic 400 84px ${SERIF}`]
-  try {
-    await Promise.all(fontsToLoad.map((f) => document.fonts?.load(f)))
-  } catch {
-    /* fall back to whatever is available */
-  }
-  const url = spec.plate.kind === 'image' ? spec.plate.imageUrl : undefined
-  const img = url ? await preloadImage(url).catch(() => null) : null
+  const [, pic] = await Promise.all([
+    Promise.all(fontsToLoad.map((f) => document.fonts?.load(f))).catch(() => undefined), // fall back to whatever is available
+    plateImage(spec),
+  ])
+  const img = pic?.img ?? null
 
   const cv = document.createElement('canvas')
   cv.width = CARD_W
   cv.height = CARD_H
-  const ctx = cv.getContext('2d') as Ctx | null
+  const ctx = cv.getContext('2d', { willReadFrequently: true }) as Ctx | null
   if (!ctx) throw new Error('Canvas unavailable')
   ctx.textBaseline = 'alphabetic'
 
@@ -364,7 +438,10 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   ctx.rect(0, 0, PLATE, PLATE)
   ctx.clip()
   if (plate.kind === 'image' && img) {
-    ctx.drawImage(img, 0, 0, PLATE, PLATE)
+    const r = pic?.rect
+    ctx.imageSmoothingQuality = 'high' // the cut is downsampled a little (645 → 630 px for Sentinel-2)
+    if (r) ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, PLATE, PLATE)
+    else ctx.drawImage(img, 0, 0, PLATE, PLATE)
     if (plate.clouded) {
       ctx.fillStyle = C.veil
       ctx.fillRect(0, 0, PLATE, PLATE)

@@ -26,8 +26,16 @@ export interface SharePageMeta {
   /** Absolute og:image URL */
   image: string
   imageAlt: string
+  /** og:image:type: 'image/jpeg' for /api/og cards (R2SH4), 'image/png' for /og-default.png. Default: inferred from the URL. */
+  imageType?: 'image/jpeg' | 'image/png'
   /** Where people are sent (same-origin path, e.g. "/?s=ab3d5f7h") */
   redirect: string
+}
+
+/** The card's media type from its URL: the static default card is a PNG, /api/og answers JPEG. */
+function imageTypeOf(m: SharePageMeta): 'image/jpeg' | 'image/png' {
+  if (m.imageType) return m.imageType
+  return /\.png(?:$|[?#])/.test(m.image) ? 'image/png' : 'image/jpeg'
 }
 
 export function sharePageHtml(m: SharePageMeta): string {
@@ -50,7 +58,7 @@ export function sharePageHtml(m: SharePageMeta): string {
 <meta property="og:description" content="${d}">
 <meta property="og:url" content="${esc(m.canonical)}">
 <meta property="og:image" content="${esc(m.image)}">
-<meta property="og:image:type" content="image/png">
+<meta property="og:image:type" content="${imageTypeOf(m)}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="${esc(m.imageAlt)}">

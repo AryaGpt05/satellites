@@ -5,6 +5,7 @@
  * (≈ 1.1 km of latitude, less of longitude), and the card's crop is centred on that rounded point.
  */
 import type { Pass } from '@/types'
+import { cloudWords } from '../../../api/_lib/cardSpec'
 
 /** 2 decimals of a degree ≈ 1.1 km north–south. */
 export const SHARE_DECIMALS = 2
@@ -18,13 +19,60 @@ export function roundedPlace(lat: number, lon: number): { lat: number; lon: numb
   return { lat: roundCoord(lat), lon: roundCoord(lon) }
 }
 
-/** Fallback deep link when the share service is unavailable: `/?q=lat,lon&n=label&p=passId`. */
-export function deepLink(origin: string, label: string, lat: number, lon: number, passId: string): string {
+/**
+ * The pass facts a fallback link carries (share R2SH2): the same ones a stored share holds, so a link
+ * unfurler can print that pass's card (api/s → /api/og) without any database row.
+ */
+export interface DeepLinkPass {
+  norad: number
+  satName: string
+  verdict: Pass['verdict']
+  tClosest: number
+  altitudeKm?: number
+  offNadirDeg?: number
+  headingDeg?: number
+  capture?: {
+    collection: string
+    itemId: string
+    cloudCoverPct?: number
+    gsdM?: number
+    spot?: 'clear' | 'cirrus' | 'cloud' | 'shadow' | 'unknown'
+  }
+}
+
+/** The query keys a fallback link adds for its pass (api/_lib/share.ts reads the same set). */
+export const DEEP_LINK_PASS_KEYS = ['sat', 'norad', 'verdict', 't', 'alt', 'off', 'hdg', 'collection', 'item', 'cloud', 'gsd', 'spot'] as const
+
+const finite = (v: number | undefined): v is number => v !== undefined && Number.isFinite(v)
+
+/**
+ * Fallback deep link when the share service is unavailable: `/?q=lat,lon&n=label&p=passId`, plus, with
+ * `pass`, the pass itself (sat, norad, verdict, t, alt, off, hdg and the capture: collection, item,
+ * cloud, gsd, spot), so the link unfurls to that very pass. Coordinates are rounded to ~1 km.
+ */
+export function deepLink(origin: string, label: string, lat: number, lon: number, passId: string, pass?: DeepLinkPass): string {
   const r = roundedPlace(lat, lon)
   const p = new URLSearchParams()
   p.set('q', `${r.lat.toFixed(SHARE_DECIMALS)},${r.lon.toFixed(SHARE_DECIMALS)}`)
   p.set('n', label)
   p.set('p', passId)
+  if (pass) {
+    p.set('sat', pass.satName)
+    p.set('norad', String(Math.round(pass.norad)))
+    p.set('verdict', pass.verdict)
+    p.set('t', String(Math.round(pass.tClosest)))
+    if (finite(pass.altitudeKm)) p.set('alt', String(Math.round(pass.altitudeKm)))
+    if (finite(pass.offNadirDeg)) p.set('off', pass.offNadirDeg.toFixed(1))
+    if (finite(pass.headingDeg)) p.set('hdg', String(Math.round(pass.headingDeg) % 360))
+    const c = pass.capture
+    if (c) {
+      p.set('collection', c.collection)
+      p.set('item', c.itemId)
+      if (finite(c.cloudCoverPct)) p.set('cloud', String(Math.round(c.cloudCoverPct)))
+      if (finite(c.gsdM)) p.set('gsd', String(Math.round(c.gsdM * 100) / 100))
+      if (c.spot) p.set('spot', c.spot)
+    }
+  }
   return `${origin}/?${p.toString()}`
 }
 
@@ -43,8 +91,8 @@ export interface PostTextInput {
   localTime: string
   /** e.g. "10 m" */
   resolution?: string
-  /** The picture is mostly cloud: say so instead of promising a view. */
-  clouded?: boolean
+  /** The capture's cloud (scene %, spot class): a clouded picture says what it saw (cloudWords), not "the actual image". */
+  cloud?: { pct?: number; spot?: string }
 }
 
 /** Post text stays within this many characters, leaving room for the link on X (280, links count 23). */
@@ -67,12 +115,14 @@ export function postText(i: PostTextInput): string {
   let lead: string
   let hook: string
   switch (i.verdict) {
-    case 'imaged':
-      lead = i.clouded
-        ? `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. It saw only cloud.`
+    case 'imaged': {
+      const words = i.cloud ? cloudWords(i.cloud.pct, i.cloud.spot) : undefined
+      lead = words
+        ? `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. ${words.post}`
         : `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. ${i.resolution ? `${i.resolution} per pixel; this` : 'This'} is the actual image.`
       hook = HOOK.photographed
       break
+    }
     case 'likely':
       lead = `${i.satName} swept over ${i.placeLabel} from ${alt} up on ${when}. Its camera's swath covered the spot.`
       hook = HOOK.passed
@@ -95,7 +145,7 @@ export interface SummaryLinkInput {
   label: string
   lat: number
   lon: number
-  /** Distinct satellites that photographed the place */
+  /** Distinct satellites that photographed the place in detail (Sentinel-2 / Landsat; R2SH5) */
   satellites: number
   counts: { imaged: number; likely: number; could: number; overhead: number }
   windowEnd: number
@@ -125,12 +175,15 @@ export function summaryLink(origin: string, i: SummaryLinkInput): string {
   return `${origin}/?${p.toString()}`
 }
 
-/** "7 satellites photographed Waterloo this week. The clearest one, Sentinel-2C, from 795 km up." + the invitation. */
+/**
+ * "2 satellites photographed Waterloo in detail this week. The clearest one, Sentinel-2C, from 795 km up."
+ * + the invitation. `satellites` counts detailed pictures only (as the results headline, R2SH5).
+ */
 export function summaryPostText(i: { placeLabel: string; satellites: number; passes: number; best?: { satName: string; altitudeKm?: number } }): string {
   const n = i.satellites
   let lead: string
   if (n > 0) {
-    lead = `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${i.placeLabel} this week.`
+    lead = `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${i.placeLabel} in detail this week.`
     if (i.best) lead += ` The clearest one, ${i.best.satName}${i.best.altitudeKm !== undefined ? `, from ${Math.round(i.best.altitudeKm)} km up` : ''}.`
   } else lead = `${i.passes.toLocaleString('en-US')} satellite passes crossed ${i.placeLabel} this week. None caught a clear picture.`
   const full = `${lead}\n\n${n > 0 ? HOOK.photographed : HOOK.passed}`

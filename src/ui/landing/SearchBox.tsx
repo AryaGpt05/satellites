@@ -10,10 +10,12 @@
  * States shown in the field's status slot and the list: searching, results, no match, unavailable.
  * ARIA 1.2 combobox pattern: the input owns a listbox via aria-controls / aria-activedescendant.
  *
- * The list is capped to the space above the on-screen keyboard (visualViewport), so every option can
- * be scrolled into view while typing on a phone. `onBeforeFocus` lets the landing move the field
- * before a touch focuses it (see Landing.tsx: iOS pans to the focused field, so it must already be
- * where it will stay).
+ * The list shows five rows, capped (in CSS) to the room between where it will sit and the bottom
+ * corner readouts, and to the space above the on-screen keyboard (visualViewport), so every option
+ * can be scrolled into view while typing on a phone; an overflowing list ends on a fade, never on a
+ * cut row. `onBeforeFocus` lets the landing move the field before a touch focuses it (see
+ * Landing.tsx: iOS pans to the focused field, so it must already be where it will stay);
+ * `onListChange` lets it make room for the list (wide layouts lift the field when it opens).
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { isAbortError, searchPlaces } from '@/imagery'
@@ -36,6 +38,9 @@ export function SearchBox({
   statusOverride,
   metaHidden,
   onBeforeFocus,
+  onListChange,
+  onQueryChange,
+  liftedBy,
 }: {
   onSubmit: (place: Place) => void
   onFocusChange?: (focused: boolean) => void
@@ -52,6 +57,15 @@ export function SearchBox({
    * where it will sit while typing. The field is then focused programmatically.
    */
   onBeforeFocus?: () => void
+  /** The suggestion list became visible with at least one option (true), or closed (false). */
+  onListChange?: (open: boolean) => void
+  /** The text in the field changed (typed, cleared, or set by a choice). */
+  onQueryChange?: (query: string) => void
+  /**
+   * How far (px) the caller has moved the field up with a transform that is still playing when the
+   * list opens (wide layouts lift it as the list appears): the list is capped to where it will sit.
+   */
+  liftedBy?: () => number
 }) {
   const mobile = useIsMobile()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -200,52 +214,50 @@ export function SearchBox({
   const showList = open && focused && fresh
   const activeId = showList && active >= 0 ? `${listId}-${active}` : undefined
 
-  // Keep the list in view: cap it to the space between the field and the bottom of the *visual*
-  // viewport, which on phones ends at the top of the on-screen keyboard (innerHeight does not change
-  // when iOS / Android open it). It scrolls past that.
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const [maxH, setMaxH] = useState<number>()
-  // The field's bottom edge, read once per focus (the list closes and reopens as you type: reading
-  // layout each time would force it on every keystroke). Viewport changes re-read it.
-  const field = useRef<{ bottom: number; inset: number } | null>(null)
-  const readField = () => {
-    const wrap = wrapRef.current
-    if (!wrap) return null
-    field.current = {
-      bottom: wrap.getBoundingClientRect().bottom,
-      inset: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bezel-inset')) || 16,
-    }
-    return field.current
-  }
-  useEffect(() => {
-    field.current = null
-    if (!focused) return
-    // Read it once the field has settled where it types (after the landing's 320 ms lift), at the
-    // top of a frame, when layout is clean and the read costs nothing.
-    let raf = 0
-    const t = window.setTimeout(() => (raf = requestAnimationFrame(readField)), 360)
-    return () => {
-      window.clearTimeout(t)
-      cancelAnimationFrame(raf)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused])
+  // Report the list's visibility (with options) to the caller, which may move the field for it.
+  const listOpen = showList && places.length > 0
+  const cb = useRef({ onListChange, onQueryChange, liftedBy })
+  cb.current = { onListChange, onQueryChange, liftedBy }
+  const reportedOpen = useRef(false)
   useLayoutEffect(() => {
-    if (!showList) return
+    if (listOpen === reportedOpen.current) return
+    reportedOpen.current = listOpen
+    cb.current.onListChange?.(listOpen)
+  }, [listOpen])
+  const firstQuery = useRef(true)
+  useEffect(() => {
+    if (firstQuery.current) {
+      firstQuery.current = false
+      return
+    }
+    cb.current.onQueryChange?.(query)
+  }, [query])
+
+  // Keep the list in view. CSS caps it at five rows and at the room between its top (--list-top) and
+  // the bottom corner readouts; on phones the space above the on-screen keyboard (the *visual*
+  // viewport, which ends at the keyboard's top: innerHeight does not change when iOS / Android open it)
+  // caps it too (--kb-max). Its top is read from layout offsets, which ignore the landing's lift
+  // animations (a FLIP on phones, the wide lift's transform), so it is where the list will sit, read
+  // once per opening; viewport changes re-read it.
+  const listRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!showList || !list) return
     let raf = 0
-    const measure = (fresh = false) => {
+    const measure = () => {
       raf = 0
-      const f = fresh || !field.current ? readField() : field.current
-      if (!f) return
-      const { bottom: fieldBottom, inset } = f
+      let top = 0
+      for (let el: HTMLElement | null = list; el; el = el.offsetParent as HTMLElement | null) top += el.offsetTop
+      top -= cb.current.liftedBy?.() ?? 0
+      list.style.setProperty('--list-top', `${Math.round(top)}px`)
       const vv = window.visualViewport
-      const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight
-      // Above the keyboard: just clear of it. Without one: inside the bezel.
-      const clear = vv && vv.height < window.innerHeight - 80 ? 8 : inset + 12
-      setMaxH(Math.max(120, Math.min(360, bottom - fieldBottom - clear)))
+      if (vv && vv.height < window.innerHeight - 80) {
+        // Just clear of the keyboard.
+        list.style.setProperty('--kb-max', `${Math.max(120, Math.floor(vv.offsetTop + vv.height - top - 8))}px`)
+      } else list.style.removeProperty('--kb-max')
     }
     const later = () => {
-      if (!raf) raf = requestAnimationFrame(() => measure(true))
+      if (!raf) raf = requestAnimationFrame(measure)
     }
     measure()
     window.addEventListener('resize', later)
@@ -257,6 +269,24 @@ export function SearchBox({
       window.visualViewport?.removeEventListener('resize', later)
       window.visualViewport?.removeEventListener('scroll', later)
     }
+  }, [showList])
+
+  // An overflowing list fades out at the bottom (until it is scrolled to its end), so it never ends on
+  // a cut row. Read after layout (ResizeObserver), when it costs nothing.
+  const markOverflow = () => {
+    const list = listRef.current
+    if (!list) return
+    const more = list.scrollHeight - list.clientHeight - list.scrollTop > 2
+    if (more) list.dataset.overflow = ''
+    else delete list.dataset.overflow
+  }
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!showList || !list || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(markOverflow)
+    ro.observe(list)
+    if (list.lastElementChild) ro.observe(list.lastElementChild)
+    return () => ro.disconnect()
   }, [showList])
 
   // Touch tap on the unfocused field: let the caller lift it first, then focus it ourselves. The
@@ -279,7 +309,7 @@ export function SearchBox({
   const canSubmit = canSubmitQuery(query, MIN_QUERY, result && { q: result.q, count: result.places.length })
 
   return (
-    <div ref={wrapRef} className={s.search}>
+    <div className={s.search}>
       <Field
         ref={inputRef}
         id={inputId}
@@ -378,7 +408,7 @@ export function SearchBox({
         }}
       />
 
-      <div className={cx(s.list, showList && s.listOpen)} style={maxH ? { maxHeight: maxH } : undefined} data-suggestions>
+      <div ref={listRef} className={cx(s.list, showList && s.listOpen)} onScroll={markOverflow} data-suggestions>
         {/* Messages sit outside the listbox: only options belong in it. The field's status announces them. */}
         {showList && status === 'error' ? (
           <p className={s.empty}>The place search isn’t answering. Coordinates such as 43.47, −80.54 still work.</p>

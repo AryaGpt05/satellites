@@ -74,7 +74,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
 | `--fs-panel-h` | 34px | 34px | panel headline (condensed) |
 | `--fs-panel-sub` | 22px | 22px | panel sub-headline |
 
-The results headline integer is static: it does not count up (it must never visibly change while verification lands; say "at least" while partial).
+The results headline integer is static: it does not count up. It counts satellites with detailed (Sentinel-2 / Landsat) images, which is final once the archives answer, so it never changes while weather mosaics verify. Weather mosaics are reported on the second line.
 
 ## 4. Layout
 
@@ -120,7 +120,7 @@ The results headline integer is static: it does not count up (it must never visi
 Declarative, specific, quietly uncanny. Second person. Real numbers.
 
 - Hero: "Something photographed *you* this week." Sub: "Enter any place on Earth. See every satellite that passed over it in the last 7 days, and the actual pictures they took."
-- Result headline: "In the last 7 days, **3 satellites photographed Waterloo.** 41 more passed within view."
+- Result headline: "In the last 7 days, **2 satellites photographed Waterloo** in detail. 5 weather satellites also imaged it, at 250–375 m per pixel. 246 more passed within view."
 - Pass detail: "Sentinel-2C crossed 786 km overhead at 16:14:21 UTC, moving south at 7.46 km/s. It was looking straight down. Cloud cover: 25%."
 - Commercial: "WorldView Legion 4 passed within view at 10:52 local. It could have pointed here. We can't know whether it did."
 - Geostationary: "GOES-19 has photographed this spot every 10 minutes, all week: 1,008 times."

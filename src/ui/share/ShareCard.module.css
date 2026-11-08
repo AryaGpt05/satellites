@@ -35,36 +35,38 @@
   top: 0;
   overflow: visible;
 }
+/* The picture and everything drawn over it, as one layer over the geometry stand-in. Already decoded:
+   opaque from the first frame (.pictureNow). Loaded while the sheet is open: fades in (.pictureOn). */
+.picture {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.pictureNow {
+  opacity: 1;
+}
+.pictureOn {
+  opacity: 1;
+  transition: opacity var(--d-md) var(--ease-out);
+}
+/* The card's own crop, filling the plate. */
 .img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0;
-  transition: opacity var(--d-md) var(--ease-out);
 }
-.imgOn {
-  opacity: 1;
+/* The pass view's larger crop, placed (inline style) so the plate's overflow cuts out the card's square. */
+.cut {
+  position: absolute;
+  max-width: none;
+  max-height: none;
 }
 .veil {
   position: absolute;
   inset: 0;
   background: rgb(7 8 10 / 0.45);
-}
-.acq {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-weight: 350;
-  font-size: 18px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--bone-3);
 }
 .chip {
   position: absolute;

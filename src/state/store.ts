@@ -4,7 +4,9 @@
  * - Engine results land in `report`.
  * - Globe READS everything here and writes only `globeReady`, `hoveredNorad` (hovers it started),
  *   `simTime` (its frame loop owns the clock: throttled ~10 Hz in live/replay; per-frame time lives in
- *   src/state/sceneClock.ts) and `cameraFlight` (on flight start/arrival only).
+ *   src/state/sceneClock.ts), `cameraFlight` (on flight start/arrival only) and `dayMapSharp` (set once,
+ *   when the first day-map upgrade above the boot level — 2k on the phone tier, 4k on the desktop tier —
+ *   has been fully uploaded and swapped in, or at first light when the tier plan has no such step).
  * - UI layout owners write `uiInsets` (measured, from layout effects); the globe reads it with getState()
  *   inside its frame loop, never through a React subscription.
  */
@@ -69,6 +71,8 @@ export interface AppState {
   /** Toggles */
   showAmbient: boolean
   globeReady: boolean
+  /** The day map is sharper than the boot level (see header). Written once by the globe; survives reset(). */
+  dayMapSharp: boolean
   catalogReady: boolean
 
   // actions
@@ -91,6 +95,7 @@ export interface AppState {
   setShared: (s?: Share) => void
   setAboutOpen: (v: boolean) => void
   setGlobeReady: (v: boolean) => void
+  setDayMapSharp: (v: boolean) => void
   setCatalogReady: (v: boolean) => void
   reset: () => void
 }
@@ -107,6 +112,7 @@ export const useApp = create<AppState>((set) => ({
   aboutOpen: false,
   showAmbient: true,
   globeReady: false,
+  dayMapSharp: false,
   catalogReady: false,
 
   setPhase: (phase, error) => set({ phase, error }),
@@ -131,6 +137,7 @@ export const useApp = create<AppState>((set) => ({
   setShared: (shared) => set({ shared }),
   setAboutOpen: (aboutOpen) => set({ aboutOpen }),
   setGlobeReady: (globeReady) => set({ globeReady }),
+  setDayMapSharp: (dayMapSharp) => set({ dayMapSharp }),
   setCatalogReady: (catalogReady) => set({ catalogReady }),
   reset: () =>
     set({

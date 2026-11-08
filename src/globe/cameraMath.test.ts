@@ -4,10 +4,13 @@ import { DEG } from '@/lib/geo'
 import {
   createPose,
   cubicBezier,
+  curveAt,
+  curveSlope,
   easeInOut,
   headingOf,
   interpolatePose,
   latLonOfDir,
+  makeCurve,
   makePose,
   planFlight,
   poseToCamera,
@@ -214,5 +217,38 @@ describe('retarget carries speed (M06)', () => {
       }
       expect(min).toBeGreaterThanOrEqual(0.3 * pre)
     }
+  })
+})
+
+describe('range curves (a range folded into a flight)', () => {
+  it('runs --ease-in-out from rest, and lands exactly on the end value', () => {
+    const c = makeCurve(0, 0.5, 0, 1000, 600)
+    expect(curveAt(c, 1000)).toBe(0)
+    expect(curveAt(c, 1300)).toBeCloseTo(0.5 * easeInOut(0.5), 12)
+    expect(curveAt(c, 1600)).toBeCloseTo(0.5, 12)
+    expect(curveAt(c, 5000)).toBeCloseTo(0.5, 12)
+    expect(curveSlope(c, 1600)).toBe(0)
+  })
+  it('a replacement starts at the running curve’s value AND slope (no pop, no stall), and ends at rest', () => {
+    const a = makeCurve(0, 0.4, 0, 0, 1000)
+    const now = 450
+    const b = makeCurve(curveAt(a, now), 0.7, curveSlope(a, now), now, 800)
+    expect(curveAt(b, now)).toBeCloseTo(curveAt(a, now), 12)
+    expect(curveSlope(b, now + 1)).toBeCloseTo(curveSlope(a, now), 4)
+    expect(curveAt(b, now + 800)).toBeCloseTo(0.7, 12)
+    expect(Math.abs(curveSlope(b, now + 799))).toBeLessThan(1e-4)
+    // smooth: no frame-to-frame step larger than the running speed allows
+    let prev = curveAt(b, now)
+    for (let t = now + 16; t <= now + 800; t += 16) {
+      const v = curveAt(b, t)
+      expect(Math.abs(v - prev)).toBeLessThan(0.05)
+      prev = v
+    }
+  })
+  it('bounds a carried slope so a tiny correction cannot fling the camera', () => {
+    const c = makeCurve(0, 0.001, 10, 0, 300)
+    let max = 0
+    for (let t = 0; t <= 300; t += 5) max = Math.max(max, Math.abs(curveAt(c, t)))
+    expect(max).toBeLessThan(0.05)
   })
 })

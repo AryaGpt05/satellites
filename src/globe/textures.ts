@@ -2,17 +2,31 @@
  * Progressive Earth textures.
  *
  *   1k set (day, night, clouds, data; ~0.2 MB) → first frame → globeReady
- *   → phones:   day / night / clouds 2k at landing idle; day 4k once the camera has arrived at a place or pass
- *   → desktops: day / night / clouds / data 4k at landing idle; day 8k (capable desktops) after the first results
+ *   → phones:   day 2k first, then night / clouds 2k at landing idle; day 4k once the camera has arrived at a place
+ *               or pass
+ *   → desktops: day 4k first, then night / clouds / data 4k at landing idle; day 8k (capable desktops) once the first
+ *               results have settled with no pass open
  *
- * Nothing is uploaded while anything choreographed is moving (decision 9, PERF-01). Fetch and decode happen
- * off the main thread (fetch → createImageBitmap); the UPLOAD waits for canUpload():
- *   no camera flight, ≥ 600 ms since arrival, not booting or computing, ≥ 2 s into the phase, past
- *   store.motionBusyUntil (UI entrances), tab visible.
- * Uploads are sliced: the destination is allocated once (texStorage only), then one 256-row strip is copied per
- * frame (4 strips for 2k, 8 for 4k, 16 for 8k) with copyTextureToTexture, mips are generated once after the last
- * strip, and only then is the finished texture swapped in. The texture it replaces is disposed a few frames later.
- * Colour maps are sRGB; the cloud and data maps are data (no conversion).
+ * The FIRST day step sets the zoom floor a regional view needs (decision 6), so it is on the critical path of the
+ * first flight: it skips the idle wait, and on a deep link or share link (?q= / ?s=) its download starts when this
+ * module evaluates (one request, one decode, handed to the upgrade through decodedMap). Once it is on the GPU,
+ * store.dayMapSharp turns true (once per page; at first light if the plan has no day step).
+ *
+ * Nothing is uploaded while anything choreographed is moving (decision 9, PERF-01). Fetch and decode happen off the
+ * main thread (fetch → createImageBitmap); the UPLOAD waits for canUpload():
+ *   boot        allowed: the curtain covers the globe;
+ *   computing   only while the place flight has barely started (eased progress < 0.04, the camera has hardly
+ *               moved) or once it has been parked for 300 ms, so a sharper map lands before the flight's range
+ *               matters and the flight carries the new floor (CameraDirector folds it into the landing);
+ *   otherwise   no camera flight, ≥ 600 ms since arrival, ≥ 2 s into the phase;
+ *   always      past store.motionBusyUntil (UI entrances; in computing, a hold left over from the previous phase's
+ *               UI does not count), not in the first 10 s of a replay sweep (the signature moment), tab visible.
+ * Uploads are sliced: the destination is allocated once (texStorage only), then 256-row strips are uploaded
+ * straight into it with texSubImage2D (4 strips for 2k, 8 for 4k, 16 for 8k; no intermediate texture and no GL
+ * state queries), one per frame, or several within a small time budget under the boot curtain and in computing's
+ * windows (uploadBudgetMs); mips are generated once after the last strip, and only then is the finished texture
+ * swapped in. The texture it replaces is disposed a few frames later. Colour maps are sRGB; the cloud and data maps are data
+ * (no conversion).
  */
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useState } from 'react'
@@ -28,12 +42,11 @@ import {
   Texture,
   TextureLoader,
   UnsignedByteType,
-  Vector2,
   type WebGLRenderer,
 } from 'three'
 import { useApp } from '@/state/store'
 import type { TextureLevel } from './framing'
-import type { QualityTier } from './quality'
+import { detectMobile, provisionalTier, type QualityTier } from './quality'
 import { FRAME, type GlobeRuntime } from './runtime'
 
 export type EarthMap = 'day' | 'night' | 'clouds' | 'data'
@@ -50,7 +63,7 @@ const SIZE: Record<TextureLevel, [number, number]> = { '1k': [1024, 512], '2k': 
 /** Rows per uploaded strip. */
 export const STRIP_ROWS = 256
 
-function useBitmaps(): boolean {
+function bitmapsSupported(): boolean {
   if (typeof createImageBitmap === 'undefined' || typeof navigator === 'undefined') return false
   const ua = navigator.userAgent
   const safari = /^((?!chrome|android).)*safari/i.test(ua)
@@ -152,14 +165,106 @@ export function upgradePlan(tier: QualityTier): UpgradeStep[] {
 /** Number of strips a map of this level is uploaded in. */
 export const stripCount = (res: TextureLevel) => Math.max(1, SIZE[res][1] / STRIP_ROWS)
 
+/** Uploads hold off for this long after a replay sweep starts (capped, so an endless replay can't starve them). */
+export const REPLAY_QUIET_MS = 10_000
+
 /** True when a GPU upload can't hitch anything the user is watching (see the header). */
 export function canUpload(rt: GlobeRuntime, now: number): boolean {
   const st = useApp.getState()
-  if (rt.camera.flying || now - rt.camera.arrivedAt <= 600) return false
-  if (st.phase === 'boot' || st.phase === 'computing') return false
-  if (now - rt.phaseEnteredAt <= 2000) return false
-  if (now <= st.motionBusyUntil) return false
+  if (st.phase === 'computing') {
+    const early = rt.camera.flying && rt.camera.progress < 0.04 // first part of an ease-in-out flight: the camera has barely moved
+    const parked = !rt.camera.flying && now - rt.camera.arrivedAt > 300
+    if (!early && !parked) return false
+  } else if (st.phase !== 'boot') {
+    // boot: the curtain covers the globe
+    if (rt.camera.flying || now - rt.camera.arrivedAt <= 600) return false
+    if (now - rt.phaseEnteredAt <= 2000) return false
+  }
+  // In computing, a hold set before the phase began belongs to UI that has already gone (the landing's entrance).
+  const inherited = st.phase === 'computing' && st.motionBusyUntil <= rt.phaseBusyFloor
+  if (now <= st.motionBusyUntil && !inherited) return false
+  if (st.timeMode === 'replay' && now - rt.replayStartedAt < REPLAY_QUIET_MS) return false
   return typeof document === 'undefined' || !document.hidden
+}
+
+// ───────────────────────────── decode (off the main thread), memoised ─────────────────────────────
+
+const BITMAP_OPTS: ImageBitmapOptions = { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }
+
+async function fetchDecode(url: string, signal?: AbortSignal): Promise<ImageBitmap> {
+  const res = await fetch(url, { signal })
+  if (!res.ok) throw new Error(`Texture ${url}: HTTP ${res.status}`)
+  return createImageBitmap(await res.blob(), BITMAP_OPTS)
+}
+
+/** Maps whose download + decode started early (a deep link), by URL. Each is handed to the upgrade once. */
+const decoded = new Map<string, Promise<ImageBitmap>>()
+
+/** Start the download + decode of a map now (idempotent); the upgrade picks it up instead of fetching again. */
+export function prefetchMap(map: EarthMap, res: Exclude<TextureLevel, '1k'>): void {
+  const url = textureUrl(map, res)
+  if (decoded.has(url)) return
+  const p = fetchDecode(url)
+  p.catch(() => undefined) // a failed prefetch is retried by whoever takes it
+  decoded.set(url, p)
+}
+
+/** The decoded bitmap for a map: the prefetched one when there is one (taken, so it is never reused), else a fresh load. */
+function decodedMap(map: EarthMap, res: TextureLevel, signal: AbortSignal): Promise<ImageBitmap> {
+  const url = textureUrl(map, res)
+  const p = decoded.get(url)
+  if (!p) return fetchDecode(url, signal)
+  decoded.delete(url)
+  return p.catch(() => fetchDecode(url, signal))
+}
+
+/** Release prefetched bitmaps the real tier's plan has no use for (the provisional tier guessed differently). */
+function dropUnplanned(plan: UpgradeStep[]) {
+  const keep = new Set(plan.map((st) => textureUrl(st.map, st.res)))
+  for (const [url, p] of decoded) {
+    if (keep.has(url)) continue
+    decoded.delete(url)
+    p.then((b) => b.close(), () => undefined)
+  }
+}
+
+/** The step that sharpens the day map first (the regional zoom floor), if the plan has one. */
+export const firstDayStep = (plan: UpgradeStep[]) => plan.find((st) => st.map === 'day')
+
+// A deep link or share link goes from boot straight to a regional view: fetch the day map it needs now, while the
+// boot runs (the provisional tier: the GL context does not exist yet; dropUnplanned undoes a wrong guess).
+if (typeof location !== 'undefined' && (/[?&](q|s)=/.test(location.search) || /^\/s\//.test(location.pathname)) && bitmapsSupported()) {
+  const first = firstDayStep(upgradePlan(provisionalTier(detectMobile())))
+  if (first) prefetchMap(first.map, first.res)
+}
+
+// ───────────────────────────── upload ─────────────────────────────
+
+/**
+ * Upload one strip straight into the destination texture (bound through three's state cache, unpack state set
+ * through it too, so three's own later uploads see what is really set). ImageBitmaps carry their orientation and
+ * alpha handling; the strip was cut flipped, as GL rows run south → north. The last strip generates the mip chain.
+ */
+function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: ImageBitmap, y: number, last: boolean) {
+  const g = gl.getContext() as WebGL2RenderingContext
+  const props = gl.properties.get(dst) as { __webglTexture?: WebGLTexture }
+  if (!props.__webglTexture) gl.initTexture(dst)
+  const tex = (gl.properties.get(dst) as { __webglTexture: WebGLTexture }).__webglTexture
+  const state = gl.state
+  state.activeTexture(g.TEXTURE0)
+  state.bindTexture(g.TEXTURE_2D, tex)
+  state.pixelStorei(g.UNPACK_FLIP_Y_WEBGL, false)
+  state.pixelStorei(g.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
+  state.pixelStorei(g.UNPACK_ALIGNMENT, 4)
+  state.pixelStorei(g.UNPACK_ROW_LENGTH, 0)
+  state.pixelStorei(g.UNPACK_SKIP_PIXELS, 0)
+  state.pixelStorei(g.UNPACK_SKIP_ROWS, 0)
+  g.texSubImage2D(g.TEXTURE_2D, 0, 0, y, strip.width, strip.height, g.RGBA, g.UNSIGNED_BYTE, strip)
+  if (last) g.generateMipmap(g.TEXTURE_2D)
+  if (import.meta.env.DEV) {
+    const err = g.getError()
+    if (err !== g.NO_ERROR) console.error(`[globe] texture strip upload at row ${y}: GL error 0x${err.toString(16)}`)
+  }
 }
 
 const idle = (fn: () => void, timeout = 4000): (() => void) => {
@@ -176,8 +281,17 @@ const idle = (fn: () => void, timeout = 4000): (() => void) => {
 }
 
 /**
- * Frame-synchronous scheduler: conditions are checked once per frame, and at most ONE upload job runs per frame,
- * only while the upload gate is open.
+ * Time budget (ms) for upload jobs in one frame: normally one job per frame (0 = just the first); while the boot
+ * curtain covers the globe, or in computing's windows (the camera has barely moved, or is parked), a frame may take
+ * several, so the critical day map lands even on a slow device.
+ */
+export function uploadBudgetMs(phase: string): number {
+  return phase === 'boot' ? 24 : phase === 'computing' ? 12 : 0
+}
+
+/**
+ * Frame-synchronous scheduler: conditions are checked once per frame, and upload jobs run only while the upload
+ * gate is open: the first queued job, then more while the frame's budget lasts.
  */
 function createScheduler() {
   const waits: { pred: () => boolean; resolve: () => void }[] = []
@@ -189,11 +303,13 @@ function createScheduler() {
     upload(fn: () => void): Promise<void> {
       return new Promise((resolve, reject) => jobs.push({ fn, resolve, reject }))
     },
-    tick(gateOpen: boolean) {
+    tick(gateOpen: boolean, budgetMs = 0) {
       for (let i = waits.length - 1; i >= 0; i--) {
         if (waits[i].pred()) waits.splice(i, 1)[0].resolve()
       }
-      if (gateOpen && jobs.length) {
+      if (!gateOpen) return
+      const t0 = performance.now()
+      while (jobs.length) {
         const j = jobs.shift()!
         try {
           j.fn()
@@ -201,6 +317,7 @@ function createScheduler() {
         } catch (e) {
           j.reject(e)
         }
+        if (performance.now() - t0 >= budgetMs) break
       }
     },
     clear() {
@@ -220,8 +337,8 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
   const [status, setStatus] = useState<TextureStatus>({ state: 'loading' })
   const sched = useMemo(createScheduler, [])
 
-  // Poll conditions and run at most one upload slice per frame, before the scene renders.
-  useFrame(() => sched.tick(canUpload(rt, performance.now())), FRAME.clock)
+  // Poll conditions and run upload slices (one per frame, more only where the budget allows), before the scene renders.
+  useFrame(() => sched.tick(canUpload(rt, performance.now()), uploadBudgetMs(useApp.getState().phase)), FRAME.clock)
 
   useEffect(() => {
     const ctl = new AbortController()
@@ -254,16 +371,21 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       const now = performance.now()
       if (!placeSeen && settledAtPlace(now)) placeSeen = true
       if (!resultsSeen && useApp.getState().phase === 'results' && now - rt.phaseEnteredAt > 600 && settledAtPlace(now)) resultsSeen = true
-      return when === 'idle' || (when === 'place' && placeSeen) || (when === 'results' && resultsSeen)
+      // The big step (8k day) never starts while a pass is open: it waits for the user to come back to the list.
+      return when === 'idle' || (when === 'place' && placeSeen) || (when === 'results' && resultsSeen && !useApp.getState().selectedPassId)
     }
 
-    /** Fetch + decode off-thread, then upload strip by strip; resolves with the finished texture. */
-    const buildSliced = async (step: UpgradeStep): Promise<Texture> => {
-      const res = await fetch(textureUrl(step.map, step.res), { signal: ctl.signal })
-      if (!res.ok) throw new Error(`Texture ${textureUrl(step.map, step.res)}: HTTP ${res.status}`)
-      const blob = await res.blob()
-      const opts: ImageBitmapOptions = { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }
-      const full = await createImageBitmap(blob, opts)
+    /**
+     * Fetch + decode off-thread (or take the deep-link prefetch), then upload strip by strip; resolves with the
+     * finished texture. `eager` (the first day step, on the critical path): every strip is cut up front, so a frame
+     * with upload budget can take several; otherwise each strip is cut just before its upload (less memory).
+     */
+    const buildSliced = async (step: UpgradeStep, eager: boolean): Promise<Texture> => {
+      const full = await decodedMap(step.map, step.res, ctl.signal)
+      if (ctl.signal.aborted) {
+        full.close()
+        throw new DOMException('Aborted', 'AbortError')
+      }
       pending.add(full)
       const W = full.width
       const H = full.height
@@ -275,25 +397,49 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       dst.mipmapsAutoUpdate = false
       dst.source.dataReady = false
       dst.needsUpdate = true
+      const n = Math.ceil(H / STRIP_ROWS)
+      // GL rows [y, y + rows) count from the bottom (south) up; image rows run north → south, so they are image
+      // rows [H − y − rows, H − y), flipped.
+      const cut = async (i: number) => {
+        const y = i * STRIP_ROWS
+        const rows = Math.min(STRIP_ROWS, H - y)
+        const strip = await createImageBitmap(full, 0, H - y - rows, W, rows, { ...BITMAP_OPTS, imageOrientation: 'flipY' })
+        pending.add(strip)
+        return strip
+      }
+      const done = (strip: ImageBitmap) => {
+        pending.delete(strip)
+        strip.close()
+      }
+      const abortIfNeeded = () => {
+        if (ctl.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+      }
       try {
-        await sched.upload(() => gl.initTexture(dst))
-        const n = Math.ceil(H / STRIP_ROWS)
-        const at = new Vector2()
-        for (let i = 0; i < n; i++) {
-          if (ctl.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-          const y = i * STRIP_ROWS // GL rows from the bottom (south) up
-          const rows = Math.min(STRIP_ROWS, H - y)
-          // Image rows run north → south, so GL rows [y, y + rows) are image rows [H − y − rows, H − y), flipped.
-          const strip = await createImageBitmap(full, 0, H - y - rows, W, rows, { ...opts, imageOrientation: 'flipY' })
-          pending.add(strip)
-          const src = new Texture(strip)
-          await sched.upload(() => {
-            // The last strip also generates the mip chain, once.
-            if (i === n - 1) dst.mipmapsAutoUpdate = true
-            gl.copyTextureToTexture(src, dst, null, at.set(0, y))
-          })
-          pending.delete(strip)
-          strip.close()
+        if (eager) {
+          const cuts = await Promise.allSettled(Array.from({ length: n }, (_, i) => cut(i)))
+          const strips = cuts.flatMap((c) => (c.status === 'fulfilled' ? [c.value] : []))
+          pending.delete(full)
+          full.close() // the strips hold the pixels now
+          if (strips.length < n) {
+            strips.forEach(done)
+            throw new Error(`Texture ${textureUrl(step.map, step.res)}: strip decode failed`)
+          }
+          abortIfNeeded()
+          // The first job allocates the storage (uploadStrip inits the texture), the last generates the mips.
+          await Promise.all(
+            strips.map((strip, i) => sched.upload(() => uploadStrip(gl, dst, strip, i * STRIP_ROWS, i === n - 1)).finally(() => done(strip))),
+          )
+        } else {
+          await sched.upload(() => gl.initTexture(dst))
+          for (let i = 0; i < n; i++) {
+            abortIfNeeded()
+            const strip = await cut(i)
+            try {
+              await sched.upload(() => uploadStrip(gl, dst, strip, i * STRIP_ROWS, i === n - 1))
+            } finally {
+              done(strip)
+            }
+          }
         }
       } catch (e) {
         dst.dispose()
@@ -313,18 +459,30 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       return tex
     }
 
+    const plan = upgradePlan(tier)
+    const firstDay = firstDayStep(plan)
+    /** store.dayMapSharp: once per page, when the day map is first sharper than the boot level. */
+    const markSharp = () => {
+      const st = useApp.getState()
+      if (!st.dayMapSharp) st.setDayMapSharp(true)
+    }
+
     const upgrade = async () => {
-      const bitmaps = useBitmaps()
-      for (const step of upgradePlan(tier)) {
+      const bitmaps = bitmapsSupported()
+      dropUnplanned(plan)
+      for (const step of plan) {
         if (ctl.signal.aborted || !current) return
         await sched.waitUntil(ready(step.when))
-        // Start fetching in an idle slot; the upload is gated separately.
-        await new Promise<void>((r) => {
-          cancelIdle = idle(r)
-        })
+        // Start fetching in an idle slot (the upload is gated separately), except the first day step: the first
+        // regional view waits on it.
+        if (step !== firstDay) {
+          await new Promise<void>((r) => {
+            cancelIdle = idle(r)
+          })
+        }
         let tex: Texture
         try {
-          tex = bitmaps ? await buildSliced(step) : await buildWhole(step)
+          tex = bitmaps ? await buildSliced(step, step === firstDay) : await buildWhole(step)
         } catch {
           if (ctl.signal.aborted) return
           continue // keep the lower resolution; nothing else depends on it
@@ -338,6 +496,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
         if (step.map === 'day') rt.textureLevel = step.res
         if (step.map === 'night') rt.nightLevel = step.res
         gl.domElement.dataset.textures = `${step.map}-${step.res}`
+        if (step.map === 'day') markSharp()
         // Materials re-bind on their next frame; dispose once a few frames have rendered without it.
         afterFrames(3, () => disposeTexture(old))
       }
@@ -351,6 +510,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
         rt.nightLevel = '1k'
         setStatus({ state: 'ready', textures: tex })
         gl.domElement.dataset.textures = '1k'
+        if (!firstDay) markSharp() // nothing sharper will come: first light is as sharp as it gets
         onFirstReady?.()
         void upgrade()
       },

@@ -1,16 +1,21 @@
-/** The report window as a mono kicker: "01 NOV → 08 NOV 2026 UTC" (or across years: "29 DEC 2026 → 05 JAN 2027 UTC"). */
+/**
+ * The report window as a mono kicker, in the product's one date style: days without zero padding, the
+ * month once when both ends share it, the year once.
+ *   "1 → 8 NOV 2026 UTC" · "29 OCT → 5 NOV 2026 UTC" · "29 DEC 2026 → 5 JAN 2027 UTC"
+ */
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 export const WINDOW_DAYS = 7
 
-function day(ms: number, withYear: boolean): string {
-  const d = new Date(ms)
-  const s = `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]}`
-  return withYear ? `${s} ${d.getUTCFullYear()}` : s
-}
-
 export function windowLabel(nowMs: number, days = WINDOW_DAYS): string {
-  const start = nowMs - days * 86_400_000
-  const crossesYear = new Date(start).getUTCFullYear() !== new Date(nowMs).getUTCFullYear()
-  return `${day(start, crossesYear)} → ${day(nowMs, true)} UTC`
+  const a = new Date(nowMs - days * 86_400_000)
+  const b = new Date(nowMs)
+  const end = `${b.getUTCDate()} ${MONTHS[b.getUTCMonth()]} ${b.getUTCFullYear()}`
+  const start =
+    a.getUTCFullYear() !== b.getUTCFullYear()
+      ? `${a.getUTCDate()} ${MONTHS[a.getUTCMonth()]} ${a.getUTCFullYear()}`
+      : a.getUTCMonth() !== b.getUTCMonth()
+        ? `${a.getUTCDate()} ${MONTHS[a.getUTCMonth()]}`
+        : `${a.getUTCDate()}`
+  return `${start} → ${end} UTC`
 }

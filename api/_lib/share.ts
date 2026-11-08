@@ -6,7 +6,7 @@
  * are anyone's). Each field is re-validated and clamped before it reaches a renderer.
  */
 import tzlookup from '@photostructure/tz-lookup'
-import { CLOUDED_PCT, VERDICT_WORDS, localStamp, type CardInput, type SummaryInput } from './cardSpec.js'
+import { VERDICT_WORDS, cloudWords, localStamp, type CardInput, type SummaryInput } from './cardSpec.js'
 import { supabaseConfig } from './env.js'
 
 export type Verdict = 'imaged' | 'likely' | 'could' | 'overhead'
@@ -167,7 +167,7 @@ export function shareFromRpc(v: unknown): ShareRecord | null {
  * Explicit-parameter fallback, for a card without a stored share:
  *   /api/og?sat=Sentinel-2C&norad=60989&place=Waterloo&lat=43.47&lon=-80.54&t=<ms|ISO>
  *          &verdict=imaged&alt=786&off=0.9&cloud=25&dist=12&az=271&hdg=194
- *          &collection=sentinel-2-l2a&item=<STAC item id>&gsd=10
+ *          &collection=sentinel-2-l2a&item=<STAC item id>&gsd=10&spot=clear
  * Null unless at least place, lat, lon and verdict are valid.
  */
 export function shareFromParams(q: URLSearchParams): ShareRecord | null {
@@ -185,6 +185,7 @@ export function shareFromParams(q: URLSearchParams): ShareRecord | null {
     datetime: tClosest,
     cloudCoverPct: q.get('cloud'),
     gsdM: q.get('gsd'),
+    spot: q.get('spot'), // validated against the five classes by captureOf
   })
   return {
     placeLabel,
@@ -209,6 +210,26 @@ export function shareFromParams(q: URLSearchParams): ShareRecord | null {
       verdict,
     },
   }
+}
+
+/** The pass keys a fallback deep link carries (src/ui/share/links.ts DEEP_LINK_PASS_KEYS). */
+export const DEEP_LINK_PASS_KEYS = ['sat', 'norad', 'verdict', 't', 'alt', 'off', 'hdg', 'collection', 'item', 'cloud', 'gsd', 'spot'] as const
+
+/**
+ * A pass from the app's fallback deep link (share R2SH2): the place link `/?q=lat,lon&n=label&p=passId`
+ * plus the pass's own facts (DEEP_LINK_PASS_KEYS). Coordinates are coarsened to 0.01° and the label is
+ * screened as placeFromParams does. Null unless the link names a verdict and a satellite (norad).
+ */
+export function shareFromDeepLink(q: URLSearchParams): ShareRecord | null {
+  if (!verdictOf(q.get('verdict')) || num(q.get('norad'), 1, 999_999_999) === undefined) return null
+  const place = placeFromParams(q)
+  if (!place) return null
+  const p = new URLSearchParams({ place: place.label, lat: place.lat.toFixed(2), lon: place.lon.toFixed(2) })
+  for (const k of DEEP_LINK_PASS_KEYS) {
+    const v = q.get(k)
+    if (v !== null) p.set(k, v)
+  }
+  return shareFromParams(p)
 }
 
 // ── Places (address-bar links: /?q=lat,lon&n=label) ─────────────────────────────────────────
@@ -283,10 +304,10 @@ export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
   }
 }
 
-/** "7 satellites photographed Waterloo this week" */
+/** "2 satellites photographed Waterloo in detail this week" (detailed pictures only, as the results headline) */
 export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>): string {
   const n = s.satellites
-  return n > 0 ? `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${s.placeLabel} this week` : `What passed over ${s.placeLabel} this week`
+  return n > 0 ? `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${s.placeLabel} in detail this week` : `What passed over ${s.placeLabel} this week`
 }
 
 export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel'>): string {
@@ -421,8 +442,9 @@ export function description(s: ShareRecord): string {
     parts.push(`${sat} ${s.verdict === 'overhead' ? 'passed' : 'crossed'}${alt} ${s.placeLabel}${when}${moving}.`)
     if (s.verdict === 'imaged' && p.offNadirDeg !== undefined) parts.push(p.offNadirDeg < 2 ? 'It was looking straight down.' : `It was looking ${p.offNadirDeg.toFixed(1)}° off nadir.`)
     const pct = s.capture?.cloudCoverPct
-    if (s.verdict === 'imaged' && pct !== undefined && pct >= CLOUDED_PCT) parts.push(`It saw mostly cloud (${Math.round(pct)}%).`)
-    else if (s.verdict === 'imaged' && s.capture?.spot === 'cloud') parts.push('Cloud covered the spot.')
+    // The card's own words for a clouded picture (cloudWords), else the plain cloud cover.
+    const words = s.verdict === 'imaged' ? cloudWords(pct, s.capture?.spot) : undefined
+    if (words) parts.push(words.desc)
     else if (s.verdict === 'imaged' && pct !== undefined) parts.push(`Cloud cover: ${Math.round(pct)}%.`)
     if (s.verdict === 'likely') parts.push(`${s.placeLabel} was inside its swath.`)
   }

@@ -1,10 +1,11 @@
 /**
  * <ShareSheet pass report onClose/>: preview of the share card + the ways to share it.
  *
- * Phones (touch with the Web Share API): one full-width "Share image", which opens the system share
- * sheet with the card PNG attached (iMessage, WhatsApp, the X app), then Copy link / Post to X /
- * Save PNG. The PNG is rendered locally as soon as the sheet opens, so the tap can call
- * navigator.share synchronously, inside the gesture (Safari drops the share otherwise).
+ * Phones (touch with the Web Share API): one full-width primary, then Copy link / Post to X / Save PNG.
+ * The PNG renders locally once the sheet's entrance is done (an idle callback, ≤ 500 ms), so the tap can
+ * call navigator.share synchronously, inside the gesture (Safari drops the share otherwise). The primary
+ * reads "Preparing image…" (inert) until the PNG is ready, then "Share image" (the card attached); if the
+ * PNG takes longer than 2.5 s or fails, it reads "Share" and shares the text and link alone (R2SH2).
  *
  * Desktop: Post to X (primary) / Copy link / Copy image (pasted into a post as native media), with
  * Save PNG as a quiet text action.
@@ -17,8 +18,12 @@
  * the PNG in the browser). The share row (and its short link) is created on the first Share / Copy /
  * Post press, then reused for this pass for the rest of the session.
  *
+ * Until the short link exists, a share carries the fallback link: the place link plus the pass's own
+ * facts (satellite, time, geometry, capture), so it still unfurls to this pass's card (R2SH2).
+ *
  * Privacy: the link carries coordinates rounded to ~1 km, and the card's crop is centred on that
- * rounded point, not the searched one. Esc closes this sheet only (it does not also deselect the pass).
+ * rounded point, not the searched one. The fallback link holds only the pass facts a stored share
+ * holds. Esc closes this sheet only (it does not also deselect the pass).
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ensureTz, timeZoneAt, tzReady } from '@/imagery'
@@ -57,8 +62,24 @@ type Flash = 'link' | 'image' | null
 
 const X_POPUP = 'width=600,height=560'
 const COARSE_QUERY = '(pointer: coarse)'
-/** The PNG renders after the sheet's entrance, so the first frames stay smooth (a tap before then starts it at once). */
-const PNG_DELAY_MS = 500
+/** The PNG renders once the sheet's entrance leaves the main thread idle, and at the latest after this (a tap before then starts it at once). */
+const PNG_IDLE_TIMEOUT_MS = 500
+/** How long the phone's primary waits for the PNG ("Preparing image…") before it shares the link alone. */
+const PNG_PATIENCE_MS = 2500
+
+/** Run `fn` when the main thread is idle (or after `timeout` ms); returns a cancel function. */
+function whenIdle(fn: () => void, timeout: number): () => void {
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+    cancelIdleCallback?: (id: number) => void
+  }
+  if (typeof w.requestIdleCallback === 'function') {
+    const id = w.requestIdleCallback(fn, { timeout })
+    return () => w.cancelIdleCallback?.(id)
+  }
+  const t = window.setTimeout(fn, timeout)
+  return () => window.clearTimeout(t)
+}
 
 /** True when this browser can hand a PNG file to the system share sheet. */
 function canShareFiles(): boolean {
@@ -119,11 +140,23 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
       localDay: fmtLocalDay(pass.tClosest, tz),
       localTime: fmtLocalTime(pass.tClosest, tz),
       resolution: capture ? `${Math.round(capture.gsdM)} m` : undefined,
-      clouded: spec.sub !== undefined,
+      // The same words as the card (cloudWords): the card is clouded exactly when these are defined.
+      cloud: capture && spec.sub !== undefined ? { pct: capture.cloudCoverPct, spot: capture.spot } : undefined,
     }),
     fileName: `overflight-${slug(meta.name)}-${slug(label)}-${new Date(pass.tClosest).toISOString().slice(0, 10)}.png`,
     input: { placeLabel: label, lat: rounded.lat, lon: rounded.lon, pass, capture, satName: meta.name },
-    fallbackUrl: deepLink(origin(), label, place.lat, place.lon, pass.id),
+    fallbackUrl: deepLink(origin(), label, place.lat, place.lon, pass.id, {
+      norad: pass.norad,
+      satName: meta.name,
+      verdict: pass.verdict,
+      tClosest: pass.tClosest,
+      altitudeKm: pass.altitudeKm,
+      offNadirDeg: pass.offNadirDeg,
+      headingDeg: pass.headingDeg,
+      capture: capture
+        ? { collection: capture.collection, itemId: capture.itemId, cloudCoverPct: capture.cloudCoverPct, gsdM: capture.gsdM, spot: capture.spot }
+        : undefined,
+    }),
   }
 }
 
@@ -242,7 +275,13 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   useEffect(() => {
     job.current = null
     setPng('busy')
-    const t = window.setTimeout(() => void startPng(), PNG_DELAY_MS)
+    return whenIdle(() => void startPng(), PNG_IDLE_TIMEOUT_MS)
+  }, [startPng])
+  // The phone's primary waits this long for the PNG, then offers the link alone.
+  const [patient, setPatient] = useState(true)
+  useEffect(() => {
+    setPatient(true)
+    const t = window.setTimeout(() => setPatient(false), PNG_PATIENCE_MS)
     return () => window.clearTimeout(t)
   }, [startPng])
 
@@ -381,11 +420,17 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
     }
   }
 
+  // The phone's primary: the image once it's ready; until then (≤ 2.5 s) an inert "Preparing image…";
+  // after that, or if the PNG failed, the text and link alone.
+  const nativeMode: 'image' | 'preparing' | 'link' = !shareFiles ? 'link' : png === 'ready' ? 'image' : png === 'busy' && patient ? 'preparing' : 'link'
+  const nativeLabel = nativeMode === 'image' ? 'Share image' : nativeMode === 'preparing' ? 'Preparing image…' : 'Share'
+
   /**
    * Phones: the system share sheet with the card attached. Called synchronously in the tap: no await
    * comes before navigator.share, or Safari treats the gesture as spent and refuses.
    */
   const nativeShare = () => {
+    if (nativeMode === 'preparing') return // inert for a moment: the next tap carries the image
     void ensureLink() // the short link for next time (and for Copy); this share uses what's ready now
     const j = startPng()
     const data: ShareData = { text, url: linkNow.current ?? fallbackUrl }
@@ -411,9 +456,20 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
 
   const actions = nativeFirst ? (
     <div className={s.actionsTouch}>
-      <Button variant="primary" className={s.native} onClick={nativeShare} onPointerDown={warm}>
+      <Button
+        variant="primary"
+        className={s.native}
+        onClick={nativeShare}
+        onPointerDown={() => {
+          warm()
+          void startPng() // a tap before the idle callback starts the card at once
+        }}
+        aria-disabled={nativeMode === 'preparing' ? 'true' : undefined}
+        aria-live="polite"
+        data-mode={nativeMode}
+      >
         <Glyph name="share" size={14} />
-        {shareFiles ? 'Share image' : 'Share'}
+        {nativeLabel}
       </Button>
       <div className={s.secondary}>
         <Button onClick={copy} onPointerDown={warm} aria-live="polite">
@@ -492,7 +548,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   const title = <span id="share-title">{model.title}</span>
 
   return (
-    <div ref={rootRef} className={s.root} role="dialog" aria-modal="true" aria-labelledby="share-title" tabIndex={-1}>
+    <div ref={rootRef} className={s.root} role="dialog" aria-modal="true" aria-labelledby="share-title" tabIndex={-1} data-png={png}>
       <div className={s.scrim} onMouseDown={onClose} aria-hidden />
       {stacked ? (
         <StackedShare onClose={onClose} title={title} label={model.title}>

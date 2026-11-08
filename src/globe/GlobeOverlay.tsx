@@ -18,8 +18,11 @@
  * Departing labels stay mounted for 240 ms at opacity 0, so they fade instead of popping (M11).
  */
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { ensureTz, timeZoneAt, tzReady } from '@/imagery'
 import { isStacked } from '@/lib/layout'
 import { selectSelectedPass, useApp } from '@/state/store'
+// The pure time module only, never the '@/ui/results' index (that is the lazy results chunk).
+import { fmtLocalTime, zoneAbbr } from '@/ui/results/lib/time'
 import { fmtLat, fmtLon, fmtNorad, fmtUtcTime } from '@/ui/system/format'
 import { getSatInfo, useCatalogBuffers } from './data'
 import { passAnchorId } from './PassOverlay'
@@ -58,6 +61,15 @@ export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
   )
   const hovers = useDeparting(hoverItem, (h) => `h${h.norad}`)
   const selected = useDeparting(pass, (p) => p.id)
+  const tzLoaded = useTzReady()
+  /** "IMAGED 11:21:13 EST": the place's local time, as the pass header says it (UTC until the zone table is in). */
+  const imagedAt = (t: number) => {
+    if (place && tzLoaded) {
+      const tz = timeZoneAt(place.lat, place.lon)
+      return `IMAGED ${fmtLocalTime(t, tz, true)} ${zoneAbbr(t, tz)}`
+    }
+    return `IMAGED ${fmtUtcTime(t)} UTC`
+  }
 
   return (
     <div ref={root} className={s.overlay} aria-hidden>
@@ -84,13 +96,27 @@ export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
           id={passAnchorId(item.id)}
           norad={item.norad}
           tone={item.verdict === 'imaged' ? 'signal' : 'bone'}
-          detail={item.verdict === 'imaged' ? `IMAGED ${fmtUtcTime(item.tClosest)} UTC` : undefined}
+          detail={item.verdict === 'imaged' ? imagedAt(item.tClosest) : undefined}
           ready={catalogReady}
           leaving={leaving}
         />
       ))}
     </div>
   )
+}
+
+/** True once the time-zone table is in (it normally is long before a pass opens); re-renders when it lands. */
+function useTzReady(): boolean {
+  const [ready, setReady] = useState(tzReady)
+  useEffect(() => {
+    if (ready) return
+    let alive = true
+    void ensureTz().then(() => alive && setReady(tzReady()))
+    return () => {
+      alive = false
+    }
+  }, [ready])
+  return ready
 }
 
 /**
@@ -360,7 +386,7 @@ function SatLabel({
         <span className={s.calloutName}>{name}</span>
         {compact ? (
           <span className={s.calloutMeta}>
-            {' · '}
+            {'· '}
             <b ref={altEl}>—</b> KM
           </span>
         ) : (

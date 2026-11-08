@@ -1,5 +1,6 @@
 /**
- * GET /api/og — the 1200×630 share card (PNG).
+ * GET /api/og — the 1200×630 share card (JPEG, R2SH4: satori draws a PNG, which is re-encoded as a
+ * JPEG under 250 KB, because WhatsApp drops link previews whose image is much over ~300 KB).
  *
  *   /api/og?id=<shareId>          a stored share (read via get_share, without counting a view)
  *   /api/og?place=…&lat=…&…       explicit parameters (see shareFromParams), no database needed
@@ -14,6 +15,8 @@
  *
  * Runs on the Node.js runtime (fonts and the default plate are read from api/_fonts, api/_assets).
  */
+import { decode as decodePng } from 'fast-png'
+import { encode as encodeJpeg } from 'jpeg-js'
 import { CARD_H, CARD_W, PLATE, defaultCard, defaultPlateDataUri, shareCard } from './_lib/card.js'
 import { buildCardSpec, buildSummarySpec, type CardSpec } from './_lib/cardSpec.js'
 import { displayHost, siteOrigin } from './_lib/env.js'
@@ -33,15 +36,66 @@ const CACHE = {
   default: 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800',
 } as const
 
+/** Link previews stay under this (WhatsApp shows none for an og:image much over ~300 KB). */
+export const OG_MAX_BYTES = 250_000
+const JPEG_QUALITY = [80, 70] as const
+
+/**
+ * Satori's PNG as a baseline JPEG: quality 80, or 70 if that is still over OG_MAX_BYTES. The card is
+ * flat ink with type and one photograph; at 80 the type's edges stay clean (no visible blocking at
+ * 100 %). Measured: Sentinel-2 over a city 208 KB, clouded 133 KB, Landsat 158 KB, MODIS 83 KB, the
+ * default card 153 KB; the step adds ~100–150 ms to a render.
+ */
+export function pngToJpeg(png: ArrayBuffer | Uint8Array): Uint8Array {
+  const img = decodePng(png instanceof Uint8Array ? png : new Uint8Array(png))
+  const { width, height } = img
+  const px = width * height
+  let rgba: Uint8Array
+  if (img.palette) {
+    // Indexed colour: expand through the palette (satori/resvg don't emit it, but don't trust that).
+    const out = new Uint8Array(px * 4)
+    const idx = img.data
+    for (let i = 0; i < px; i++) {
+      const c = img.palette[idx[i]] ?? [0, 0, 0]
+      out[i * 4] = c[0]
+      out[i * 4 + 1] = c[1]
+      out[i * 4 + 2] = c[2]
+      out[i * 4 + 3] = 255
+    }
+    rgba = out
+  } else {
+    const ch = img.channels
+    const shift = img.depth === 16 ? 8 : 0
+    const src = img.data
+    const out = new Uint8Array(px * 4)
+    for (let i = 0; i < px; i++) {
+      const o = i * 4
+      const j = i * ch
+      if (ch >= 3) {
+        out[o] = src[j] >> shift
+        out[o + 1] = src[j + 1] >> shift
+        out[o + 2] = src[j + 2] >> shift
+      } else {
+        out[o] = out[o + 1] = out[o + 2] = src[j] >> shift // grey (± alpha)
+      }
+      out[o + 3] = 255 // the card is opaque; JPEG has no alpha
+    }
+    rgba = out
+  }
+  let jpeg = encodeJpeg({ data: rgba, width, height }, JPEG_QUALITY[0]).data
+  if (jpeg.byteLength >= OG_MAX_BYTES) jpeg = encodeJpeg({ data: rgba, width, height }, JPEG_QUALITY[1]).data
+  return new Uint8Array(jpeg.buffer, jpeg.byteOffset, jpeg.byteLength)
+}
+
 async function render(element: ReturnType<typeof defaultCard>, cacheControl: string, status = 200): Promise<Response> {
   const [{ ImageResponse }, fonts] = await Promise.all([loadOg(), loadFonts()])
   const img = new ImageResponse(element, { width: CARD_W, height: CARD_H, fonts, status })
   // ImageResponse streams; buffer it so errors surface here (and the response has a length).
-  const body = await img.arrayBuffer()
-  return new Response(body, {
+  const jpeg = pngToJpeg(await img.arrayBuffer())
+  return new Response(jpeg, {
     status,
     headers: {
-      'content-type': 'image/png',
+      'content-type': 'image/jpeg',
       'cache-control': cacheControl,
       'x-content-type-options': 'nosniff',
     },

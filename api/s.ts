@@ -13,16 +13,25 @@
  * unfurler (vercel.json sends only bot user agents here; people get the SPA). Title "What
  * photographed Waterloo this week", the card at /api/og?kind=place…, coordinates coarsened to 0.01°,
  * and people who land here anyway are handed to the same address in the app.
+ *
+ * Pass links (share R2SH2): the app's fallback link for a pass (made when no short link exists yet)
+ * carries the pass itself (sat, norad, verdict, t, alt, off, hdg, collection, item, cloud, gsd, spot).
+ * It unfurls as that pass: its headline, description and card (/api/og with the explicit parameters),
+ * with no database row.
+ *
+ * Cards from /api/og are JPEG (og:image:type image/jpeg, R2SH4); the static default card is a PNG.
  */
 import { siteOrigin } from './_lib/env.js'
 import { DEFAULT_CARD_ALT } from './_lib/cardSpec.js'
 import { sharePageHtml } from './_lib/html.js'
 import {
+  DEEP_LINK_PASS_KEYS,
   SHARE_ID_RE,
   SUMMARY_KEYS,
   description,
   fetchShare,
   headline,
+  shareFromDeepLink,
   placeDescription,
   placeFromParams,
   placeTitle,
@@ -32,7 +41,7 @@ import {
 } from './_lib/share.js'
 
 /** Bump when the card design changes so unfurler caches (which key on the URL) refetch. */
-export const CARD_VERSION = '2'
+export const CARD_VERSION = '3'
 
 const GENERIC = {
   title: 'Something photographed you this week.',
@@ -56,7 +65,7 @@ function placePage(q: URLSearchParams, origin: string): Response {
   const place = placeFromParams(q)
   if (!place) {
     return html(
-      sharePageHtml({ ...GENERIC, canonical: `${origin}/`, image: `${origin}/og-default.png`, imageAlt: DEFAULT_CARD_ALT, redirect: '/' }),
+      sharePageHtml({ ...GENERIC, canonical: `${origin}/`, image: `${origin}/og-default.png`, imageType: 'image/png', imageAlt: DEFAULT_CARD_ALT, redirect: '/' }),
       200,
       'public, max-age=300, s-maxage=3600',
     )
@@ -67,6 +76,27 @@ function placePage(q: URLSearchParams, origin: string): Response {
   if (pass && /^[0-9A-Za-z_.:-]{1,40}$/.test(pass)) app.set('p', pass)
   // A week's summary (SH6) rides in the link itself: its card shows the counts and the best look.
   const summary = summaryFromParams(q)
+  // A pass's fallback link (R2SH2) carries the pass: unfurl it as that pass.
+  const share = summary ? null : shareFromDeepLink(q)
+  if (share) {
+    const passKeys = DEEP_LINK_PASS_KEYS.flatMap((k) => (q.get(k) !== null ? [[k, q.get(k)!] as [string, string]] : []))
+    for (const [k, v] of passKeys) app.set(k, v)
+    const card = new URLSearchParams([['place', share.placeLabel], ['lat', share.lat.toFixed(2)], ['lon', share.lon.toFixed(2)], ...passKeys, ['v', CARD_VERSION]])
+    const title = headline(share)
+    return html(
+      sharePageHtml({
+        title,
+        description: description(share),
+        canonical: `${origin}/?${app.toString()}`,
+        image: `${origin}/api/og?${card.toString()}`,
+        imageType: 'image/jpeg',
+        imageAlt: title,
+        redirect: `/?${app.toString()}`,
+      }),
+      200,
+      'public, max-age=300, s-maxage=86400, stale-while-revalidate=604800',
+    )
+  }
   const card = new URLSearchParams(
     summary
       ? { kind: 'summary', q: coords, n: place.label, ...Object.fromEntries(SUMMARY_KEYS.flatMap((k) => (q.get(k) ? [[k, q.get(k)!]] : []))), v: CARD_VERSION }
@@ -78,6 +108,7 @@ function placePage(q: URLSearchParams, origin: string): Response {
       description: summary ? summaryDescription(summary) : placeDescription(place),
       canonical: `${origin}/?${app.toString()}`,
       image: `${origin}/api/og?${card.toString()}`,
+      imageType: 'image/jpeg',
       imageAlt: summary ? `${summaryTitle(summary)}: the share card, with the clearest satellite picture of the week.` : DEFAULT_CARD_ALT,
       redirect: `/?${app.toString()}`,
     }),
@@ -96,7 +127,7 @@ export async function handleSharePage(request: Request): Promise<Response> {
 
   if (!SHARE_ID_RE.test(id)) {
     return html(
-      sharePageHtml({ ...GENERIC, canonical: `${origin}/`, image: `${origin}/og-default.png`, imageAlt: DEFAULT_CARD_ALT, redirect: '/' }),
+      sharePageHtml({ ...GENERIC, canonical: `${origin}/`, image: `${origin}/og-default.png`, imageType: 'image/png', imageAlt: DEFAULT_CARD_ALT, redirect: '/' }),
       404,
       'public, max-age=300, s-maxage=3600',
     )
@@ -110,21 +141,21 @@ export async function handleSharePage(request: Request): Promise<Response> {
   if (r.status === 'found') {
     const title = headline(r.share)
     return html(
-      sharePageHtml({ title, description: description(r.share), canonical, image: card, imageAlt: title, redirect }),
+      sharePageHtml({ title, description: description(r.share), canonical, image: card, imageType: 'image/jpeg', imageAlt: title, redirect }),
       200,
       'public, max-age=300, s-maxage=86400, stale-while-revalidate=604800',
     )
   }
   if (r.status === 'missing') {
     return html(
-      sharePageHtml({ ...GENERIC, canonical: `${origin}/`, image: `${origin}/og-default.png`, imageAlt: DEFAULT_CARD_ALT, redirect: '/' }),
+      sharePageHtml({ ...GENERIC, canonical: `${origin}/`, image: `${origin}/og-default.png`, imageType: 'image/png', imageAlt: DEFAULT_CARD_ALT, redirect: '/' }),
       404,
       'public, max-age=60, s-maxage=600',
     )
   }
   // Couldn't reach the database: don't 404 a link that may well be valid.
   return html(
-    sharePageHtml({ ...GENERIC, canonical, image: card, imageAlt: GENERIC.title, redirect }),
+    sharePageHtml({ ...GENERIC, canonical, image: card, imageType: 'image/jpeg', imageAlt: GENERIC.title, redirect }),
     200,
     'public, max-age=60, s-maxage=60',
   )
