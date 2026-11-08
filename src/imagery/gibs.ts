@@ -135,8 +135,8 @@ interface DomainEntry {
   frames: number[]
 }
 /** Last successful domain per layer; read synchronously by `geoImageUrl`. */
-const knownDomains = new Map<GibsCollection, DomainEntry>()
-const domainLoads = new Lru<string, Promise<number[]>>(16)
+const knownDomains = /* @__PURE__ */ new Map<GibsCollection, DomainEntry>()
+const domainLoads = /* @__PURE__ */ new Lru<string, Promise<number[]>>(16)
 
 /**
  * The frames GIBS lists for a geostationary layer over the last 6 hours, newest first (gaps left

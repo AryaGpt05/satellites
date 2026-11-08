@@ -1,0 +1,23 @@
+.count {
+  position: relative;
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  vertical-align: baseline;
+}
+.cur {
+  display: inline-block;
+}
+.old {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+}
+.old:empty {
+  display: none;
+}
+/* Clip only while rolling, so italic or overhanging neighbours are never cut at rest. */
+.rolling {
+  overflow: hidden;
+  vertical-align: bottom;
+}

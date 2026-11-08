@@ -9,10 +9,17 @@
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 400;
-  font-size: 10px;
+  font-size: var(--fs-meta, 10px);
   line-height: 1;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--bone-2);
   white-space: nowrap;
+}
+
+/* No keyboard to speak of on touch-only devices: key caps would be noise. */
+@media (hover: none) {
+  .kbd {
+    display: none;
+  }
 }

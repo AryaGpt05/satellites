@@ -1,35 +1,44 @@
 /**
- * <ResultsView/> (phase 'results'): the report.
+ * <ResultsView/>: the ONE results panel, from computing through results to a pass (decision #10).
+ * Mounted for phase 'computing' and 'results'; it keys off the phase, not off the report.
  *
- *   desktop  right-docked panel (Sheet, 432px) above a full-width timeline strip inside the bezel
- *   mobile   bottom sheet with snap points; the headline and a compact timeline ride in its header
+ *   desktop  right-docked panel (Sheet). While computing it is as tall as its readout; when results
+ *            land it grows to the full dock above the timeline strip (beside it on short screens).
+ *   phones   bottom sheet with content-measured snaps: computing = the readout; overview = header +
+ *            best-look hero (the peek); a pass = flight (header + footer), then image.
  *
- * Panel: 01 / SUMMARY · 03 / PASSES · 04 / WATCHED CONTINUOUSLY (02 / TIMELINE is the strip), or, with
- * a pass selected, its detail (03.1 capture, 03.2 geometry, 03.3 replay) with Share / Replay in the footer.
+ * Contents swap in two beats (old out 160 ms, new in 240 ms), never as a page cut. Overview:
+ * 01 / SUMMARY (headline, best look, readouts) · 02 / PASSES · 03 / WATCHED CONTINUOUSLY, and the
+ * 04 / TIMELINE strip. A pass: its capture (pushbroom reveal), readouts, 01 / GEOMETRY, 02 / REPLAY,
+ * with Share / Replay in the footer.
  *
  * Keys: ←/→ step through passes (same verdict as the selection), Space plays/pauses the replay.
- * Esc is NOT handled here: the app shell owns it (deselect, then back to search), so it never fires twice.
+ * Esc is NOT handled here (except inside the inline search field): the app shell owns it.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { timeZoneAt } from '@/imagery'
+import { SHORT_LANDSCAPE_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
-import { Button, Glyph, Kbd, Rule, ScrambleOnce, Sheet, cx, fmtLat, fmtLon, useIsMobile } from '@/ui/system'
-import { clearPass, focusPass, startReplay, togglePlay } from './actions'
+import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion } from '@/ui/system'
+import { BestLook } from './BestLook'
+import { ComputingBody } from './ComputingBody'
 import { GeoWatchers } from './GeoWatchers'
-import { glyphForPass, markColorVar } from './lib/meta'
-import { replayWindow } from './lib/replay'
-import { stepPass } from './lib/timeline'
-import { fmtLocalDay, fmtLocalStamp } from './lib/time'
-import { useReportNow, useResultsModel, type ResultsModel } from './model'
+import { DetailHeader, OverviewHeader, rememberPlace } from './Headers'
 import { PassDetail } from './PassDetail'
 import { PassList } from './PassList'
-import { Headline, Summary } from './Summary'
+import { Headline, MoreLine, Notes, Verdicts, enterStyle } from './Summary'
 import { Timeline } from './Timeline'
+import { clearPass, focusPass, startReplay, togglePlay } from './actions'
+import { isClouded } from './lib/bestLook'
+import { captureFor } from './lib/captures'
+import { replayWindow } from './lib/replay'
+import { stepPass } from './lib/timeline'
+import { useResultsModel, type ResultsModel } from './model'
+import { useOnce } from './once'
+import { exitTimeline, lastShellUnmount, publishSheetInset, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
 import s from './results.module.css'
-
-/** Mobile sheet snaps: header only · half · nearly full. */
-const SNAPS = [0.3, 0.7, 0.92]
 
 export interface ResultsViewProps {
   /** Back to search. Defaults to store.reset(); the app passes its controller's reset (aborts work, clears the URL). */
@@ -40,205 +49,602 @@ export interface ResultsViewProps {
   onSearch?: (place: Place) => void
 }
 
-export function ResultsView({ onBack }: ResultsViewProps) {
-  const report = useApp((st) => st.report)
+/** Phone snaps that are fractions of the viewport (the measured ones are px). */
+const MID = 0.62
+const TOP = 0.92
+/** Desktop dock height the computing panel starts from when the panel is remounted at results. */
+let lastComputingH = 0
+
+export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
+  const phase = useApp((st) => st.phase)
+  const place = useApp((st) => st.place)
+  const shared = useApp((st) => st.shared)
+  // PERF-03: the report lands in a deferred render, so the arrival never blocks a frame of the flight.
+  const report = useDeferredValue(useApp((st) => st.report))
   const selectedId = useApp((st) => st.selectedPassId)
-  const model = useResultsModel(report)
   const mobile = useIsMobile()
-  const now = useReportNow(report)
-  const [sharing, setSharing] = useState<Pass | null>(null)
-  // Phones open on the header snap: globe + headline + timeline. Selecting a pass raises it.
-  const [snap, setSnap] = useState(0)
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const listScroll = useRef(0)
-  const selected = selectedId && model ? model.passById.get(selectedId) : undefined
+  const shortLandscape = useMediaQuery(SHORT_LANDSCAPE_QUERY) && !mobile
+  const reduced = useReducedMotion()
+  const computing = phase !== 'results' || !report
+  const liveModel = useResultsModel(computing ? undefined : report)
+  // While the old overview fades out for a new computing run, it keeps rendering its last model.
+  const lastModel = useRef(liveModel)
+  if (liveModel) lastModel.current = liveModel
+  const model = liveModel
   const back = onBack ?? (() => useApp.getState().reset())
 
-  const select = useCallback((p: Pass) => {
-    if (!useApp.getState().selectedPassId) listScroll.current = bodyRef.current?.scrollTop ?? 0
-    focusPass(p)
-  }, [])
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement | null>(null)
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const listScroll = useRef(0)
+  const [sharing, setSharing] = useState<Pass | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [inviteClosed, setInviteClosed] = useState(false)
+  const [snap, setSnap] = useState(0)
+  const overviewSnap = useRef(0)
+  // When computing started (T+ readout), reset for each new place.
+  const [t0, setT0] = useState(() => performance.now())
+  const placeKey = place ? `${place.lat},${place.lon}` : ''
+  useEffect(() => setT0(performance.now()), [placeKey])
+  const placeTz = useMemo(() => (place ? timeZoneAt(place.lat, place.lon) : undefined), [placeKey])
 
-  // Scroll: detail opens at the top; the list comes back where it was.
+  // Continuity across a remount (the current app mounts a fresh view at the computing → results
+  // switch): no second entrance for the panel.
+  const [continued] = useState(() => performance.now() - lastShellUnmount.at < 400 && lastShellUnmount.phase === 'results')
+
+  useLayoutEffect(() => {
+    sectionRef.current = (bodyRef.current?.parentElement as HTMLElement | null) ?? null
+  })
+
+  // ── what is shown ──────────────────────────────────────────────────────────────────────
+  const selectedValid = !!selectedId && !!model?.passById.has(selectedId)
+  const viewKey = computing ? 'computing' : selectedValid ? `pass:${selectedId}` : 'overview'
+  // Remember where the list was before leaving it.
+  useEffect(() => {
+    if (viewKey.startsWith('pass:') && bodyRef.current && !bodyRef.current.querySelector('[data-detail-root]')) listScroll.current = bodyRef.current.scrollTop
+  }, [viewKey])
+  const staged = useStagedKey(viewKey)
+  const shownModel = lastModel.current
+  const shownPass = staged.shown.startsWith('pass:') ? shownModel?.passById.get(staged.shown.slice(5)) : undefined
+  const shownKey = shownPass ? staged.shown : staged.shown === 'computing' && !computing ? 'computing' : staged.shown.startsWith('pass:') ? 'overview' : staged.shown
+  const headerKeyOf = (k: string) => (k.startsWith('pass:') ? k : 'overview')
+  const headerChanging = headerKeyOf(viewKey) !== headerKeyOf(staged.shown)
+  const headerEntering = staged.stage === 'in' && headerKeyOf(staged.prev) !== headerKeyOf(staged.shown)
+  const prevPass = staged.prev.startsWith('pass:') ? shownModel?.passById.get(staged.prev.slice(5)) : undefined
+  const dir = !shownPass ? -1 : prevPass && prevPass.tClosest > shownPass.tClosest ? -1 : 1
+  const handoff = staged.prev === 'computing' && shownKey === 'overview'
+
+  // Scroll: a pass opens at the top; the list comes back where it was. While the new content is
+  // still at opacity ~0 (first frame of its entrance), so the jump is never seen.
   useLayoutEffect(() => {
     const body = bodyRef.current
     if (!body) return
-    body.scrollTop = selectedId ? 0 : listScroll.current
-  }, [selectedId])
+    const target = shownKey === 'overview' ? listScroll.current : 0
+    const id = requestAnimationFrame(() => {
+      body.scrollTop = target
+    })
+    return () => cancelAnimationFrame(id)
+  }, [shownKey])
 
-  // On phones, any selection (ours, a deep link, a shared pass) opens the sheet far enough to show
-  // the picture.
+  // The results handoff: let the globe keep its GPU work for after the entrance.
   useEffect(() => {
-    if (mobile && selectedId) setSnap((i) => Math.max(i, 1))
-  }, [mobile, selectedId])
+    if (handoff) useApp.getState().holdMotion(900)
+  }, [handoff])
 
+  // Staging (PERF-03): the list, the geostationary frames and the timeline marks mount one frame
+  // after the summary and the hero, in a transition. Once per report.
+  const reportKey = model ? `${model.report.windowEnd}:${model.report.place.lat},${model.report.place.lon}` : ''
+  const [fullFor, setFullFor] = useState('')
+  const full = !!reportKey && fullFor === reportKey
+  useEffect(() => {
+    if (!reportKey || fullFor === reportKey) return
+    const id = requestAnimationFrame(() => startTransition(() => setFullFor(reportKey)))
+    return () => cancelAnimationFrame(id)
+  }, [reportKey, fullFor])
+
+  useEffect(() => {
+    if (model) rememberPlace(model.report.place)
+  }, [model?.report.place])
+
+  // ── selection ──────────────────────────────────────────────────────────────────────────
+  const select = useCallback((p: Pass) => {
+    focusPass(p)
+  }, [])
+  const selected = selectedValid && model ? model.passById.get(selectedId!) : undefined
   useExternalFocus(selectedId, model)
-  useReplayGuard(selected)
+  useReplayGuard(selected, () => mobile && setSnap(1))
   useDeselectCleanup()
-  useKeys(model, selected, select, !!sharing)
+  useKeys(model, selected, select, !!sharing || searching)
   const closeShare = useCallback(() => setSharing(null), [])
-
   // A selection that vanished (report replaced by the final one) falls back to the overview.
   useEffect(() => {
     if (selectedId && model && !model.passById.has(selectedId)) clearPass()
   }, [selectedId, model])
 
-  if (!model) return null
-  const { report: r, tz } = model
-  const place = r.place
+  // ── phone sheet: content-measured snaps and the two-beat pass choreography ─────────────
+  const geo = useSheetGeometry(bodyRef, innerRef, mobile, [shownKey, full])
+  const vh = typeof window === 'undefined' ? 800 : window.innerHeight
+  const snaps = (() => {
+    if (!geo) return shownKey === 'computing' ? [0.44, TOP] : [0.42, MID, TOP]
+    const pad = geo.pad
+    if (shownKey === 'computing') return [Math.min(vh * 0.8, geo.top + pad + geo.content + 18), TOP]
+    if (shownKey === 'overview') {
+      const peek = geo.peekEnd !== undefined ? geo.top + pad + geo.peekEnd + 12 : vh * 0.36
+      return [Math.min(peek, vh * (MID - 0.02)), MID, TOP]
+    }
+    const flight = geo.top + geo.foot + 2
+    const image = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 12 + geo.foot : vh * 0.7
+    return [Math.min(flight, vh * 0.4), Math.max(Math.min(image, vh * (TOP - 0.02)), Math.min(flight, vh * 0.4) + 40), TOP]
+  })()
 
-  const header = selected ? (
-    <DetailHeader model={model} pass={selected} mobile={mobile} />
-  ) : (
-    <OverviewHeader model={model} mobile={mobile} onBack={back} onSelect={select} selectedId={selectedId} />
+  // Phase / view changes pick the snap.
+  useEffect(() => {
+    if (!mobile) return
+    if (viewKey === 'computing') setSnap(0)
+    else if (viewKey === 'overview') setSnap(overviewSnap.current)
+  }, [viewKey, mobile])
+  // A new place opens on the peek again.
+  useEffect(() => {
+    overviewSnap.current = 0
+  }, [placeKey])
+
+  // A pass on phones: flight first (sheet low, the camera and swath visible), then the image.
+  useEffect(() => {
+    if (!mobile || !selectedId) return
+    if (reduced) {
+      setSnap(1)
+      return
+    }
+    setSnap(0)
+    let done = false
+    let touched = false
+    const sec = sectionRef.current
+    const onDown = () => (touched = true)
+    sec?.addEventListener('pointerdown', onDown)
+    const start = useApp.getState().cameraFlight
+    let sawFlight = start.flying
+    const raise = () => {
+      if (done) return
+      done = true
+      if (!touched) setSnap(1)
+    }
+    const unsub = useApp.subscribe((st) => {
+      if (st.cameraFlight.flying) sawFlight = true
+      else if (sawFlight) raise()
+    })
+    // The globe reports flights: if none starts, the camera is already there. Without any report at
+    // all (no flight status from the globe), fall back to the 2.8 s cap.
+    const known = start.id !== 0 || start.arrivedAt !== 0
+    const quiet = window.setTimeout(() => !sawFlight && known && raise(), 400)
+    const cap = window.setTimeout(raise, 2800)
+    return () => {
+      done = true
+      unsub()
+      window.clearTimeout(quiet)
+      window.clearTimeout(cap)
+      sec?.removeEventListener('pointerdown', onDown)
+    }
+  }, [selectedId, mobile, reduced])
+
+  const onSnapChange = useCallback(
+    (i: number) => {
+      setSnap(i)
+      if (viewKey === 'overview') overviewSnap.current = i
+    },
+    [viewKey],
   )
 
-  const footer = selected ? (
-    <div className={s.actions}>
-      <Button variant="primary" onClick={() => setSharing(selected)}>
-        <Glyph name="share" size={14} />
-        Share this pass
-      </Button>
-      <Button onClick={() => focusPass(selected)} title="Replay the pass on the globe">
-        <Glyph name="play" size={12} />
-        Replay
-      </Button>
-    </div>
-  ) : undefined
+  // Inline search on phones: the sheet rises while typing.
+  useEffect(() => {
+    if (mobile && searching) setSnap(2)
+  }, [mobile, searching])
+  useEffect(() => {
+    if (computing) setSearching(false)
+  }, [computing])
+
+  // ── desktop dock height: content while computing, full at results (CSS transition) ──────
+  useLayoutEffect(() => {
+    const sec = sectionRef.current
+    const body = bodyRef.current
+    const inner = innerRef.current
+    if (mobile || !sec || !body || !inner || typeof ResizeObserver === 'undefined') return
+    if (!computing) {
+      if (continued && lastComputingH) {
+        // Remounted at the handoff: start from the readout's height and grow.
+        sec.style.height = `${lastComputingH}px`
+        const id = requestAnimationFrame(() => requestAnimationFrame(() => (sec.style.height = '')))
+        return () => cancelAnimationFrame(id)
+      }
+      return
+    }
+    if (shownKey !== 'computing') {
+      // A new place from the header search: the old overview is still leaving. Shrink toward the
+      // readout's last height now (it is the same readout), never toward the outgoing overview's.
+      if (lastComputingH) sec.style.setProperty('--computing-h', `${lastComputingH}px`)
+      return
+    }
+    const measure = () => {
+      const chrome = sec.offsetHeight - body.offsetHeight
+      const h = Math.round(chrome + 20 + inner.offsetHeight + 22)
+      // A 1-2 px difference must not restart the height transition already gliding there.
+      const cur = parseFloat(sec.style.getPropertyValue('--computing-h'))
+      if (!(Math.abs(cur - h) < 3)) sec.style.setProperty('--computing-h', `${h}px`)
+      lastComputingH = h
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [computing, mobile, continued, shownKey])
+
+  // Desktop pass frame: measure what sits above and below it so the square always fits (R8).
+  useLayoutEffect(() => {
+    const sec = sectionRef.current
+    const body = bodyRef.current
+    const inner = innerRef.current
+    if (mobile || !sec || !body || !inner || !shownPass) return
+    const measure = () => {
+      const frame = inner.querySelector<HTMLElement>('[data-detail-frame]')
+      if (!frame) return
+      const sr = sec.getBoundingClientRect()
+      const foot = body.nextElementSibling as HTMLElement | null
+      // The caption's first line (the product: "SENTINEL-2 L2A · 10 M · 10.0 KM") belongs with the
+      // picture: it must clear the footer too, not end half-cut under the body's fade.
+      const product = frame.closest('figure')?.querySelector('figcaption')?.firstElementChild as HTMLElement | null | undefined
+      const caption = product ? product.offsetHeight + 8 : 0
+      const above = sr.top + body.offsetTop + 20 + (frame.getBoundingClientRect().top - inner.getBoundingClientRect().top)
+      const below = (foot?.offsetHeight ?? 0) + Math.max(0, window.innerHeight - sr.bottom) + 14 + caption
+      sec.style.setProperty('--detail-chrome', `${Math.round(above + below)}px`)
+    }
+    // The observer's first callback (after layout) does the first measure: no forced layout in the
+    // commit that opens the pass.
+    if (typeof ResizeObserver === 'undefined') measure()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    ro?.observe(sec)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [mobile, shownPass, shownKey])
+
+  // A long body ends on a 24 px fade, never on a clipped baseline (desktop: the body's own box).
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!body || mobile) return
+    const update = () => {
+      const more = body.scrollHeight - body.scrollTop - body.clientHeight > 2
+      if (body.dataset.more !== String(more)) body.dataset.more = String(more)
+    }
+    if (typeof ResizeObserver === 'undefined') update()
+    body.addEventListener('scroll', update, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    ro?.observe(body)
+    if (innerRef.current) ro?.observe(innerRef.current)
+    return () => {
+      body.removeEventListener('scroll', update)
+      ro?.disconnect()
+    }
+  }, [mobile, shownKey, full])
+
+  useInsets(sectionRef, timelineRef, mobile, [shownKey, computing, full, shortLandscape])
+  useShellExit(sectionRef, timelineRef, mobile)
+
+  // ── render ─────────────────────────────────────────────────────────────────────────────
+  // Inline search lives in the overview header: from a pass, go back to the overview first.
+  const openSearch = onSearch
+    ? () => {
+        if (useApp.getState().selectedPassId) clearPass()
+        setSearching(true)
+      }
+    : undefined
+  const enterKey = `enter:${reportKey}`
+  const dockEnter = useOnce(`${enterKey}:dock`)
+
+  const header = shownPass && shownModel ? (
+    <DetailHeader
+      model={shownModel}
+      pass={shownPass}
+      mobile={mobile}
+      onSelect={select}
+      strip={mobile && !!selected && selected.id === shownPass.id}
+    />
+  ) : (
+    <OverviewHeader
+      place={place}
+      model={model}
+      computing={computing}
+      t0={t0}
+      mobile={mobile}
+      enter={handoff}
+      searching={searching}
+      onBack={back}
+      onCancel={back}
+      onOpenSearch={openSearch}
+      onCloseSearch={() => setSearching(false)}
+      onSearch={onSearch}
+      onRetry={onRetry}
+    />
+  )
+
+  const footer = shownPass && shownModel ? <DetailFooter model={shownModel} pass={shownPass} mobile={mobile} shared={!!shared} onShare={setSharing} onFindYours={openSearch} onReplay={() => {
+    if (mobile) setSnap(0)
+    focusPass(shownPass)
+  }} /> : undefined
+
+  const swapClass = staged.stage === 'out' ? s.swapOut : staged.stage === 'in' && !handoff ? s.swapIn : undefined
+  const headSwapClass = staged.stage === 'out' && headerChanging ? s.swapOut : headerEntering ? s.swapIn : undefined
+  const dirStyle = { '--dir': dir } as CSSProperties
 
   return (
     <>
       <Sheet
-        label={`Satellites over ${place.label}`}
-        header={header}
+        label={place ? `Satellites over ${place.label}` : 'Computing passes'}
+        header={
+          <GlideHeight enabled={mobile}>
+            <div key={headerKeyOf(staged.shown)} className={headSwapClass} style={dirStyle}>
+              {header}
+            </div>
+          </GlideHeight>
+        }
         footer={footer}
-        snaps={SNAPS}
+        snaps={snaps}
         snap={snap}
-        onSnapChange={setSnap}
-        className={cx(s.vars, s.panel)}
+        onSnapChange={onSnapChange}
+        onVisibleChange={mobile ? publishSheetInset : undefined}
+        className={cx(
+          s.vars,
+          s.panel,
+          !mobile && s.desk,
+          !mobile && (computing ? s.isComputing : s.isResults),
+          shortLandscape && s.shortLandscape,
+          continued && s.noEnter,
+        )}
+        bodyClassName={s.body}
         bodyRef={bodyRef}
       >
-        {selected ? (
-          <PassDetail key={selected.id} model={model} pass={selected} />
-        ) : (
-          <>
-            <section className={s.section} aria-label="Summary">
-              <Rule index="01" className={s.rule}>
-                Summary
-              </Rule>
-              <Summary model={model} showHeadline={!mobile} />
-            </section>
-            <section className={s.section} aria-label="Passes">
-              <Rule index="03" className={s.rule}>
-                Passes · newest first
-              </Rule>
-              <PassList model={model} selectedId={selectedId} now={now} onSelect={select} />
-            </section>
-            <section className={s.section} aria-label="Watched continuously">
-              <Rule index="04" className={s.rule}>
-                Watched continuously
-              </Rule>
-              <GeoWatchers watchers={r.geo} place={place} days={model.windowDays} />
-            </section>
-            <section className={s.section}>
-              <p className={s.footnote}>
-                Pass times are when each satellite was closest to {place.label}, computed from public orbital elements
-                {r.catalogFetchedAt ? ` (fetched ${r.catalogFetchedAt.slice(0, 16).replace('T', ' ')}Z)` : ''}. Local times are {tz.replace(/_/g, ' ')}.
-              </p>
-            </section>
-          </>
-        )}
+        <div ref={innerRef} key={shownKey} className={cx(s.stage, swapClass)} style={dirStyle} data-detail-root={shownPass ? '' : undefined}>
+          {shownKey === 'computing' || !lastModel.current ? (
+            <ComputingBody t0={t0} tz={placeTz} />
+          ) : shownPass ? (
+            <PassDetail key={shownPass.id} model={lastModel.current} pass={shownPass} />
+          ) : (
+            <Overview
+              model={lastModel.current}
+              mobile={mobile}
+              compactTimeline={mobile || shortLandscape}
+              full={full}
+              enterKey={enterKey}
+              selectedId={selectedId}
+              onSelect={select}
+              onShare={setSharing}
+              onRetry={onRetry}
+              invite={!!shared && !inviteClosed && !searching}
+              onFindYours={openSearch}
+              onCloseInvite={() => setInviteClosed(true)}
+            />
+          )}
+        </div>
       </Sheet>
 
-      {!mobile ? (
-        <div className={cx(s.vars, s.timelineDock)}>
+      {!mobile && !shortLandscape && model && full ? (
+        <TimelineDock dockRef={timelineRef} className={cx(s.vars, s.timelineDock, dockEnter && s.dockEnter)}>
           <Timeline model={model} selectedId={selectedId} onSelect={select} />
-        </div>
+        </TimelineDock>
       ) : null}
 
-      {sharing ? <ShareSheet pass={sharing} report={r} onClose={closeShare} /> : null}
+      {sharing && model ? <ShareFor pass={sharing} model={model} onClose={closeShare} /> : null}
     </>
   )
 }
 
-// ── headers ───────────────────────────────────────────────────────────────────────────────
-
-function OverviewHeader({
-  model,
-  mobile,
-  onBack,
-  onSelect,
-  selectedId,
-}: {
-  model: ResultsModel
-  mobile: boolean
-  onBack: () => void
-  onSelect: (p: Pass) => void
-  selectedId?: string
-}) {
-  const { report, tz } = model
-  const place = report.place
+/**
+ * The desktop timeline strip. When it leaves while the panel stays (a second place searched from the
+ * header: the panel turns back into the computing readout), it clips away to the right instead of
+ * vanishing in one frame. When the whole shell leaves, useShellExit takes both out together.
+ */
+function TimelineDock({ dockRef, className, children }: { dockRef: React.RefObject<HTMLDivElement | null>; className?: string; children: React.ReactNode }) {
+  useLayoutEffect(() => {
+    const node = dockRef.current
+    // An unmount's layout cleanup runs while the node is still in the document, so it can be cloned.
+    return () => {
+      if (useApp.getState().phase === 'computing') exitTimeline(node)
+    }
+  }, [dockRef])
   return (
-    <div>
-      <div className={s.headTop}>
-        <span className={s.headId}>
-          {Math.round(model.windowDays)} days · {shortDay(report.windowStart, tz)} → {shortDay(report.windowEnd, tz)}
-        </span>
-        <button type="button" className={s.crumb} onClick={onBack} aria-keyshortcuts="Escape">
-          <Glyph name="search" size={11} />
-          New search
-          {!mobile ? <Kbd>Esc</Kbd> : null}
-        </button>
-      </div>
-      {mobile ? (
-        <>
-          <Headline model={model} compact />
-          <div className={s.mTimeline}>
-            <Timeline model={model} selectedId={selectedId} onSelect={onSelect} compact />
-          </div>
-        </>
-      ) : (
-        <>
-          <h1 className={s.placeName}>{place.label}</h1>
-          <div className={s.placeSub}>
-            <ScrambleOnce text={`${fmtLat(place.lat)} ${fmtLon(place.lon)}`} className={s.coordsText} />
-            {place.sublabel ? <b>{place.sublabel}</b> : null}
-            <span>{tz.replace(/_/g, ' ')}</span>
-          </div>
-        </>
-      )}
+    <div ref={dockRef} className={className}>
+      {children}
     </div>
   )
 }
 
-/** "27 Oct" */
-const shortDay = (ms: number, tz: string) => fmtLocalDay(ms, tz).split(' ').slice(1).join(' ')
-
-/** Pass header. On phones it stays short (no timeline) so the whole picture fits at the middle snap. */
-function DetailHeader({ model, pass, mobile }: { model: ResultsModel; pass: Pass; mobile: boolean }) {
-  const meta = model.meta(pass.norad)
+/** Phones: the sheet header glides to its new height when its content changes (R14). */
+function GlideHeight({ enabled, children }: { enabled: boolean; children: React.ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
+  useAnimatedHeight(outer, inner, enabled)
   return (
-    <div>
-      <div className={s.headTop}>
-        <button type="button" className={s.crumb} onClick={clearPass} aria-keyshortcuts="Escape">
-          <Glyph name="arrow-left" size={11} />
-          All passes
-          {!mobile ? <Kbd>Esc</Kbd> : null}
-        </button>
-        <span className={s.headId}>
-          <ScrambleOnce text={`Pass ${pass.id}`} />
-        </span>
-      </div>
-      <div className={s.passTitle}>
-        <Glyph name={glyphForPass(pass.verdict, meta.category)} size={18} color={markColorVar(pass.verdict, meta.category)} />
-        <h1 className={s.placeName}>{meta.name}</h1>
-      </div>
-      <div className={s.placeSub}>
-        <b>{fmtLocalStamp(pass.tClosest, model.tz, true)}</b>
-        {meta.operator ? <span>{meta.operator}</span> : null}
+    <div ref={outer} data-anim-outer>
+      <div ref={inner} data-anim-inner>
+        {children}
       </div>
     </div>
   )
+}
+
+// ── overview body ─────────────────────────────────────────────────────────────────────────
+
+interface OverviewProps {
+  model: ResultsModel
+  mobile: boolean
+  compactTimeline: boolean
+  full: boolean
+  enterKey: string
+  selectedId?: string
+  onSelect: (p: Pass) => void
+  onShare: (p: Pass) => void
+  onRetry?: () => void
+  invite: boolean
+  onFindYours?: () => void
+  onCloseInvite: () => void
+}
+
+function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onFindYours, onCloseInvite }: OverviewProps) {
+  const { report } = model
+  // Notch indices in reading order (V22): phones have no SUMMARY rule (the summary is the sheet's
+  // header and hero), so their first rule is 01 / PASSES.
+  const idx = (n: number) => String(mobile ? n - 1 : n).padStart(2, '0')
+  const enter = useOnce(`${enterKey}:body`)
+  const best = model.best
+  const hero = best ? (
+    <div data-peek-end className={cx(enter && s.enter)} style={enterStyle(1)}>
+      <BestLook model={model} best={best} onOpen={onSelect} onShare={onShare} />
+    </div>
+  ) : null
+  const inviteBar = invite ? (
+    <div className={s.invite}>
+      <p className={s.inviteText}>Something photographed you this week too.</p>
+      {onFindYours ? (
+        <Button variant="primary" size="sm" onClick={onFindYours}>
+          Find yours
+        </Button>
+      ) : null}
+      <button type="button" className={s.inviteClose} onClick={onCloseInvite} aria-label="Dismiss">
+        <Glyph name="close" size={12} />
+      </button>
+    </div>
+  ) : null
+
+  return (
+    <>
+      {inviteBar}
+      {mobile ? (
+        <section className={s.section} aria-label="Summary">
+          {hero}
+          <div data-peek-end={best ? undefined : ''}>
+            <Verdicts model={model} enter={enter} />
+          </div>
+          {full ? (
+            <div className={s.mTimeline}>
+              <Timeline model={model} selectedId={selectedId} onSelect={onSelect} compact />
+            </div>
+          ) : (
+            <div className={s.mTimeline} />
+          )}
+          <Notes model={model} enter={enter} />
+        </section>
+      ) : (
+        <section className={s.section} aria-label="Summary">
+          <Rule index="01" className={s.rule}>
+            Summary
+          </Rule>
+          <div className={s.headBlock}>
+            <Headline model={model} enter={enter} />
+            <MoreLine model={model} enter={enter} onRetry={onRetry} />
+          </div>
+          {hero}
+          <Verdicts model={model} enter={enter} />
+          {compactTimeline && full ? (
+            <div className={s.mTimeline}>
+              <Timeline model={model} selectedId={selectedId} onSelect={onSelect} compact />
+            </div>
+          ) : null}
+          <Notes model={model} enter={enter} />
+        </section>
+      )}
+      {full ? (
+        <>
+          <section className={s.section} aria-label="Passes">
+            <Rule index={idx(2)} className={s.rule}>
+              Passes
+            </Rule>
+            <PassList model={model} selectedId={selectedId} onSelect={onSelect} />
+          </section>
+          <section className={s.section} aria-label="Watched continuously">
+            <Rule index={idx(3)} className={s.rule}>
+              Watched continuously
+            </Rule>
+            <GeoWatchers watchers={report.geo} place={report.place} days={model.windowDays} />
+          </section>
+          <section className={s.section}>
+            <p className={s.footnote}>
+              Pass times are when each satellite was closest to {report.place.label}, computed from public orbital elements
+              {report.catalogFetchedAt ? ` (fetched ${report.catalogFetchedAt.slice(0, 16).replace('T', ' ')}Z)` : ''}. Local times are {model.tzLabel}.
+            </p>
+          </section>
+        </>
+      ) : null}
+    </>
+  )
+}
+
+// ── pass footer ───────────────────────────────────────────────────────────────────────────
+
+function DetailFooter({
+  model,
+  pass,
+  mobile,
+  shared,
+  onShare,
+  onReplay,
+  onFindYours,
+}: {
+  model: ResultsModel
+  pass: Pass
+  mobile: boolean
+  shared: boolean
+  onShare: (p: Pass) => void
+  onReplay: () => void
+  onFindYours?: () => void
+}) {
+  const capture = captureFor(model.report, pass)
+  const best = model.best
+  // A clouded picture: the primary action is the clearest one, not sharing a white square.
+  const clearer = !!capture && isClouded(capture) && best?.kind === 'detailed' && best.pass.id !== pass.id ? best.pass : undefined
+  // With the clearer-look CTA, the secondary actions become icons so the primary's words fit.
+  const iconOnly = !!clearer
+  const third =
+    shared && onFindYours ? (
+      <Button onClick={onFindYours}>Find yours</Button>
+    ) : (
+      <Button onClick={onReplay} title="Replay the pass on the globe" aria-label="Replay the pass" className={cx(iconOnly && s.iconBtn)}>
+        <Glyph name="play" size={12} />
+        {iconOnly ? null : 'Replay'}
+      </Button>
+    )
+  return (
+    <div className={cx(s.actions, clearer && s.actionsThree)}>
+      {mobile ? (
+        <Button onClick={clearPass} aria-label="All passes" className={s.iconBtn}>
+          <Glyph name="arrow-left" size={13} />
+        </Button>
+      ) : null}
+      {clearer ? (
+        <>
+          <Button variant="primary" onClick={() => focusPass(clearer)} className={s.primary} aria-label="See the clearest look">
+            <span className={s.ctaLead}>See the </span>clearest look
+          </Button>
+          <Button onClick={() => onShare(pass)} aria-label="Share this pass" title="Share this pass" className={cx(iconOnly && s.iconBtn)}>
+            <Glyph name="share" size={13} />
+            {iconOnly ? null : 'Share'}
+          </Button>
+        </>
+      ) : (
+        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary}>
+          <Glyph name="share" size={14} />
+          Share this pass
+        </Button>
+      )}
+      {third}
+    </div>
+  )
+}
+
+/** The share sheet, told when the picture is mostly cloud (share SH2 renders the clouded card). */
+function ShareFor({ pass, model, onClose }: { pass: Pass; model: ResultsModel; onClose: () => void }) {
+  const c = captureFor(model.report, pass)
+  return <ShareSheet pass={pass} report={model.report} onClose={onClose} clouded={!!c && isClouded(c)} cloudPct={c?.cloudCoverPct} />
 }
 
 // ── behaviour ─────────────────────────────────────────────────────────────────────────────
@@ -285,7 +691,9 @@ function useDeselectCleanup() {
 }
 
 /** Stop the replay at the end of the pass window and hold that frame. */
-function useReplayGuard(pass: Pass | undefined) {
+function useReplayGuard(pass: Pass | undefined, onEnd?: () => void) {
+  const endRef = useRef(onEnd)
+  endRef.current = onEnd
   useEffect(() => {
     if (!pass) return
     const [, end] = replayWindow(pass)
@@ -293,6 +701,7 @@ function useReplayGuard(pass: Pass | undefined) {
       if (st.timeMode === 'replay' && st.simTime >= end) {
         st.setTimeMode('scrub')
         st.setSimTime(end)
+        endRef.current?.()
       }
     })
   }, [pass])

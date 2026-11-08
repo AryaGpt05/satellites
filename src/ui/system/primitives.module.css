@@ -19,7 +19,7 @@
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 350;
-  font-size: 13px;
+  font-size: var(--fs-readout, 12px);
   font-variant-numeric: tabular-nums;
   color: var(--bone);
   white-space: nowrap;
@@ -30,7 +30,7 @@
   color: var(--bone-3);
 }
 .readoutLg .readoutValue {
-  font-size: 22px;
+  font-size: var(--fs-readout-l, 21px);
   font-weight: 300;
   letter-spacing: -0.01em;
 }
@@ -81,9 +81,27 @@
     color var(--d-hover) var(--ease-out);
   user-select: none;
 }
-.btn:hover {
+/* Hover only where there is a real hover (a tapped button must not stay lit on touch); pressed is
+   instant on and eased off. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover {
+    border-color: var(--bone-3);
+    background: var(--ink-2);
+  }
+  .btnPrimary:hover {
+    background: var(--signal-hover);
+    border-color: var(--signal-hover);
+  }
+  .btnGhost:hover {
+    background: transparent;
+    border-color: transparent;
+    color: var(--signal);
+  }
+}
+.btn:active {
   border-color: var(--bone-3);
-  background: var(--ink-2);
+  background: var(--ink-3);
+  transition-duration: 0ms;
 }
 .btn:disabled {
   opacity: 0.4;
@@ -94,14 +112,14 @@
   border-color: var(--signal);
   color: var(--ink-0);
 }
-.btnPrimary:hover {
+.btnPrimary:active {
   background: var(--signal-hover);
   border-color: var(--signal-hover);
 }
 .btnGhost {
   border-color: transparent;
 }
-.btnGhost:hover {
+.btnGhost:active {
   background: transparent;
   border-color: transparent;
   color: var(--signal);
@@ -120,7 +138,7 @@
   border: 1px solid var(--line-strong);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9.5px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone-2);

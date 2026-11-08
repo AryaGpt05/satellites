@@ -48,12 +48,17 @@ export const cloudsFragment = glsl`
     if (cover < 0.004) discard;
 
     // Self-shading: treat coverage as thickness, light its gradient (thick cores bulge toward the sun).
+    // LITE (phones): skip the 4 gradient fetches; decks get a coverage-based shade instead.
+  #ifdef LITE
+    float shade = mix(0.86, 1.02, cover) * mix(0.78, 1.06, sat01(NdL * 0.5 + 0.5));
+  #else
     vec2 du = vec2(uTexel.x * 2.0, 0.0);
     vec2 dv = vec2(0.0, uTexel.y * 2.0);
     float gx = texture2D(uClouds, uv + du).r - texture2D(uClouds, uv - du).r;
     float gy = texture2D(uClouds, uv + dv).r - texture2D(uClouds, uv - dv).r;
     vec3 Nc = normalize(N - 0.9 * (gx / cosLat * E + gy * Nn));
     float shade = mix(0.78, 1.06, sat01(dot(Nc, L) * 0.5 + 0.5));
+  #endif
 
     float dayMix = smoothstep(-0.05, 0.12, NdL);
     float lambert = sat01((NdL + 0.08) / 1.08);

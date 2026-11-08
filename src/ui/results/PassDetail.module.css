@@ -2,11 +2,98 @@
   display: flex;
   flex-direction: column;
 }
+.detail > section + section {
+  margin-top: 28px;
+}
+.prose {
+  gap: 12px;
+}
+
+/* Entrance (R14): frame 0, sentence 60 ms, geometry 120 ms, cells 120–300 ms in 20 ms steps. */
+.st {
+  animation: st-in var(--d-md) var(--ease-out) backwards;
+  animation-delay: var(--st, 0ms);
+}
+@keyframes st-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st {
+    animation: st-fade 160ms linear backwards;
+    animation-delay: 0ms;
+  }
+}
+@keyframes st-fade {
+  from {
+    opacity: 0;
+  }
+}
 
 .capture {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+
+/* Mostly cloud, said plainly above the frame (decision #2). */
+.clouded {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--warn);
+}
+
+.figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/*
+ * Desktop: the square never runs under the footer. --detail-chrome (frame top + footer + bezel) is
+ * measured by the results view; on short screens the frame shrinks and centres, but never below
+ * 240 px (a 390 px-tall landscape phone scrolls to it rather than show a stamp-sized picture).
+ */
+.stack {
+  position: relative;
+  width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
+  margin-inline: auto;
+}
+.plan {
+  width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
+  margin-inline: auto;
+}
+.zoomLayer {
+  position: absolute;
+  inset: 0;
+}
+.caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+}
+.product {
+  white-space: nowrap;
+}
+.credit {
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: 0.04em;
+  color: var(--bone-3);
 }
 
 /* ── overlay on the image ─────────────────────────────────────── */
@@ -15,6 +102,7 @@
   inset: 0;
   opacity: 0;
   transition: opacity var(--d-md) var(--ease-out);
+  pointer-events: none;
 }
 .overlayOn {
   opacity: 1;
@@ -62,7 +150,7 @@
   background: color-mix(in srgb, var(--ink-0) 78%, transparent);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -80,6 +168,31 @@
 .br {
   bottom: 8px;
   right: 8px;
+}
+.zoomSlot {
+  position: absolute;
+  top: 34px;
+  right: 8px;
+  pointer-events: auto;
+}
+.zoomChip {
+  position: static;
+  gap: 6px;
+  color: var(--bone-3);
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+}
+.zoomChip:disabled {
+  cursor: progress;
+}
+.zoomOn {
+  color: var(--bone);
+}
+@media (pointer: coarse) {
+  .zoomChip {
+    min-height: 40px;
+    padding: 0 10px;
+  }
 }
 .scale {
   position: absolute;
@@ -106,12 +219,64 @@
   background: color-mix(in srgb, var(--ink-0) 78%, transparent);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
   color: var(--bone);
   white-space: nowrap;
+}
+
+/* ── four-up readout strip under the frame (R23) ──────────────── */
+.strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.stripCell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 8px 10px 0;
+}
+.stripCell + .stripCell {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.stripLabel {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  line-height: 1.2;
+  color: var(--bone-3);
+}
+.stripValue {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 300;
+  font-size: var(--fs-readout-l, 21px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone);
+  white-space: nowrap;
+}
+.stripUnit {
+  margin-left: 0.3em;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+}
+@media (max-width: 420px) {
+  .stripValue {
+    font-size: 18px;
+  }
 }
 
 /* ── links under the image ────────────────────────────────────── */
@@ -134,8 +299,15 @@
   text-decoration: none;
   transition: color var(--d-hover) var(--ease-out);
 }
-.link:hover {
-  color: var(--signal);
+@media (hover: hover) and (pointer: fine) {
+  .link:hover {
+    color: var(--signal);
+  }
+}
+@media (pointer: coarse) {
+  .link {
+    padding: 10px 0;
+  }
 }
 .link:disabled {
   cursor: progress;
@@ -151,6 +323,7 @@
   font-stretch: 87.5%;
   font-size: var(--fs-label);
   letter-spacing: var(--track-label);
+  line-height: 1.45;
   text-transform: uppercase;
   color: var(--bone-2);
 }
@@ -158,6 +331,7 @@
   color: var(--bone-3);
 }
 .spotMark {
+  flex: none;
   width: 7px;
   height: 7px;
   border: 1px solid currentColor;
@@ -166,9 +340,20 @@
   background: var(--bone);
   border-color: var(--bone);
 }
+.spotCirrus {
+  background: linear-gradient(135deg, transparent 45%, currentColor 45% 55%, transparent 55%);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .reticle {
     transition: opacity 200ms linear;
+  }
+}
+
+/* Wide stacked layouts (portrait tablets): the square stays a picture, not a wall. */
+@media (min-width: 600px) and (max-width: 1100px) and (orientation: portrait) {
+  .stack,
+  .plan {
+    width: min(100%, 520px);
   }
 }

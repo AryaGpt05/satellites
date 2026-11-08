@@ -2,9 +2,17 @@
  * <AboutPage onClose/>: methodology, honesty and credits, as a full-height scrollable overlay in the
  * instrument language. A modal dialog: focus moves in and is trapped, Esc / the close control leave,
  * focus returns to where it was. The section index on the left tracks the reading position.
+ *
+ * Motion: an ink curtain. Opening, it drops from the top (360 ms ease-in-out) and the title wipes in
+ * under it; closing, the text clears (120 ms) and the curtain lifts away downward (480 ms), on a
+ * frozen copy that keeps the reading position. Reduced motion: 160 ms fades.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Bezel, Glyph, Kbd, Reveal, cx, fmtInt, useExitClone, type GlyphName } from '@/ui/system'
+import { DUR, EASE } from '@/lib/ease'
+import { useApp } from '@/state/store'
+import { Bezel, Glyph, Kbd, Reveal, cx, fmtInt, useExitClone } from '@/ui/system'
+// Only the vocabulary table (plain data, type-only imports), not the results UI: this chunk stays small.
+import { VERDICTS, VERDICT_GLYPH, VERDICT_META, type Verdict } from '@/ui/results/lib/meta'
 import { VERSION } from '@/ui/hud/Hud'
 import { useCatalogStatus } from '@/ui/hud/catalogStatus'
 import { fmtStampZ } from '@/ui/hud/readouts'
@@ -113,35 +121,49 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
+  // The curtain's entrance holds heavy GPU work back until it has played.
+  useEffect(() => {
+    useApp.getState().holdMotion(400)
+  }, [])
+
+  // Close: the text clears first (120 ms), then the curtain lifts away downward (480 ms).
   useExitClone(rootRef, {
-    keyframes: [{ opacity: 1 }, { opacity: 0 }],
-    duration: 240,
-    easing: 'cubic-bezier(.2, 0, 0, 1)',
+    keyframes: [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: 'inset(100% 0 0 0)' }],
+    duration: DUR.md,
+    delay: 120,
+    easing: EASE.inOut,
+    reducedKeyframes: [{ opacity: 1 }, { opacity: 0 }],
+    onStart: (clone, reduced) => {
+      if (reduced) return
+      clone.querySelectorAll<HTMLElement>('[data-about-content]').forEach((el) =>
+        el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: EASE.inOut, fill: 'forwards' }),
+      )
+    },
   })
 
   const jump = (id: SectionId) => {
     const el = scrollRef.current?.querySelector<HTMLElement>(`#about-${id}`)
     if (!el || !scrollRef.current) return
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    scrollRef.current.scrollTo({ top: el.offsetTop - 96, behavior: reduce ? 'auto' : 'smooth' })
+    scrollRef.current.scrollTo({ top: el.offsetTop - 32, behavior: reduce ? 'auto' : 'smooth' })
   }
 
   const years = copernicusYears()
 
   return (
     <div ref={rootRef} className={s.overlay} role="dialog" aria-modal="true" aria-labelledby="about-title">
-      <div ref={scrollRef} className={s.scroll} tabIndex={-1}>
-        <header className={s.bar}>
-          <span className={s.barLabel}>
-            Overflight <span className={s.dim}>/ About</span>
-          </span>
-          <button ref={closeRef} type="button" className={s.close} onClick={onClose} aria-label="Close" aria-keyshortcuts="Escape">
-            <span className={s.closeText}>Close</span>
-            <Kbd className={s.closeKbd}>Esc</Kbd>
-            <Glyph name="close" size={14} />
-          </button>
-        </header>
-
+      <header className={s.bar} data-about-content>
+        <span className={s.barLabel}>
+          Overflight <span className={s.dim}>/ About</span>
+        </span>
+        <button ref={closeRef} type="button" className={s.close} onClick={onClose} aria-label="Close" aria-keyshortcuts="Escape">
+          <span className={s.closeText}>Close</span>
+          <Kbd className={s.closeKbd}>Esc</Kbd>
+          <Glyph name="close" size={14} />
+        </button>
+      </header>
+      {/* The reading area sits inside the frame: under the bar, above the bezel's bottom hairline. */}
+      <div ref={scrollRef} className={s.scroll} tabIndex={-1} data-about-content>
         <div className={s.grid}>
           <nav className={s.nav} aria-label="Sections">
             <ol>
@@ -164,14 +186,14 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
           <article className={s.article}>
             <header className={s.intro}>
               <h1 id="about-title" className={s.title}>
-                <Reveal as="span" className={s.titleLine} delay={60}>
+                <Reveal as="span" className={s.titleLine} delay={300}>
                   What this is,
                 </Reveal>
-                <Reveal as="span" className={s.titleLine} delay={120}>
+                <Reveal as="span" className={s.titleLine} delay={360}>
                   and what it <em className={s.serif}>isn’t</em>.
                 </Reveal>
               </h1>
-              <Reveal as="p" className={s.lede} delay={260} duration={720}>
+              <Reveal as="p" className={s.lede} delay={500} duration={720}>
                 Overflight replays the last seven days of orbits over a single point on Earth, then asks the public archives for
                 the pictures. Every number is computed from public data, in your browser. Anything uncertain is labelled as such.
               </Reveal>
@@ -213,14 +235,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
             </Section>
 
             <Section id="words" index="02" title="What the words mean">
-              <Terms
-                rows={[
-                  ['imaged', 'Photographed', 'A real image of this place exists in a public archive, and you are looking at it.'],
-                  ['likely', 'Likely imaged', 'Geometry and daylight say a fixed-swath imager covered the place, but no scene is published — not yet, or not kept because of cloud.'],
-                  ['commercial', 'Passed within view', 'A commercial satellite could have pointed here. Their tasking is private: we can’t know whether it did, and we don’t pretend to.'],
-                  ['crewed', 'Overhead', 'It passed over. Stations and everything else in the catalog.'],
-                ]}
-              />
+              <Terms />
             </Section>
 
             <Section id="accuracy" index="03" title="What we can’t see">
@@ -317,18 +332,32 @@ function Facts({ rows }: { rows: [string, string][] }) {
   )
 }
 
-function Terms({ rows }: { rows: [GlyphName, string, string][] }) {
+/**
+ * About's longer word on each verdict, after the one-sentence definition. The names and definitions come
+ * from the product's one vocabulary table (DESIGN §7), so About always says what the results say.
+ */
+const VERDICT_MORE: Record<Verdict, string> = {
+  imaged: 'When we show it, you are looking at that scene.',
+  likely: 'Not yet, or not kept because of cloud.',
+  could: 'We can’t know whether it did, and we don’t pretend to.',
+  overhead: '',
+}
+
+function Terms() {
   return (
     <dl className={s.terms}>
-      {rows.map(([glyph, term, def]) => (
-        <div key={term} className={s.term}>
+      {VERDICTS.map((v) => (
+        <div key={v} className={s.term}>
           <dt>
-            <span className={cx(s.termGlyph, glyph === 'imaged' && s.signal)}>
-              <Glyph name={glyph} size={14} />
+            <span className={cx(s.termGlyph, v === 'imaged' && s.signal)}>
+              <Glyph name={VERDICT_GLYPH[v]} size={14} />
             </span>
-            {term}
+            {VERDICT_META[v].title}
           </dt>
-          <dd>{def}</dd>
+          <dd>
+            {VERDICT_META[v].definition}
+            {VERDICT_MORE[v] ? ` ${VERDICT_MORE[v]}` : null}
+          </dd>
         </div>
       ))}
     </dl>

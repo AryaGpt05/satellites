@@ -1,22 +1,34 @@
 /**
  * The signature moment (DESIGN §5): a captured image is revealed line by line in the satellite's
- * along-track direction, the way a pushbroom sensor actually builds it. A 1px signal scan line leads
- * with a faint 6px trailing glow; a mono counter reads LINE 0000 → 1024. ≈ 1.6 s, linear (a pushbroom
- * scans at a constant rate). Reduced motion: a plain fade.
+ * along-track direction, the way a pushbroom sensor actually builds it. A 1px signal scan line with a
+ * bone core leads, with a 6px trailing glow; the part not yet scanned is raster (bone hairlines
+ * parallel to the front, 4px pitch) on ink, like lines waiting to be read. One in-frame counter reads
+ * LINE 0000 → 1024. ≈ 1.6 s, linear (a pushbroom scans at a constant rate). Reduced motion: a fade.
  *
  * The image is north-up; `headingDeg` is the ground-track heading at closest approach, so a descending
  * Sentinel-2 pass (≈ 195°) scans from the top edge down, slightly leaning.
  *
- * States: acquiring (hairline frame, mono ACQUIRING…) → revealing → done; or error (honest message +
- * retry). The image is fetched with preloadImage (crossOrigin anonymous, decoded off-thread, cached).
+ * When the scan starts (`startAt`):
+ *   'now'      as soon as the image is decoded (a shared picture)
+ *   'arrival'  the pass detail: once the camera has arrived (store.cameraFlight) + 400 ms, so the
+ *              scan line crosses the centre as the swath crosses the reticle; never later than 2.8 s
+ *              after mount for the camera; on phones also only once the frame is ≥ 95 % visible
+ *   'hero'     the summary best look: max(decoded, mount + 480 ms, camera eta − 200 ms)
+ * `instant` draws the finished picture at once (already revealed this session).
+ *
+ * Cheap by construction (PERF-04): the per-frame work is canvas paint + one textContent write.
+ * React renders at mount, at scan start, at the centre lock and at the end. The box size comes from a
+ * ResizeObserver, never from layout reads inside paint().
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { DUR } from '@/lib/ease'
 import { preloadImage } from '@/imagery'
+import { useApp } from '@/state/store'
 import { Button, LiveDot, cx, palette, useReducedMotion } from '@/ui/system'
 import { frontLine, lineLabel, motionVector, revealProgress, REVEAL_MS, scannedPolygon, sweepRange } from './lib/pushbroom'
 import s from './PushbroomReveal.module.css'
 
-type Phase = 'loading' | 'revealing' | 'done' | 'error'
+export type RevealPhase = 'loading' | 'waiting' | 'revealing' | 'done' | 'error'
 
 interface Props {
   src: string
@@ -25,46 +37,87 @@ interface Props {
   lines: number
   alt: string
   /** Overlay drawn above the image (reticle, labels); receives whether the scan has passed the centre */
-  overlay?: (state: { centreLocked: boolean; phase: Phase }) => ReactNode
-  /** Caption left of the counter */
+  overlay?: (state: { centreLocked: boolean; phase: RevealPhase }) => ReactNode
+  /** Product line under the image ("Sentinel-2 L2A · 10 m · 10.0 km"); hidden when omitted */
   caption?: ReactNode
   /** Slow-network copy under ACQUIRING… */
   acquiringNote?: string
+  startAt?: 'now' | 'arrival' | 'hero'
+  /** Draw the finished picture at once (no scan) */
+  instant?: boolean
+  /** Phones: hold the scan until the frame is (≥ 95 %) on screen */
+  gateOnVisible?: boolean
+  /** Dim the picture (a scene that is mostly cloud must never be the brightest thing on screen): 'cloud' ≥ 70 %, 'overcast' ≥ 90 % */
+  dim?: false | 'cloud' | 'overcast'
+  /** Fade the picture in (200 ms) instead of cutting to it, e.g. a close-up swapped over the full crop */
+  fade?: boolean
   className?: string
-  onPhase?: (p: Phase) => void
+  frameClassName?: string
+  onPhase?: (p: RevealPhase) => void
 }
 
-const GLOW_PX = 6
+/**
+ * Phones: share of the frame that must be on screen before the scan starts; on a phone too short to
+ * show it all, half of it once the camera has been ready this long (below half, the user has moved
+ * the sheet away: the scan waits for them to bring it back).
+ */
+const VISIBLE_TO_SCAN = 0.95
+const VISIBLE_PARTIAL = 0.5
+const PARTIAL_AFTER_MS = 1200
+const GLOW_PX = 8
+const RASTER_PITCH = 4
+const CAMERA_CAP_MS = 2800
+const ARRIVAL_LEAD_MS = 400
+const HERO_MIN_MS = 480
+/** A new flight starts within a frame or two of a selection; wait this long before assuming none will. */
+const FLIGHT_GRACE_MS = 250
 
-export function PushbroomReveal({ src, headingDeg, lines, alt, overlay, caption, acquiringNote, className, onPhase }: Props) {
+export function PushbroomReveal({
+  src,
+  headingDeg,
+  lines,
+  alt,
+  overlay,
+  caption,
+  acquiringNote,
+  startAt = 'arrival',
+  instant = false,
+  gateOnVisible = false,
+  dim = false,
+  fade = false,
+  className,
+  frameClassName,
+  onPhase,
+}: Props) {
   const reduced = useReducedMotion()
   const boxRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const lineRef = useRef<HTMLElement>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const sizeRef = useRef({ w: 0, h: 0 })
   const progressRef = useRef(0)
-  const [phase, setPhase] = useState<Phase>('loading')
-  const [line, setLine] = useState(0)
+  /** Share of the frame on screen (1 when not gated) */
+  const visibleRef = useRef(1)
+  const [phase, setPhase] = useState<RevealPhase>('loading')
+  const [centreLocked, setCentreLocked] = useState(false)
   const [slow, setSlow] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const onPhaseRef = useRef(onPhase)
+  onPhaseRef.current = onPhase
+  const hasOverlay = !!overlay
 
-  const setP = useCallback(
-    (p: Phase) => {
-      setPhase(p)
-      onPhase?.(p)
-    },
-    [onPhase],
-  )
+  const setP = useCallback((p: RevealPhase) => {
+    setPhase(p)
+    onPhaseRef.current?.(p)
+  }, [])
 
-  /** Paint the image scanned up to progress p (0..1), with the scan line + glow while 0 < p < 1. */
+  /** Paint the image scanned up to progress p (0..1). */
   const paint = useCallback(
     (p: number) => {
       const cv = canvasRef.current
-      const box = boxRef.current
       const img = imgRef.current
-      if (!cv || !box || !img) return
-      const w = box.clientWidth
-      const h = box.clientHeight
-      if (!w || !h) return
+      const { w, h } = sizeRef.current
+      if (!cv || !img || !w || !h) return
       const dpr = Math.min(2, window.devicePixelRatio || 1)
       const W = Math.round(w * dpr)
       const H = Math.round(h * dpr)
@@ -77,38 +130,66 @@ export function PushbroomReveal({ src, headingDeg, lines, alt, overlay, caption,
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
       ctx.imageSmoothingQuality = 'high'
+      // Cover-fit: a square crop in a 16:9 hero frame shows its centre (the place stays centred).
+      const iw = img.naturalWidth || img.width
+      const ih = img.naturalHeight || img.height
+      const scale = Math.max(w / iw, h / ih)
+      const sw = w / scale
+      const sh = h / scale
+      const sx = (iw - sw) / 2
+      const sy = (ih - sh) / 2
+      const draw = () => ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
       if (p >= 1) {
-        ctx.drawImage(img, 0, 0, w, h)
+        draw()
         return
       }
       const d = motionVector(headingDeg)
       const [a, b] = sweepRange(w, h, d)
       const front = a + (b - a) * p
-      // scanned part
+      const px = 1 / dpr
+
+      // Not yet scanned: ink raster, hairlines parallel to the front at a 4px pitch.
+      ctx.save()
+      const ahead = scannedPolygon(w, h, { x: -d.x, y: -d.y }, -front)
+      fillPoly(ctx, ahead, palette.ink2)
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(236,232,224,0.06)'
+      ctx.lineWidth = px
+      ctx.beginPath()
+      for (let sPos = front + RASTER_PITCH; sPos <= b + RASTER_PITCH; sPos += RASTER_PITCH) {
+        const [l0, l1] = frontLine(w, h, d, sPos)
+        ctx.moveTo(l0.x, l0.y)
+        ctx.lineTo(l1.x, l1.y)
+      }
+      ctx.stroke()
+      ctx.restore()
+
+      // Scanned part.
       ctx.save()
       const poly = scannedPolygon(w, h, d, front)
-      ctx.beginPath()
-      ctx.moveTo(poly[0].x, poly[0].y)
-      for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y)
-      ctx.closePath()
+      tracePoly(ctx, poly)
       ctx.clip()
-      ctx.drawImage(img, 0, 0, w, h)
-      // trailing glow (6px, 30% → 0) just behind the front
+      draw()
+      // Trailing glow just behind the front (DESIGN §5: ≈ 6px, 30 % → 0). Screen-blended so it reads
+      // as light on dark terrain at 1× DPR, not as a tint lost in the antialiasing of the line.
       const g = ctx.createLinearGradient(d.x * front, d.y * front, d.x * (front - GLOW_PX), d.y * (front - GLOW_PX))
-      g.addColorStop(0, 'rgba(255,106,26,0.30)')
+      g.addColorStop(0, 'rgba(255,106,26,0.42)')
+      g.addColorStop(0.35, 'rgba(255,106,26,0.18)')
       g.addColorStop(1, 'rgba(255,106,26,0)')
-      const band = scannedPolygon(w, h, d, front, GLOW_PX)
-      ctx.fillStyle = g
-      ctx.beginPath()
-      ctx.moveTo(band[0].x, band[0].y)
-      for (let i = 1; i < band.length; i++) ctx.lineTo(band[i].x, band[i].y)
-      ctx.closePath()
-      ctx.fill()
+      ctx.globalCompositeOperation = 'screen'
+      fillPoly(ctx, scannedPolygon(w, h, d, front, GLOW_PX), g)
       ctx.restore()
-      // 1px scan line
+
+      // Scan front: a signal line with a 1px bone core (a hot read head, not a crack in a JPEG).
       const [l0, l1] = frontLine(w, h, d, front)
+      ctx.lineWidth = 2
       ctx.strokeStyle = palette.signal
+      ctx.beginPath()
+      ctx.moveTo(l0.x, l0.y)
+      ctx.lineTo(l1.x, l1.y)
+      ctx.stroke()
       ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(236,232,224,0.6)'
       ctx.beginPath()
       ctx.moveTo(l0.x, l0.y)
       ctx.lineTo(l1.x, l1.y)
@@ -117,41 +198,118 @@ export function PushbroomReveal({ src, headingDeg, lines, alt, overlay, caption,
     [headingDeg],
   )
 
-  // Load → reveal.
+  // Size from a ResizeObserver only: its first callback arrives after layout, so mounting never forces
+  // a synchronous layout of the panel inside React's commit (that read alone cost 110 ms at 4× CPU on
+  // the results handoff). paint() waits for a size; the observer repaints at the current progress.
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    if (typeof ResizeObserver === 'undefined') {
+      sizeRef.current = { w: box.clientWidth, h: box.clientHeight }
+      return
+    }
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[entries.length - 1].contentRect
+      sizeRef.current = { w: r.width, h: r.height }
+      paint(progressRef.current)
+    })
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [paint])
+
+  // Phones: the frame must be on screen before the scan runs: essentially all of it, so the sheet has
+  // finished rising past the footer (the body clips it) and no line is read under the fold.
+  useEffect(() => {
+    const box = boxRef.current
+    if (!gateOnVisible || !box || typeof IntersectionObserver === 'undefined') {
+      visibleRef.current = 1
+      return
+    }
+    visibleRef.current = 0
+    const io = new IntersectionObserver((e) => (visibleRef.current = e[e.length - 1].intersectionRatio), { threshold: [0, VISIBLE_PARTIAL, 0.75, VISIBLE_TO_SCAN, 1] })
+    io.observe(box)
+    return () => io.disconnect()
+  }, [gateOnVisible])
+
+  // Load → wait for the moment → reveal.
   useEffect(() => {
     let alive = true
     let raf = 0
+    let poll = 0
     const ctl = new AbortController()
+    const mountedAt = performance.now()
     imgRef.current = null
     progressRef.current = 0
-    setLine(0)
+    setCentreLocked(false)
     setSlow(false)
     setP('loading')
+    if (lineRef.current) lineRef.current.textContent = lineLabel(0)
     const slowTimer = window.setTimeout(() => alive && setSlow(true), 4500)
+
+    const finish = () => {
+      progressRef.current = 1
+      paint(1)
+      if (lineRef.current) lineRef.current.textContent = lineLabel(lines)
+      setCentreLocked(true)
+      setP('done')
+    }
+    const run = () => {
+      if (!alive) return
+      useApp.getState().holdMotion(DUR.pushbroom + 200)
+      if (reduced) {
+        finish()
+        return
+      }
+      setP('revealing')
+      // The centre lock is a render only when an overlay needs it (≤ 3 renders per reveal otherwise).
+      let locked = !hasOverlay
+      const start = performance.now()
+      const tick = (now: number) => {
+        if (!alive) return
+        const p = revealProgress(now - start, REVEAL_MS)
+        progressRef.current = p
+        paint(p)
+        if (lineRef.current) lineRef.current.textContent = lineLabel(Math.round(p * lines))
+        if (!locked && p >= 0.5) {
+          locked = true
+          setCentreLocked(true)
+        }
+        if (p < 1) raf = requestAnimationFrame(tick)
+        else setP('done')
+      }
+      raf = requestAnimationFrame(tick)
+    }
+
+    /** When the camera lets the scan start (performance.now() ms), or undefined while it is still flying. */
+    const cameraReadyAt = (now: number): number | undefined => {
+      const f = useApp.getState().cameraFlight
+      if (startAt === 'hero') return Math.max(mountedAt + HERO_MIN_MS, f.flying ? f.eta - 200 : 0)
+      if (now - mountedAt >= CAMERA_CAP_MS) return now
+      if (f.flying) return undefined
+      // A flight that arrived before this mount is the previous one: give a new one a moment to start.
+      if (f.arrivedAt < mountedAt) return now - mountedAt >= FLIGHT_GRACE_MS ? now : undefined
+      return f.arrivedAt + ARRIVAL_LEAD_MS
+    }
+
+    const schedule = () => {
+      if (!alive) return
+      const now = performance.now()
+      if (startAt === 'now') return run()
+      const at = cameraReadyAt(now)
+      const seen = visibleRef.current
+      if (at !== undefined && now >= at && (seen >= VISIBLE_TO_SCAN || (seen >= VISIBLE_PARTIAL && now >= at + PARTIAL_AFTER_MS))) return run()
+      poll = window.setTimeout(schedule, at !== undefined && at > now ? Math.min(100, at - now) : 50)
+    }
+
     preloadImage(src, { signal: ctl.signal })
       .then((img) => {
         if (!alive) return
         window.clearTimeout(slowTimer)
         imgRef.current = img
-        if (reduced) {
-          progressRef.current = 1
-          paint(1)
-          setLine(lines)
-          setP('done')
-          return
-        }
-        setP('revealing')
-        const start = performance.now()
-        const tick = (now: number) => {
-          if (!alive) return
-          const p = revealProgress(now - start, REVEAL_MS)
-          progressRef.current = p
-          paint(p)
-          setLine(Math.round(p * lines))
-          if (p < 1) raf = requestAnimationFrame(tick)
-          else setP('done')
-        }
-        raf = requestAnimationFrame(tick)
+        if (instant) return finish()
+        paint(0)
+        setP('waiting')
+        schedule()
       })
       .catch(() => {
         if (!alive) return
@@ -162,28 +320,21 @@ export function PushbroomReveal({ src, headingDeg, lines, alt, overlay, caption,
       alive = false
       ctl.abort()
       cancelAnimationFrame(raf)
+      window.clearTimeout(poll)
       window.clearTimeout(slowTimer)
     }
-    // `attempt` re-runs the load on retry.
+    // `attempt` re-runs the load on retry. `instant`/`startAt` are read at start only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, lines, reduced, paint, setP, attempt])
 
-  // Repaint on resize (keeps the canvas crisp; holds the current progress).
-  useLayoutEffect(() => {
-    const box = boxRef.current
-    if (!box || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => paint(progressRef.current))
-    ro.observe(box)
-    return () => ro.disconnect()
-  }, [paint])
-
-  const centreLocked = phase === 'done' || (phase === 'revealing' && line >= lines / 2)
+  const shown = phase === 'revealing' || phase === 'done'
 
   return (
     <figure className={cx(s.figure, className)}>
-      <div ref={boxRef} className={cx(s.frame, phase === 'loading' && s.loading, phase === 'error' && s.errored)}>
+      <div ref={boxRef} className={cx(s.frame, phase !== 'done' && s.loading, phase === 'error' && s.errored, frameClassName)}>
         <canvas
           ref={canvasRef}
-          className={cx(s.canvas, reduced && s.fade, (phase === 'revealing' || phase === 'done') && s.on)}
+          className={cx(s.canvas, reduced || fade ? s.fade : s.cut, (shown || phase === 'waiting') && s.on, dim === 'cloud' && s.dimCloud, dim === 'overcast' && s.dim)}
           role="img"
           aria-label={alt}
         />
@@ -205,18 +356,26 @@ export function PushbroomReveal({ src, headingDeg, lines, alt, overlay, caption,
           </div>
         ) : null}
         {overlay ? <div className={s.overlay}>{overlay({ centreLocked, phase })}</div> : null}
-        {/* The counter rides on the image while it scans (the caption below may be off-screen). */}
+        {/* The one counter: it rides on the image while it scans. */}
         <span className={cx(s.scanChip, phase === 'revealing' && s.scanChipOn)} aria-hidden>
-          <LiveDot className={s.dot} />
-          Line <b>{lineLabel(line)}</b> → {lineLabel(lines)}
+          {phase === 'revealing' ? <LiveDot className={s.dot} /> : null}
+          Line <b ref={lineRef}>{lineLabel(0)}</b> → {lineLabel(lines)}
         </span>
       </div>
-      <figcaption className={s.caption}>
-        <span className={s.counter} aria-hidden>
-          Line <b>{lineLabel(phase === 'loading' || phase === 'error' ? 0 : line)}</b> → {lineLabel(lines)}
-        </span>
-        {caption ? <span className={s.captionRest}>{caption}</span> : null}
-      </figcaption>
+      {caption ? <figcaption className={s.caption}>{caption}</figcaption> : null}
     </figure>
   )
+}
+
+function tracePoly(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]) {
+  ctx.beginPath()
+  ctx.moveTo(poly[0].x, poly[0].y)
+  for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y)
+  ctx.closePath()
+}
+
+function fillPoly(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[], fill: string | CanvasGradient) {
+  tracePoly(ctx, poly)
+  ctx.fillStyle = fill
+  ctx.fill()
 }

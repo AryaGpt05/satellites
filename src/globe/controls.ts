@@ -148,6 +148,8 @@ export function radiansPerPixel(pose: Pose, fovDeg: number, heightPx: number): n
 /**
  * Consume the accumulated input and advance the pose by dt (s). Returns true if the user moved the camera.
  * `northUp` keeps the heading pinned to north (overview), with the look-at latitude clamped off the poles.
+ * `minRange` is the near zoom limit (the texture-resolution floor, framing.minRangeFor; decision 6). If the
+ * pose is already closer than a newly raised floor, it eases out to it rather than jumping.
  */
 export function applyControls(
   pose: Pose,
@@ -157,7 +159,9 @@ export function applyControls(
   fovDeg: number,
   heightPx: number,
   northUp: boolean,
+  minRange = MIN_RANGE,
 ): boolean {
+  const floor = Math.min(MAX_RANGE, Math.max(MIN_RANGE, minRange))
   let moved = false
   const k = radiansPerPixel(pose, fovDeg, heightPx)
 
@@ -202,7 +206,7 @@ export function applyControls(
   // Zoom: ease the range toward the accumulated target.
   if (input.zoom !== 0) {
     const base = state.zoomTarget ?? Math.log(pose.range)
-    state.zoomTarget = clamp(base + input.zoom, Math.log(MIN_RANGE), Math.log(MAX_RANGE))
+    state.zoomTarget = clamp(base + input.zoom, Math.log(floor), Math.log(MAX_RANGE))
     input.zoom = 0
   }
   if (state.zoomTarget !== null) {
@@ -211,6 +215,8 @@ export function applyControls(
     pose.range = Math.exp(next)
     if (Math.abs(state.zoomTarget - next) < 1e-4) state.zoomTarget = null
     moved = true
+  } else if (pose.range < floor * 0.999) {
+    pose.range += (floor - pose.range) * (1 - Math.exp(-dt / 0.35))
   }
 
   if (northUp) {

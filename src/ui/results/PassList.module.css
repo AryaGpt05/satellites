@@ -2,6 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 28px;
+  /* Rows adapt to the list's own width (phones, the 380 px short-landscape dock, the 400 px dock). */
+  container-type: inline-size;
 }
 .empty {
   margin: 0;
@@ -15,9 +17,10 @@
 }
 .groupHead {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 4px 12px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line-strong);
   font-family: var(--font-mono);
@@ -34,6 +37,10 @@
   gap: 8px;
   color: var(--bone);
 }
+.order {
+  margin-left: -4px;
+  color: var(--bone-3);
+}
 .groupCount {
   color: var(--bone-2);
 }
@@ -42,6 +49,15 @@
 }
 .dim {
   color: var(--bone-3);
+}
+@container (max-width: 370px) {
+  .satCount {
+    display: none;
+  }
+}
+/* The photographs' head carries its order ("· clearest first"): the image count is what matters. */
+.satCountImaged {
+  display: none;
 }
 
 .rows,
@@ -62,18 +78,36 @@
   border-bottom: 1px solid var(--line);
   text-align: left;
   transition: background-color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
 }
-.row:hover {
-  background: var(--ink-2);
+@media (hover: hover) and (pointer: fine) {
+  .row:hover,
+  .subRow:hover {
+    background: var(--ink-2);
+  }
+  .subRow:hover {
+    color: var(--bone);
+  }
+  .moreBtn:hover {
+    color: var(--signal);
+  }
 }
 .row:focus-visible {
   outline-offset: -1px;
+}
+/* Pressed: ink-2 with the signal rule, instantly (touch has no hover). */
+.row:active,
+.subRow:active {
+  background: var(--ink-2);
+  transition-duration: 0ms;
 }
 .selected,
 .selected:hover {
   background: var(--ink-2);
 }
-.selected::before {
+.selected::before,
+.row:active::before,
+.subRow:active::before {
   content: '';
   position: absolute;
   left: -1px;
@@ -103,6 +137,9 @@
   min-width: 0;
 }
 .name {
+  /* The name gives way last: a long operator ("NASA / Roscosmos / ESA / JAXA / CSA") truncates first. */
+  flex: 0 1 auto;
+  min-width: 0;
   font-family: var(--font-sans);
   font-stretch: 85%;
   font-weight: 520;
@@ -115,12 +152,14 @@
   white-space: nowrap;
 }
 .operator {
+  flex: 0 1000 auto;
+  min-width: 0;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9.5px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
-  color: var(--bone-3);
+  color: var(--bone-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -128,12 +167,16 @@
 .tag {
   flex: none;
   height: 18px;
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
+}
+.tagWarn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
 }
 .metaLine {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 10px;
+  font-size: var(--fs-meta, 10px);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -163,6 +206,35 @@
 }
 .thumbOk img {
   opacity: 1;
+}
+/* Mostly cloud: dimmed, hatched and labelled, never a bright unexplained square (decision #2). */
+.thumbClouded img {
+  filter: brightness(0.55) contrast(1.3) saturate(0.5);
+}
+.hatch {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(135deg, rgb(236 232 224 / 0.14) 0 1px, transparent 1px 5px);
+  pointer-events: none;
+}
+.cloudChip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 3px 1px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink-0) 82%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: var(--track-label);
+  line-height: 1.2;
+  text-align: center;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--warn);
+  white-space: nowrap;
 }
 /* centre tick: the place, a 1px signal cross */
 .thumbMark {
@@ -202,10 +274,10 @@
   color: var(--bone);
 }
 .countUnit {
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
-  color: var(--bone-3);
+  color: var(--bone-2);
 }
 .chev {
   flex: none;
@@ -230,7 +302,7 @@
   padding: 7px 8px 7px 32px;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 10px;
+  font-size: var(--fs-meta, 10px);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -240,10 +312,13 @@
   transition:
     background-color var(--d-hover) var(--ease-out),
     color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
 }
-.subRow:hover {
-  background: var(--ink-2);
-  color: var(--bone);
+@media (pointer: coarse) {
+  .subRow {
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
 }
 .subRow > span:first-child {
   overflow: hidden;
@@ -273,16 +348,38 @@
   color: var(--bone-2);
   transition: color var(--d-hover) var(--ease-out);
 }
-.moreBtn:hover {
-  color: var(--signal);
+@media (pointer: coarse) {
+  .moreBtn {
+    min-height: 44px;
+  }
 }
 .down {
   transform: rotate(90deg);
 }
 
-/* Narrow phones: the word "Latest" is what gives way, so the relative time ("10 h ago") still fits. */
-@media (max-width: 420px) {
-  .latestWord {
+/*
+ * Narrow lists (phones, narrow docks): the two meta lines must fit, never end in an ellipsis. What gives way: the
+ * words "Latest" / "Closest", the zone abbreviation (the timeline and the footnote name it), and on a
+ * photograph's row the ground distance (its cloud cover is what it is judged by). Tracking tightens.
+ */
+@container (max-width: 370px) {
+  .giveWay,
+  .zone,
+  .km {
     display: none;
+  }
+  .metaLine,
+  .subRow {
+    letter-spacing: 0.03em;
+  }
+}
+@container (max-width: 340px) {
+  .thumb {
+    width: 48px;
+    height: 48px;
+  }
+  .metaLine,
+  .subRow {
+    letter-spacing: 0;
   }
 }

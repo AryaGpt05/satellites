@@ -11,7 +11,10 @@
   /* bone (warm off-white) */
   --bone: #ece8e0;
   --bone-2: rgb(236 232 224 / 0.64);
-  --bone-3: rgb(236 232 224 / 0.4);
+  /* tertiary text and labels: .52 keeps mono labels at AA (4.8:1 on ink-0, DESIGN §9) */
+  --bone-3: rgb(236 232 224 / 0.52);
+  /* non-text marks only (ticks, inactive glyph strokes): the old .40 */
+  --bone-3-mark: rgb(236 232 224 / 0.4);
   --bone-4: rgb(236 232 224 / 0.18);
   --line: rgb(236 232 224 / 0.1);
   --line-strong: rgb(236 232 224 / 0.22);
@@ -36,8 +39,14 @@
   --fs-h3: 20px;
   --fs-body: 15px;
   --fs-small: 13px;
-  --fs-label: 10.5px;
-  --fs-readout: 12px;
+  /* type scale (DESIGN §3): use only these; no raw font-size px in components */
+  --fs-micro: 9.5px; /* in-image chips and tags only, never below bone-2 */
+  --fs-meta: 10px; /* secondary mono meta */
+  --fs-label: 10.5px; /* mono labels */
+  --fs-readout: 12px; /* mono readouts */
+  --fs-readout-l: 21px; /* large readouts */
+  --fs-panel-h: 34px; /* panel headline (condensed) */
+  --fs-panel-sub: 22px; /* panel sub-headline */
 
   --track-label: 0.08em;
   --track-display: -0.02em;
@@ -73,12 +82,18 @@
   --z-toast: 60;
 }
 
+/* Phone spacing and the phone type floor stay on width (not the stacked query): a portrait tablet keeps
+   desktop sizes. Mono never goes below 10.5px on a phone, labels 11px. */
 @media (max-width: 760px) {
   :root {
     --bezel-inset: 10px;
     --margin: 18px;
     --gutter: 16px;
     --fs-body: 15px;
+    --fs-micro: 10.5px;
+    --fs-meta: 11px;
+    --fs-label: 11px;
+    --fs-readout: 12.5px;
   }
 }
 

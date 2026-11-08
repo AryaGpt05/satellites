@@ -1,30 +1,90 @@
 /**
- * Camera framing: store.camera intents → target poses, for a given viewport.
+ * Camera framing: store.camera intents → target poses, for a given viewport AND the UI that covers it.
  *
- * Composition (DESIGN.md §4, §6): the globe is the hero, panels never cover more than 40% of the viewport.
- *  - overview: whole Earth, offset right of centre on desktop so the hero copy breathes on the left; centred
- *    and smaller on phones.
- *  - place / pass / satellite: the subject sits in the space the results panel leaves free — left of the
- *    right-docked panel on desktop, above the bottom sheet on phones.
- * The offsets are lens shifts (NDC), so perspective and the orbit pivot are unchanged.
+ * The UI measures what it covers and publishes it as store.uiInsets (CSS px per edge): the HUD the top, the
+ * landing column the left (desktop) or bottom (stacked), the results panel / sheet / timeline the right and
+ * bottom. Every pose frames its subject inside the free rect those insets leave:
+ *
+ *   F = { x0: left, y0: top, x1: W − right, y1: H − bottom }
+ *
+ * Offsets are lens shifts (NDC), so perspective and the orbit pivot are unchanged. The subject lands at
+ * screen ((x0 + x1) / 2, (y0 + y1) / 2), i.e. shiftX = (x0 + x1) / W − 1 and shiftY = 1 − (y0 + y1) / H.
+ *
+ * Composition (DESIGN.md §4, §6; product decisions 3, 4, 6):
+ *  - overview, stacked: the whole globe AND its LEO point halo fit the band above the landing panel with ≥ 12 px
+ *    to spare; desktop: the globe sits right of centre and the halo never reaches the text column.
+ *  - place / pass / satellite: the subject is centred in F; regional ranges are measured against F.
+ *  - the pass view is north-up (oblique ~35°), never south-up by default.
+ *  - no pose (and no user zoom) goes closer than the loaded day texture can resolve (minRangeFor).
  */
+import { PerspectiveCamera, Vector3 } from 'three'
 import { clamp, DEG, EARTH_RADIUS_KM, RAD } from '@/lib/geo'
+import { isStacked } from '@/lib/layout'
+import type { UiInsets } from '@/state/store'
 import type { Pass } from '@/types'
-import type { PoseSpec } from './cameraMath'
+import { applyPoseToCamera, createPose, makePose, type PoseSpec } from './cameraMath'
 
 export interface Viewport {
   width: number
   height: number
 }
 
-/** Below this CSS width the layout is the phone layout (matches tokens.css' 760px breakpoint). */
-export const PHONE_MAX_W = 760
-/** Right-docked results panel: --panel-w + --margin (tokens.css). */
-const PANEL_W = 432 + 32
-/** Fraction of the viewport height covered by the phone bottom sheet in results. */
-const SHEET_FRACTION = 0.46
+export type Insets = UiInsets
+export const NO_INSETS: Readonly<Insets> = Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 })
 
-export const isPhone = (vp: Viewport) => vp.width <= PHONE_MAX_W
+/** Stacked (phone-like) layout: the shared predicate from src/lib/layout.ts. */
+export const isPhone = (vp: Viewport) => isStacked(vp.width, vp.height)
+
+/** World radius (Earth radii) that the overview keeps inside the frame: the dense LEO / Starlink shells. */
+export const HALO_R = 1.18
+/** Gap kept between the halo and the panel below it on stacked layouts (decision 4). */
+export const HALO_GAP_PX = 12
+
+// ───────────────────────────── free rect ─────────────────────────────
+
+export interface FreeRect {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/**
+ * The part of the viewport the UI leaves free. Never inverted; a fully covered axis collapses to a 1 px line.
+ * Writes into `out` when given (allocation-free for per-frame callers).
+ */
+export function freeRect(vp: Viewport, insets: Insets = NO_INSETS, out?: FreeRect): FreeRect {
+  const W = Math.max(1, vp.width)
+  const H = Math.max(1, vp.height)
+  let x0 = clamp(insets.left, 0, W)
+  let x1 = clamp(W - insets.right, 0, W)
+  let y0 = clamp(insets.top, 0, H)
+  let y1 = clamp(H - insets.bottom, 0, H)
+  if (x1 - x0 < 1) {
+    const m = clamp((x0 + x1) / 2, 0.5, W - 0.5)
+    x0 = m - 0.5
+    x1 = m + 0.5
+  }
+  if (y1 - y0 < 1) {
+    const m = clamp((y0 + y1) / 2, 0.5, H - 0.5)
+    y0 = m - 0.5
+    y1 = m + 0.5
+  }
+  if (!out) return { x0, y0, x1, y1 }
+  out.x0 = x0
+  out.y0 = y0
+  out.x1 = x1
+  out.y1 = y1
+  return out
+}
+
+/** Lens shift that centres a subject in the free rect. */
+export function freeShift(vp: Viewport, insets: Insets = NO_INSETS): { shiftX: number; shiftY: number } {
+  const f = freeRect(vp, insets)
+  return { shiftX: (f.x0 + f.x1) / Math.max(1, vp.width) - 1, shiftY: 1 - (f.y0 + f.y1) / Math.max(1, vp.height) }
+}
+
+// ───────────────────────────── lens ─────────────────────────────
 
 /**
  * Vertical field of view. 30° on landscape screens; on portrait screens the horizontal field is held at ≥ 22°
@@ -36,6 +96,9 @@ export function fovFor(vp: Viewport): number {
   const v = 2 * Math.atan(Math.tan(minH / 2) / aspect)
   return Math.max(30 * DEG, v) * RAD
 }
+
+/** CSS px per unit of tan(angle off the optical axis); the same horizontally and vertically for a pinhole. */
+const pxPerTan = (vp: Viewport) => vp.height / 2 / Math.tan((fovFor(vp) * DEG) / 2)
 
 /**
  * Range (look-at point on the surface → camera) at which the whole Earth spans `fraction` of the limiting
@@ -50,51 +113,182 @@ export function rangeForEarthFraction(vp: Viewport, fraction: number): number {
   return 1 / Math.sin(rho) - 1
 }
 
-/** Lens shift that centres a subject in the area the results UI leaves free. */
-export function resultsShift(vp: Viewport): { shiftX: number; shiftY: number } {
-  if (isPhone(vp)) return { shiftX: 0, shiftY: SHEET_FRACTION * 0.92 }
-  const free = Math.max(vp.width * 0.6, vp.width - PANEL_W)
-  return { shiftX: -(vp.width - free) / vp.width, shiftY: 0 }
+/** Apparent radius (CSS px) of a centred sphere of radius `r` seen from distance `dist` (exact for a pinhole). */
+export function spherePx(vp: Viewport, r: number, dist: number): number {
+  const rho = Math.asin(Math.min(1, r / Math.max(dist, r * 1.000001)))
+  return Math.tan(rho) * pxPerTan(vp)
 }
 
-export function overviewPose(vp: Viewport, lat: number, lon: number): PoseSpec {
-  const phone = isPhone(vp)
-  return {
-    lat,
-    lon,
-    headingDeg: 0,
-    range: rangeForEarthFraction(vp, phone ? 0.82 : 0.74),
-    tilt: 0,
-    shiftX: phone ? 0 : 0.3,
-    shiftY: phone ? 0.06 : 0,
-  }
-}
-
-/** Width of ground (km) visible across the free area, for regional views. */
-function rangeForGroundKm(vp: Viewport, km: number): number {
-  const fov = fovFor(vp) * DEG
-  const aspect = vp.width / Math.max(1, vp.height)
-  // Visible half-width at range r on a flat approximation: r · tan(fov/2) · min(aspect, 1).
-  return km / 2 / EARTH_RADIUS_KM / (Math.tan(fov / 2) * Math.min(aspect, 1.25))
-}
-
-export function placePose(vp: Viewport, lat: number, lon: number): PoseSpec {
-  return {
-    lat,
-    lon,
-    headingDeg: 0,
-    range: clamp(rangeForGroundKm(vp, 4200), 0.45, 1.6),
-    tilt: 12 * DEG,
-    ...resultsShift(vp),
-  }
+/** Camera distance (from Earth's centre) at which a sphere of radius `r` appears `radiusPx` CSS px in radius. */
+export function distanceForSpherePx(vp: Viewport, r: number, radiusPx: number): number {
+  const t = Math.max(1e-4, radiusPx / pxPerTan(vp))
+  return r / Math.sin(Math.atan(t))
 }
 
 /**
- * Oblique view above the place, ~35° tilt, facing along the ground-track heading, so the satellite runs
- * away from the viewer across the place and on toward the horizon. For pointable imagers whose track is
- * off to one side, the look-at point moves a third of the way toward the track so both stay in frame.
+ * Range at which `km` of ground spans the free rect. The span is measured across F's limiting dimension, with
+ * wide rects capped at 1.25 × their height, so a short free band (a raised sheet, a timeline) pulls the camera
+ * back instead of cropping the region. Flat approximation at the look-at point.
  */
-export function passPose(vp: Viewport, pass: Pass, place: { lat: number; lon: number }): PoseSpec {
+export function rangeForGroundKm(vp: Viewport, f: FreeRect, km: number): number {
+  const spanPx = Math.max(24, Math.min(f.x1 - f.x0, 1.25 * (f.y1 - f.y0)))
+  return (km / EARTH_RADIUS_KM) * (pxPerTan(vp) / spanPx)
+}
+
+// ───────────────────────────── texture-resolution floor (decision 6) ─────────────────────────────
+
+/** Width in texels of the equirectangular day map at each level. */
+export const TEXTURE_WIDTH = { '1k': 1024, '2k': 2048, '4k': 4096, '8k': 8192 } as const
+export type TextureLevel = keyof typeof TEXTURE_WIDTH
+
+/** Ground km per texel of the day map at the equator (1k 39 km, 2k 19.6, 4k 9.8, 8k 4.9). */
+export const kmPerTexel = (level: TextureLevel) => 40075 / TEXTURE_WIDTH[level]
+
+const LEVELS: TextureLevel[] = ['1k', '2k', '4k', '8k']
+/** The coarser of two levels. */
+export const coarserLevel = (a: TextureLevel, b: TextureLevel): TextureLevel => (LEVELS.indexOf(a) <= LEVELS.indexOf(b) ? a : b)
+
+/** At most this many CSS px per texel at the look-at point: closer than that the surface reads as a blur. */
+export const MAX_PX_PER_TEXEL = 2.5
+
+/**
+ * The closest range (look-at on the surface → camera) at which the day map still has a texel for every
+ * MAX_PX_PER_TEXEL CSS px. Monotonic: a finer level always allows a closer camera.
+ */
+export function minRangeFor(vp: Viewport, level: TextureLevel): number {
+  const kmPerPx = kmPerTexel(level) / MAX_PX_PER_TEXEL
+  return (kmPerPx / EARTH_RADIUS_KM) * pxPerTan(vp)
+}
+
+// ───────────────────────────── poses ─────────────────────────────
+
+/**
+ * Whole Earth, north-up.
+ *  - Stacked: the halo (HALO_R) spans min(W − 56, band − 24) and is centred in the free band, so the globe and
+ *    its point cloud sit above the landing panel with ≥ 12 px to spare (decision 4).
+ *  - Desktop: 74% of the height, right of centre (shiftX 0.3) so the hero copy breathes; pushed further right
+ *    (and if it must, made smaller) so the halo's left edge clears insets.left (the text column), while the disc
+ *    itself stays OVERVIEW_RIGHT_MARGIN inside whatever covers the right edge (the halo may bleed past the bezel).
+ */
+/** Desktop overview: the disc's minimum distance from the right edge (or whatever covers it), CSS px. */
+export const OVERVIEW_RIGHT_MARGIN = 40
+
+export function overviewPose(vp: Viewport, insets: Insets, lat: number, lon: number): PoseSpec {
+  const W = Math.max(1, vp.width)
+  const H = Math.max(1, vp.height)
+  if (isPhone(vp)) {
+    const f = freeRect(vp, insets)
+    const band = f.y1 - f.y0
+    const haloD = Math.max(96, Math.min(W - 56, band - 2 * HALO_GAP_PX))
+    const dist = distanceForSpherePx(vp, HALO_R, haloD / 2)
+    const cy = (f.y0 + f.y1) / 2
+    return { lat, lon, headingDeg: 0, range: dist - 1, tilt: 0, shiftX: 0, shiftY: 1 - (2 * cy) / H }
+  }
+
+  let fraction = 0.74
+  let range = rangeForEarthFraction(vp, fraction)
+  let er = spherePx(vp, 1, 1 + range)
+  let hr = spherePx(vp, HALO_R, 1 + range)
+  let cx = 0.65 * W
+  if (insets.left > 0 || insets.right > 0) {
+    const lo = insets.left
+    const hi = W - insets.right - OVERVIEW_RIGHT_MARGIN
+    // Shrink until halo-left-of-centre + disc-right-of-centre fits between the column and the right edge.
+    for (let i = 0; i < 4 && hr + er > hi - lo && hi - lo > 0; i++) {
+      fraction *= (hi - lo) / (hr + er)
+      range = rangeForEarthFraction(vp, fraction)
+      er = spherePx(vp, 1, 1 + range)
+      hr = spherePx(vp, HALO_R, 1 + range)
+    }
+    cx = clamp(cx, lo + hr, Math.max(lo + hr, hi - er))
+  }
+  return { lat, lon, headingDeg: 0, range, tilt: 0, shiftX: (2 * cx) / W - 1, shiftY: 0 }
+}
+
+// ───────────────────────────── limb vs. the TR clock ─────────────────────────────
+
+/**
+ * The HUD's top-right readout block (UTC clock + scene time) on desktop, CSS px, grown by `margin` so the limb
+ * keeps a little air around the text.
+ */
+export function trReadoutBox(vp: Viewport, margin = 0) {
+  return { x0: vp.width - 320 - margin, x1: vp.width - 16 + margin, y0: 16 - margin, y1: 80 + margin }
+}
+
+const _cam = new PerspectiveCamera()
+const _pose = createPose()
+const _c = new Vector3()
+const _u = new Vector3()
+const _w = new Vector3()
+const _p = new Vector3()
+
+/**
+ * True when the Earth's limb (the bright atmosphere rim), as seen from the camera for `spec`, crosses the box.
+ * Samples the silhouette circle and projects it through the real camera (lens shift included).
+ */
+export function limbCrossesBox(vp: Viewport, spec: PoseSpec, box: { x0: number; x1: number; y0: number; y1: number }, n = 240): boolean {
+  applyPoseToCamera(makePose(spec, _pose), _cam, vp, fovFor(vp))
+  const d = _cam.position.length()
+  _c.copy(_cam.position).normalize()
+  const rad = Math.sqrt(Math.max(0, 1 - 1 / (d * d)))
+  _u.set(0, 1, 0).cross(_c)
+  if (_u.lengthSq() < 1e-9) _u.set(1, 0, 0).cross(_c)
+  _u.normalize()
+  _w.copy(_c).cross(_u)
+  _c.multiplyScalar(1 / d)
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 2 * Math.PI
+    _p.copy(_c).addScaledVector(_u, rad * Math.cos(a)).addScaledVector(_w, rad * Math.sin(a)).project(_cam)
+    if (_p.z <= -1 || _p.z >= 1) continue
+    const x = ((_p.x + 1) / 2) * vp.width
+    const y = ((1 - _p.y) / 2) * vp.height
+    if (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1) return true
+  }
+  return false
+}
+
+// ───────────────────────────── place ─────────────────────────────
+
+/** Ground span of the regional place view (km across the free rect). */
+export const PLACE_SPAN_KM = 4200
+const PLACE_RANGE = { min: 0.45, max: 1.6, clearMax: 2.1 }
+const PLACE_TILT = { stacked: 12 * DEG, desktop: 8 * DEG }
+
+/**
+ * Regional view above the place, north-up, slightly oblique. `minRange` is the texture-resolution floor.
+ * On desktop the bright limb must stay clear of the TR clock (V12, G14): with the place centred left of the
+ * dock, the limb crosses the clock for ranges between ~0.8 and ~1.4, and closer than that is below the 4k
+ * texture floor, so the range steps out until the limb passes left of / below the readout block.
+ */
+export function placePose(vp: Viewport, insets: Insets, lat: number, lon: number, minRange = 0): PoseSpec {
+  const stacked = isPhone(vp)
+  const spec: PoseSpec = {
+    lat,
+    lon,
+    headingDeg: 0,
+    range: Math.max(clamp(rangeForGroundKm(vp, freeRect(vp, insets), PLACE_SPAN_KM), PLACE_RANGE.min, PLACE_RANGE.max), minRange),
+    tilt: stacked ? PLACE_TILT.stacked : PLACE_TILT.desktop,
+    ...freeShift(vp, insets),
+  }
+  if (!stacked) {
+    const box = trReadoutBox(vp, 8)
+    const r0 = spec.range
+    while (spec.range < PLACE_RANGE.clearMax && limbCrossesBox(vp, spec, box)) spec.range += 0.025
+    if (spec.range >= PLACE_RANGE.clearMax) spec.range = r0 // no clear range: keep the regional framing
+  }
+  return spec
+}
+
+/** The pass view's tilt (decision 3: oblique ~35°, north-up). */
+export const PASS_TILT = 35 * DEG
+
+/**
+ * Oblique view above the place, ~35° tilt, NORTH-UP (decision 3): the camera sits south of the place looking
+ * north, so maps read the way people know them and the (mostly north–south) ground track runs up the screen.
+ * For pointable imagers whose track is off to one side, the look-at point moves a third of the way toward the
+ * track so both stay in frame.
+ */
+export function passPose(vp: Viewport, insets: Insets, pass: Pass, place: { lat: number; lon: number }, minRange = 0): PoseSpec {
   const closest = pass.track.reduce(
     (best, p) => (Math.abs(p.t - pass.tClosest) < Math.abs(best.t - pass.tClosest) ? p : best),
     pass.track[0] ?? { t: pass.tClosest, lat: place.lat, lon: place.lon, altKm: pass.altitudeKm },
@@ -108,16 +302,17 @@ export function passPose(vp: Viewport, pass: Pass, place: { lat: number; lon: nu
   return {
     lat,
     lon,
-    headingDeg: pass.headingDeg,
-    range: clamp(rangeForGroundKm(vp, spanKm), 0.55, 1.9),
-    tilt: 35 * DEG,
-    ...resultsShift(vp),
+    headingDeg: 0,
+    range: Math.max(clamp(rangeForGroundKm(vp, freeRect(vp, insets), spanKm), 0.55, 1.9), minRange),
+    tilt: PASS_TILT,
+    ...freeShift(vp, insets),
   }
 }
 
 /** Chase view: behind and above the satellite, looking along its motion. */
 export function satellitePose(
   vp: Viewport,
+  insets: Insets,
   sat: { lat: number; lon: number; altKm: number },
   headingDeg: number,
 ): PoseSpec {
@@ -128,10 +323,10 @@ export function satellitePose(
     headingDeg,
     range: isPhone(vp) ? 0.42 : 0.32,
     tilt: 58 * DEG,
-    ...resultsShift(vp),
+    ...freeShift(vp, insets),
   }
 }
 
-/** User zoom limits (range from the look-at point). */
+/** Absolute user zoom limits (range from the look-at point). The effective near limit is minRangeFor(level). */
 export const MIN_RANGE = 0.05
 export const MAX_RANGE = 12

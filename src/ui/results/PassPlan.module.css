@@ -64,7 +64,7 @@
   background: color-mix(in srgb, var(--ink-0) 78%, transparent);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -100,7 +100,7 @@
 .scaleText {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;

@@ -5,7 +5,7 @@
 import { sunElevationDeg } from '@/lib/geo'
 import type { Pass } from '@/types'
 import { VERDICTS, type Verdict } from './meta'
-import { fmtLocalDay, localDateKey, localParts } from './time'
+import { partsAtOffset, windowOffset, type LocalParts } from './time'
 
 export const SUN_SAMPLE_MS = 10 * 60_000
 
@@ -38,30 +38,33 @@ export interface DayMark {
 
 /**
  * Local midnights inside (t0, t1], found by stepping 15 minutes (every real UTC offset is a multiple
- * of 15 min, so the step lands exactly on midnight, DST transitions included).
+ * of 15 min, so the step lands exactly on midnight, DST transitions included). The zone's offset is
+ * resolved once for the window (windowOffset), so the ~670 steps cost no Intl work.
  */
 export function dayBoundaries(t0: number, t1: number, timeZone: string): DayMark[] {
   const STEP = 15 * 60_000
+  const offset = windowOffset(t0, t1, timeZone)
+  const keyOf = (p: LocalParts) => p.year * 10_000 + p.month * 100 + p.day
   const out: DayMark[] = []
-  let t = Math.ceil(t0 / STEP) * STEP
-  let prev = localDateKey(t0, timeZone)
-  for (; t <= t1; t += STEP) {
-    const key = localDateKey(t, timeZone)
+  let prev = keyOf(partsAtOffset(t0, offset(t0)))
+  for (let t = Math.ceil(t0 / STEP) * STEP; t <= t1; t += STEP) {
+    const p = partsAtOffset(t, offset(t))
+    const key = keyOf(p)
     if (key !== prev) {
-      const p = localParts(t, timeZone)
-      out.push({ t, label: fmtLocalDay(t, timeZone), day: p.day, weekday: p.weekday })
+      out.push({ t, label: `${p.weekday} ${p.day} ${p.monthName}`, day: p.day, weekday: p.weekday })
       prev = key
     }
   }
   return out
 }
 
-/** Local hour marks (every `every` hours, excluding midnight) inside [t0, t1]. */
+/** Local clock hours that are multiples of `every` (not midnight), on the 15-minute grid. */
 export function hourMarks(t0: number, t1: number, timeZone: string, every = 6): { t: number; hour: number }[] {
   const STEP = 15 * 60_000
+  const offset = windowOffset(t0, t1, timeZone)
   const out: { t: number; hour: number }[] = []
   for (let t = Math.ceil(t0 / STEP) * STEP; t <= t1; t += STEP) {
-    const p = localParts(t, timeZone)
+    const p = partsAtOffset(t, offset(t))
     if (p.minute === 0 && p.hour !== 0 && p.hour % every === 0) out.push({ t, hour: p.hour })
   }
   return out

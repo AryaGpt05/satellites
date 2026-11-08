@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import namesRaw from '../../public/data/catalog-names.json?raw'
 import { PROFILES, displayNameFor, noradForGibsCollection, noradForPlatform, resolveProfile } from './profiles'
-import { featuredSats, getSatInfo, ingestCatalog, satrecFor } from './catalog'
+import { compactCatalog, featuredSats, getRow, getSatInfo, ingestCatalog, installCatalog, loadCatalogNames } from './catalog'
+import { satrecFor } from './sgp4'
+import { buildElementBuffer } from './elements'
 import { propagate, groundTrack } from './propagate'
 import { catalogFile, loadTestCatalog } from './testing'
 import type { CatalogRow } from '@/types'
@@ -24,6 +27,62 @@ describe('catalog', () => {
     const c = ingestCatalog({ fetchedAt: '2026-11-08T00:00:00Z', source: 'test', count: 3, rows: [good, good, bad] })
     expect(c.sats).toHaveLength(1)
     expect(c.skipped).toBe(2)
+    loadTestCatalog() // restore
+  })
+
+  it('rebuilds identical rows, SatInfo and element buffers from the transferable columns (worker path)', () => {
+    const file = catalogFile()
+    const direct = loadTestCatalog()
+    const ref = buildElementBuffer(direct)
+    const refInfo = new Map([25544, 60989, 43013, 44713, 63000].map((n) => [n, getSatInfo(n)]))
+    // What the elements worker posts: the payload without its source rows.
+    const { rows: _rows, ...wire } = compactCatalog(file)
+    const cat = installCatalog(wire)
+    expect(cat.count).toBe(direct.count)
+    expect(cat.skipped).toBe(direct.skipped)
+    expect(featuredSats(cat).map((s) => s.norad)).toEqual(featuredSats(direct).map((s) => s.norad))
+    for (const [n, info] of refInfo) expect(getSatInfo(n)).toEqual(info)
+    for (const r of file.rows.slice(0, 500)) {
+      const got = getRow(r[0])!
+      expect(got.slice(2)).toEqual(r.slice(2))
+      expect(got[1]).toBe(r[1].trim())
+    }
+    const buf = buildElementBuffer(cat)
+    expect(buf.count).toBe(ref.count)
+    expect(Array.from(buf.norad)).toEqual(Array.from(ref.norad))
+    expect(buf.data).toEqual(ref.data)
+    // Lazy map semantics: lookups don't need the whole catalog materialised; iteration does.
+    expect(cat.byNorad.size).toBe(cat.count)
+    expect(cat.byNorad.has(25544)).toBe(true)
+    expect([...cat.byNorad.keys()]).toHaveLength(cat.count)
+    expect(cat.sats).toHaveLength(cat.count)
+    loadTestCatalog() // restore
+  })
+
+  it('names off-profile objects from catalog-names.json once it loads (compact v2 catalog)', async () => {
+    loadTestCatalog()
+    const starlink = catalogFile().rows.find((r) => r[1] === '' )![0]
+    expect(getSatInfo(starlink)?.displayName).toBe(`NORAD ${starlink}`)
+    const held = getSatInfo(starlink)!
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(namesRaw, { headers: { 'content-type': 'application/json' } })))
+    try {
+      const filled = await loadCatalogNames()
+      expect(filled).toBeGreaterThan(16_000)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(getSatInfo(starlink)!.name).not.toBe('')
+    expect(held.displayName).toBe(getSatInfo(starlink)!.name) // patched in place
+    expect(getRow(starlink)![1]).toBe(held.name)
+    expect(await loadCatalogNames()).toBe(0) // nothing left to fill
+    loadTestCatalog() // restore
+  })
+
+  it('finds objects in an unsorted file too (index falls back from binary search to a map)', () => {
+    const rows = [...catalogFile().rows.slice(0, 300)].reverse()
+    const c = ingestCatalog({ fetchedAt: '2026-11-08T00:00:00Z', source: 'test', count: rows.length, rows })
+    for (const r of rows.slice(0, 50)) expect(c.byNorad.get(r[0])?.norad).toBe(r[0])
+    expect(getSatInfo(-1)).toBeUndefined()
     loadTestCatalog() // restore
   })
 

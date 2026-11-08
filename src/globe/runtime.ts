@@ -6,7 +6,9 @@
  * Ordering is fixed by useFrame priorities (see FRAME below).
  */
 import { createContext, useContext } from 'react'
-import { Vector3 } from 'three'
+import { Vector3, type Texture } from 'three'
+import type { CameraIntent, Phase } from '@/state/store'
+import type { TextureLevel } from './framing'
 import type { QualityTier } from './quality'
 
 /** useFrame priorities. Negative = before R3F's default (0); the post-processing composer renders at 1. */
@@ -26,14 +28,12 @@ export interface Anchor {
   x: number
   y: number
   visible: boolean
-  /** Put the callout box below the point (near the top edge) */
-  below: boolean
   /** Altitude readout, km (satellites) */
   altKm: number | null
 }
 
 export function createAnchor(): Anchor {
-  return { x: 0, y: 0, visible: false, below: false, altKm: null }
+  return { x: 0, y: 0, visible: false, altKm: null }
 }
 
 export interface GlobeRuntime {
@@ -52,6 +52,8 @@ export interface GlobeRuntime {
     uCloudOffset: { value: number }
     /** Device pixel ratio in effect, for pixel-exact strokes */
     uPx: { value: number }
+    /** The cloud map currently bound to the cloud shell (overlays read cloud cover from it); null before load */
+    uCloudMap: { value: Texture | null }
   }
   tier: QualityTier
   reducedMotion: boolean
@@ -60,20 +62,42 @@ export interface GlobeRuntime {
     flying: boolean
     /** performance.now() when the current intent's flight finished (or the cut happened); -Infinity before */
     arrivedAt: number
+    /** The intent kind the camera last arrived at (null while none): lets the texture plan wait for a place view */
+    arrivedKind: CameraIntent['kind'] | null
     /** Monotonic counter, bumped for every new camera intent */
     flightId: number
+    /** Eased progress (0..1) of the running flight; 1 when settled */
+    progress: number
     /** Camera height above the surface, km (for readouts) */
     altitudeKm: number
   }
+  /** performance.now() of the last user input on the canvas (written by CameraDirector) */
+  inputAt: number
+  /** True while the phone idle policy renders every 2nd frame (the DPR monitor ignores those frames) */
+  throttled: boolean
+  /** Resolution of the day map on the GPU right now (drives the zoom floor, decision 6) */
+  textureLevel: TextureLevel
+  /** Resolution of the night map (the floor on the night side follows the coarser of the two) */
+  nightLevel: TextureLevel
+  /** store.phase as of the last frame, and performance.now() when it was entered */
+  phase: Phase
+  phaseEnteredAt: number
+  /**
+   * Sim-time jumps (|Δ| > 5 min in one frame: a pass selected or deselected, a seek): a counter bumped by
+   * <Clock/>, and the sim time just before the jump. The sun glides across the jump; the point cloud dims.
+   */
+  timeJump: { id: number; at: number; fromSimTime: number }
   /** performance.now() of the last "swath crossed the place" event, for the reticle flash */
   flashAt: number
   /** performance.now() of the last reduced-motion camera cut, for the 300 ms fade */
   cutAt: number
   /** NORAD the pass overlay draws itself; the ambient field hides its own point for it (-1 = none) */
   overlayNorad: number
-  /** Screen anchors by id ('place', 'hover', 'selected') and the DOM listeners flushed after the scene */
+  /** Screen anchors by id ('place:<lat,lon>', 'hover', 'sel:<passId>') and the DOM listeners flushed after the scene */
   anchors: Map<string, Anchor>
   anchorListeners: Set<() => void>
+  /** The selected satellite's callout box as last placed (CSS px), so the coordinate label can avoid it */
+  calloutBox: { x0: number; y0: number; x1: number; y1: number; visible: boolean }
 }
 
 export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: number): GlobeRuntime {
@@ -87,15 +111,24 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
       uSunDir: { value: sunDir },
       uCloudOffset: { value: 0 },
       uPx: { value: 1 },
+      uCloudMap: { value: null },
     },
     tier,
     reducedMotion,
-    camera: { flying: false, arrivedAt: -Infinity, flightId: 0, altitudeKm: 0 },
+    camera: { flying: false, arrivedAt: -Infinity, arrivedKind: null, flightId: 0, progress: 1, altitudeKm: 0 },
+    inputAt: -Infinity,
+    throttled: false,
+    textureLevel: '1k',
+    nightLevel: '1k',
+    phase: 'boot',
+    phaseEnteredAt: 0,
+    timeJump: { id: 0, at: -Infinity, fromSimTime: now },
     flashAt: -Infinity,
     cutAt: -Infinity,
     overlayNorad: -1,
     anchors: new Map(),
     anchorListeners: new Set(),
+    calloutBox: { x0: 0, y0: 0, x1: 0, y1: 0, visible: false },
   }
 }
 

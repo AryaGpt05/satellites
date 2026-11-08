@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import { geoImageUrl, isGibsCollection, latestGeoImage } from '@/imagery'
-import type { GeoWatcher, Place } from '@/types'
+import type { GeoWatcher, LatLon, Place } from '@/types'
 import { Glyph, LiveDot, cx, fmtLon } from '@/ui/system'
 import { Paragraph } from './Text'
 import { geoSentence, int } from './lib/copy'
@@ -13,6 +13,37 @@ import { fmtRelative } from './lib/time'
 import s from './GeoWatchers.module.css'
 
 const FRAME = { halfSizeKm: 400, px: 176 }
+
+export type GeoFrameState = { kind: 'loading' } | { kind: 'ok'; url: string; time?: number } | { kind: 'none'; reason: string }
+
+/**
+ * The newest frame NASA GIBS actually has pixels for at the place (probed), else the best static
+ * guess. Shared by the list's small frames and the summary's geostationary best-look fallback.
+ */
+export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSizeKm: number; px: number }): GeoFrameState {
+  const gibs = watcher.gibs && isGibsCollection(watcher.gibs.collection) ? watcher.gibs.collection : undefined
+  const [state, setState] = useState<GeoFrameState>(() => (gibs ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
+  const { halfSizeKm, px } = spec
+  useEffect(() => {
+    if (!gibs) return
+    const ctl = new AbortController()
+    setState({ kind: 'loading' })
+    const opts = { halfSizeKm, px }
+    latestGeoImage(gibs, place, opts, { signal: ctl.signal })
+      .then((r) => {
+        if (ctl.signal.aborted) return
+        // Nothing with pixels in the last two hours (e.g. a visible-only band at night): say so.
+        if (r) setState({ kind: 'ok', url: r.url, time: r.time })
+        else setState({ kind: 'none', reason: 'Dark side: no visible frame' })
+      })
+      .catch(() => {
+        if (ctl.signal.aborted) return
+        setState({ kind: 'ok', url: geoImageUrl(gibs, place, Date.now(), opts) })
+      })
+    return () => ctl.abort()
+  }, [gibs, place, halfSizeKm, px])
+  return state
+}
 
 export function GeoWatchers({ watchers, place, days }: { watchers: GeoWatcher[]; place: Place; days: number }) {
   if (!watchers.length)
@@ -45,30 +76,11 @@ export function GeoWatchers({ watchers, place, days }: { watchers: GeoWatcher[];
   )
 }
 
-type FrameState = { kind: 'loading' } | { kind: 'ok'; url: string; time?: number } | { kind: 'none'; reason: string }
-
 function Frame({ watcher, place }: { watcher: GeoWatcher; place: Place }) {
-  const gibs = watcher.gibs && isGibsCollection(watcher.gibs.collection) ? watcher.gibs.collection : undefined
-  const [state, setState] = useState<FrameState>(() => (gibs ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
+  const probed = useGeoFrame(watcher, place, FRAME)
+  const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
-  useEffect(() => {
-    if (!gibs) return
-    const ctl = new AbortController()
-    setLoaded(false)
-    setState({ kind: 'loading' })
-    latestGeoImage(gibs, place, FRAME, { signal: ctl.signal })
-      .then((r) => {
-        if (ctl.signal.aborted) return
-        // Nothing with pixels in the last two hours (e.g. a visible-only band at night): say so.
-        if (r) setState({ kind: 'ok', url: r.url, time: r.time })
-        else setState({ kind: 'none', reason: 'Dark side: no visible frame' })
-      })
-      .catch(() => {
-        if (ctl.signal.aborted) return
-        setState({ kind: 'ok', url: geoImageUrl(gibs, place, Date.now(), FRAME) })
-      })
-    return () => ctl.abort()
-  }, [gibs, place])
+  const state: GeoFrameState = failed ? { kind: 'none', reason: 'Frame unavailable' } : probed
 
   return (
     <div className={s.frameCol}>
@@ -80,7 +92,7 @@ function Frame({ watcher, place }: { watcher: GeoWatcher; place: Place }) {
             crossOrigin="anonymous"
             decoding="async"
             onLoad={() => setLoaded(true)}
-            onError={() => setState({ kind: 'none', reason: 'Frame unavailable' })}
+            onError={() => setFailed(true)}
           />
         ) : (
           <span className={s.frameNote}>{state.kind === 'loading' ? 'Probing…' : state.reason}</span>

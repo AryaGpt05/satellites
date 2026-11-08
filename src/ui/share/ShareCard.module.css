@@ -1,3 +1,8 @@
+/*
+ * The share card at its native 1200 × 630, scaled into the sheet. Positions come from the shared spec
+ * (api/_lib/cardSpec.ts PANEL) as inline styles; this file only sets type and colour, mirroring the
+ * canvas and satori renderers (mono 350 at 87.5 % width, +0.08em tracking; display 560 at 75 %).
+ */
 .wrap {
   position: relative;
   width: 100%;
@@ -9,21 +14,26 @@
   position: absolute;
   left: 0;
   top: 0;
-  display: flex;
   transform-origin: 0 0;
   background: var(--ink-0);
   color: var(--bone);
 }
 
-/* ── left: the picture ────────────────────────────────────────── */
-.left {
-  position: relative;
-  flex: none;
+/* ── the plate ─────────────────────────────────────────────────── */
+.plate {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 630px;
   height: 630px;
   overflow: hidden;
-  border-right: 1px solid var(--line-strong);
-  background: var(--ink-0);
+  background: var(--ink-1);
+}
+.svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
 }
 .img {
   position: absolute;
@@ -37,6 +47,11 @@
 .imgOn {
   opacity: 1;
 }
+.veil {
+  position: absolute;
+  inset: 0;
+  background: rgb(7 8 10 / 0.45);
+}
 .acq {
   position: absolute;
   inset: 0;
@@ -45,160 +60,153 @@
   justify-content: center;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
+  font-weight: 350;
   font-size: 18px;
-  letter-spacing: var(--track-label);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--bone-3);
-}
-.plan.plan {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  aspect-ratio: auto;
-  height: 100%;
-}
-.reticle {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 100px;
-  height: 100px;
-  transform: translate(-50%, -50%);
-  overflow: visible;
-}
-.reticle circle,
-.reticle path {
-  fill: none;
-  stroke: var(--signal);
-  stroke-width: 1.5;
-}
-.reticleDot {
-  fill: var(--signal);
 }
 .chip {
   position: absolute;
-  top: 18px;
-  left: 18px;
-  padding: 6px 10px;
-  background: color-mix(in srgb, var(--ink-0) 80%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 6px;
+  background: rgb(7 8 10 / 0.78);
+  border: 1px solid rgb(236 232 224 / 0.22);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 15px;
-  letter-spacing: var(--track-label);
+  font-weight: 350;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--bone);
   white-space: nowrap;
+  color: var(--bone);
+}
+/* ├── 1 KM ──┤ */
+.bar {
+  position: relative;
+  height: 10px;
+  border-left: 2px solid var(--bone);
+  border-right: 2px solid var(--bone);
+}
+.bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 2px;
+  background: var(--bone);
 }
 
-/* ── right: the words ─────────────────────────────────────────── */
-.right {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 56px 52px 40px;
+/* ── the panel ─────────────────────────────────────────────────── */
+.divider {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 630px;
+  background: rgb(236 232 224 / 0.22);
 }
-.brand {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.hair {
+  position: absolute;
+  height: 1px;
+  background: rgb(236 232 224 / 0.1);
 }
-.word {
+.vrule {
+  position: absolute;
+  width: 1px;
+  background: rgb(236 232 224 / 0.1);
+}
+.rowBox {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.row,
+.lockup,
+.host,
+.unit {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 16px;
-  letter-spacing: 0.14em;
+  font-weight: 350;
+  font-size: 13px;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+.lockup {
+  font-weight: 500;
+  font-size: 16px;
+  letter-spacing: 0.26em;
   color: var(--bone);
 }
-.tagline {
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--bone-3);
+.host {
+  text-transform: none;
+  letter-spacing: 0.5px;
+  color: rgb(236 232 224 / 0.64);
 }
-.mark {
+.verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.verdict svg {
+  display: block;
+}
+
+.head {
   position: absolute;
-  right: 0;
-  top: -2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
-.headline {
-  margin: auto 0 0;
-  padding-top: 24px;
+.lead {
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 560;
-  line-height: 0.93;
-  letter-spacing: var(--track-display);
   color: var(--bone);
 }
+/* The serif place sits on its own line box with clear space above it: descenders of the condensed
+   line (p, g) never touch its ascenders (share SH2). */
 .place {
+  display: block;
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
-  font-stretch: 100%;
-  font-size: 1.06em;
-  letter-spacing: -0.01em;
+  color: var(--bone);
 }
-.when {
-  margin-top: 26px;
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: 18px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--bone-2);
+.sub {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  color: rgb(236 232 224 / 0.64);
 }
-.readouts {
+
+.cell {
+  position: absolute;
   display: flex;
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid var(--bone-4);
+  align-items: center;
 }
-.readout {
-  flex: 1;
+.value {
+  position: absolute;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: baseline;
+  gap: 8px;
 }
-.roLabel {
+.valueNum {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 12px;
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--bone-3);
-}
-.roValue {
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-weight: 300;
+  font-weight: 350;
   font-size: 30px;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
+  color: var(--bone);
 }
-.roUnit {
-  margin-left: 8px;
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--bone-3);
-}
-.foot {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 36px;
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: 13px;
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--bone-3);
+.unit {
+  font-size: 14px;
+  line-height: 1;
+  color: rgb(236 232 224 / 0.52);
 }

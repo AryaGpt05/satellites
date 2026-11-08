@@ -2,33 +2,89 @@
  * Post (DESIGN.md §6): very mild bloom that only the signal marks and city-light cores reach (they are the
  * only things written above 1.0), a hue-preserving shoulder tone curve that leaves the ink / bone palette
  * exact (toneShoulder.ts), film grain within ±3%, a gentle vignette. No chromatic aberration, no lens flare.
+ *
+ * The composer is built directly on `postprocessing` (not the React wrapper, whose index also pulls in an SSAO
+ * library we never use), so the scene owns it: the shader warm-up renders through it (Scene.tsx), and its size
+ * only changes when the drawing buffer does.
+ *
+ * GPU budget (PERF-08): MSAA only where it pays (desktop at DPR < 1.5; points and hairlines anti-alias in their
+ * shaders anyway); phones run a lighter bloom (3 mip levels from a half-resolution luminance pass).
  */
-import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing'
-import { BlendFunction } from 'postprocessing'
-import { useEffect, useMemo } from 'react'
-import { HalfFloatType } from 'three'
+import { useFrame, useThree } from '@react-three/fiber'
+import { BlendFunction, BloomEffect, EffectComposer, EffectPass, NoiseEffect, RenderPass, VignetteEffect } from 'postprocessing'
+import { useEffect, useMemo, useRef } from 'react'
+import { HalfFloatType, Vector2 } from 'three'
+import { msaaFor } from './quality'
 import { useRuntime } from './runtime'
 import { ToneShoulderEffect } from './toneShoulder'
 
-export function Post() {
+/** Bloom whose luminance + mip chain run at a fraction of the drawing buffer (the mipmap path ignores resolutionScale). */
+class ScaledBloomEffect extends BloomEffect {
+  constructor(
+    private scale: number,
+    options: ConstructorParameters<typeof BloomEffect>[0],
+  ) {
+    super(options)
+  }
+  setSize(width: number, height: number) {
+    super.setSize(Math.max(1, Math.round(width * this.scale)), Math.max(1, Math.round(height * this.scale)))
+  }
+}
+
+/** Render priority of the composer (any positive priority takes over R3F's own render). */
+export const POST_PRIORITY = 1
+
+/** Build the composer for this canvas and render it every frame. Returns it (for the shader warm-up). */
+export function usePost(): EffectComposer {
   const rt = useRuntime()
-  const { mobile, msaa } = rt.tier
-  const tone = useMemo(() => new ToneShoulderEffect(), [])
-  useEffect(() => () => tone.dispose(), [tone])
-  return (
-    <EffectComposer multisampling={msaa} frameBufferType={HalfFloatType} enableNormalPass={false} stencilBuffer={false}>
-      <Bloom
-        mipmapBlur
-        luminanceThreshold={1.0}
-        luminanceSmoothing={0.15}
-        intensity={0.45}
-        radius={0.62}
-        levels={mobile ? 4 : 6}
-      />
-      <primitive object={tone} />
-      {/* premultiply: output = colour × noise; NORMAL at 5.5% → luminance-proportional grain within ±3%. */}
-      <Noise premultiply blendFunction={BlendFunction.NORMAL} opacity={0.055} />
-      <Vignette offset={0.3} darkness={0.42} eskil={false} />
-    </EffectComposer>
-  )
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
+  const dpr = useThree((s) => s.viewport.dpr)
+  const { mobile } = rt.tier
+  const msaa = msaaFor(rt.tier, dpr)
+
+  const composer = useMemo(() => {
+    const c = new EffectComposer(gl, { multisampling: msaa, frameBufferType: HalfFloatType, stencilBuffer: false })
+    c.addPass(new RenderPass(scene, camera))
+    const bloom = new ScaledBloomEffect(mobile ? 0.5 : 1, {
+      mipmapBlur: true,
+      luminanceThreshold: 1.0,
+      luminanceSmoothing: 0.15,
+      intensity: 0.45,
+      radius: 0.62,
+      levels: mobile ? 3 : 6,
+    })
+    // premultiply: output = colour × noise; NORMAL at 5.5% → luminance-proportional grain within ±3%.
+    const noise = new NoiseEffect({ premultiply: true, blendFunction: BlendFunction.NORMAL })
+    noise.blendMode.opacity.value = 0.055
+    const vignette = new VignetteEffect({ offset: 0.3, darkness: 0.42, eskil: false })
+    c.addPass(new EffectPass(camera, bloom, new ToneShoulderEffect(), noise, vignette))
+    return c
+  }, [gl, scene, camera, msaa, mobile])
+  useEffect(() => () => composer.dispose(), [composer])
+
+  const size = useMemo(() => new Vector2(), [])
+  const applied = useRef({ composer: null as EffectComposer | null, w: -1, h: -1, dpr: -1 })
+  useFrame((_, delta) => {
+    gl.getSize(size)
+    const pr = gl.getPixelRatio()
+    const a = applied.current
+    if (a.composer !== composer || size.x !== a.w || size.y !== a.h || pr !== a.dpr) {
+      composer.setSize(size.x, size.y)
+      a.composer = composer
+      a.w = size.x
+      a.h = size.y
+      a.dpr = pr
+    }
+    // postprocessing switches the renderer's autoClear off; the scene pass needs it on, so three's background
+    // step clears the (linear) input buffer with the clear colour converted for THAT target. Without it the
+    // clear pass reuses the sRGB-converted colour from the last on-screen render and space turns grey.
+    const autoClear = gl.autoClear
+    gl.autoClear = true
+    composer.render(delta)
+    gl.autoClear = autoClear
+  }, POST_PRIORITY)
+
+  return composer
 }

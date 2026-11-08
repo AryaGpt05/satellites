@@ -403,3 +403,24 @@ export async function searchCapturesDetailed(place: LatLon, start: number, end: 
 export async function searchCaptures(place: LatLon, start: number, end: number, signal?: AbortSignal): Promise<Capture[]> {
   return (await searchCapturesDetailed(place, start, end, signal)).captures
 }
+
+/** How far back the acquisition-plan check looks: Sentinel-2 revisits land every 5 days, so 90 days is decisive. */
+const PLAN_LOOKBACK_MS = 90 * 86_400_000
+
+/**
+ * Does Sentinel-2 image this place at all? One search for any scene over the last 90 days (limit 1).
+ * Sentinel-2 records land and coastal water only, so the open ocean answers false: geometry alone would
+ * otherwise call those overflights "likely photographed". Resolves undefined when the archive can't say
+ * (unreachable, timeout); rejects only on abort.
+ */
+export async function sentinel2PlanCovers(place: LatLon, end: number, signal?: AbortSignal): Promise<boolean | undefined> {
+  throwIfAborted(signal)
+  const body = { ...searchBody('sentinel-2-l2a', place, end - PLAN_LOOKBACK_MS, end), limit: 1 }
+  try {
+    const page = await fetchJson<StacItemCollection>(PC_STAC_SEARCH, { body, signal, timeoutMs: 6_000, retries: 1 })
+    return Array.isArray(page.features) ? page.features.length > 0 : undefined
+  } catch (err) {
+    if (isAbortError(err) || signal?.aborted) throw err
+    return undefined
+  }
+}

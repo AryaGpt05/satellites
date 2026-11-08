@@ -56,14 +56,16 @@
  *  Starlinks raising or lowering orbit) are re-anchored: their elements are SGP4's own mean elements AT
  *  refEpochMs (epochOffset = 0), with rates measured from SGP4 over ±1 orbit around that instant. That
  *  keeps them right near "now", where the globe lives. The shader math is identical either way.
- *  Cost: ~100 ms on the main thread for the full catalog (once, at boot).
+ *  Cost: ~100–170 ms for the full catalog, paid once inside the elements worker (elements.worker.ts),
+ *  never on the main thread in the app.
  * ═══════════════════════════════════════════════════════════════════════════════════════════
  */
 import { constants, sgp4 } from 'satellite.js'
 import { DEG, EARTH_RADIUS_KM, eciToEcef } from '@/lib/geo'
 import type { CatalogRow } from '@/types'
 import { CATEGORY_INDEX } from './categories'
-import { getRow, ROW, rowEpochMs, satrecFromRow, type LoadedCatalog } from './catalog'
+import { forEachObject, prebuiltElements, ROW, rowEpochMs, type LoadedCatalog } from './catalog'
+import { satrecFromRow } from './sgp4'
 import { tsinceMin } from './propagate'
 
 export const ELEMENT_STRIDE = 12
@@ -183,18 +185,23 @@ export function anchoredElements(row: CatalogRow, base: MeanElements, ms: number
   }
 }
 
-/** Pack the catalog for the GPU. refEpochMs = catalog fetchedAt. */
+/**
+ * Pack the catalog for the GPU. refEpochMs = catalog fetchedAt.
+ * A catalog loaded through the elements worker already has its buffer (built off the main thread): it is
+ * returned as is, so the globe's call costs nothing.
+ */
 export function buildElementBuffer(cat: LoadedCatalog): ElementBuffer {
+  const pre = prebuiltElements.get(cat)
+  if (pre) return pre
   const refEpochMs = Date.parse(cat.fetchedAt)
-  const data = new Float32Array(cat.sats.length * ELEMENT_STRIDE)
-  const norad = new Int32Array(cat.sats.length)
+  const n = cat.count
+  const data = new Float32Array(n * ELEMENT_STRIDE)
+  const norad = new Int32Array(n)
   let k = 0
-  for (const sat of cat.sats) {
-    const row = getRow(sat.norad)
-    if (!row) continue
+  forEachObject(cat, (id, row, category) => {
     let m = meanElements(row)
     if (Math.abs(row[ROW.ndot]) > DRAG_ANCHOR_NDOT) m = anchoredElements(row, m, refEpochMs) ?? m
-    if (!Number.isFinite(m.aKm) || !Number.isFinite(m.mDot)) continue
+    if (!Number.isFinite(m.aKm) || !Number.isFinite(m.mDot)) return
     const o = k * ELEMENT_STRIDE
     data[o] = m.aKm / EARTH_RADIUS_KM
     data[o + 1] = m.e
@@ -206,16 +213,16 @@ export function buildElementBuffer(cat: LoadedCatalog): ElementBuffer {
     data[o + 7] = m.raanDot
     data[o + 8] = m.argpDot
     data[o + 9] = (m.epochMs - refEpochMs) / 1000
-    data[o + 10] = CATEGORY_INDEX[sat.category]
-    data[o + 11] = sat.category !== 'other' ? FLAG_FEATURED : 0
-    norad[k] = sat.norad
+    data[o + 10] = CATEGORY_INDEX[category]
+    data[o + 11] = category !== 'other' ? FLAG_FEATURED : 0
+    norad[k] = id
     k++
-  }
+  })
   return {
     count: k,
     refEpochMs,
-    data: k === cat.sats.length ? data : data.slice(0, k * ELEMENT_STRIDE),
-    norad: k === cat.sats.length ? norad : norad.slice(0, k),
+    data: k === n ? data : data.slice(0, k * ELEMENT_STRIDE),
+    norad: k === n ? norad : norad.slice(0, k),
   }
 }
 

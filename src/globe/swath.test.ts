@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Vector3 } from 'three'
 import { DEG, EARTH_RADIUS_KM, haversineKm, latLonToWorld, worldToLatLon } from '@/lib/geo'
 import type { SatInfo, TrackPoint } from '@/types'
-import { buildRibbon, densifyTrack, fieldModelFor, groundRangeAtOffNadirKm, sweptAcross, trackPointAt } from './swath'
+import { buildRibbon, clipAlongTrack, densifyTrack, fieldModelFor, groundRangeAtOffNadirKm, sweptAcross, trackPointAt } from './swath'
 
 /** A straight southbound track along lon −80.5°, 20 s steps, ~7 km/s ground speed (≈ 0.063° per s). */
 function southbound(n = 49, t0 = 1_000_000): TrackPoint[] {
@@ -122,5 +122,33 @@ describe('trackPointAt', () => {
     expect(trackPointAt(tr, tr[0].t - 1)).toBeNull()
     const w = latLonToWorld(mid.lat, mid.lon)
     expect(w.length()).toBeCloseTo(1, 12)
+  })
+})
+
+describe('clipAlongTrack (G6: ±700 km around the place)', () => {
+  const track = densifyTrack(southbound(), 0.5)
+  const tRef = 1_000_000 + 24 * 20_000 + 7_000 // between samples
+  const clipped = clipAlongTrack(track, tRef, 700)
+  const ref = trackPointAt(track, tRef)!
+
+  it('keeps exactly ±700 km of ground track around closest approach', () => {
+    expect(haversineKm(clipped[0], ref)).toBeCloseTo(700, -1)
+    expect(haversineKm(clipped[clipped.length - 1], ref)).toBeCloseTo(700, -1)
+    for (const p of clipped) expect(haversineKm(p, ref)).toBeLessThan(701)
+  })
+
+  it('keeps times monotonic and the ribbon builds from it', () => {
+    for (let i = 1; i < clipped.length; i++) expect(clipped[i].t).toBeGreaterThan(clipped[i - 1].t)
+    const r = buildRibbon(southbound(), tRef, () => 145, { clipKm: 700 })
+    const lats: number[] = []
+    for (let k = 0; k < r.positions.length / 3; k++) lats.push(worldToLatLon(new Vector3(r.positions[k * 3], r.positions[k * 3 + 1], r.positions[k * 3 + 2])).lat)
+    // ~1400 km of track ≈ 12.6° of latitude on a north–south track (plus nothing beyond)
+    expect(Math.max(...lats) - Math.min(...lats)).toBeLessThan(13)
+    expect(Math.max(...lats) - Math.min(...lats)).toBeGreaterThan(12)
+  })
+
+  it('returns the track unchanged when it is shorter than the clip', () => {
+    const short = densifyTrack(southbound(5), 0.5)
+    expect(clipAlongTrack(short, short[2].t, 5000).length).toBe(short.length)
   })
 })

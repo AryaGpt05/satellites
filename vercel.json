@@ -6,40 +6,40 @@
   "functions": {
     "api/og.tsx": {
       "maxDuration": 20,
-      "includeFiles": "{api/_fonts/**,node_modules/harfbuzzjs/hb.wasm}"
+      "includeFiles": "{api/_fonts/**,api/_assets/**,node_modules/harfbuzzjs/hb.wasm}"
     },
     "api/s.ts": {
       "maxDuration": 10
     }
   },
-  "rewrites": [
-    { "source": "/s/:id", "destination": "/api/s?id=:id" },
-    { "source": "/((?!api/|s/)[^.]*)", "destination": "/index.html" }
-  ],
-  "headers": [
+  "routes": [
     {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "geolocation=(self), camera=(), microphone=(), payment=(), usb=()" }
-      ]
+      "src": "/(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "geolocation=(self), camera=(), microphone=(), payment=(), usb=()"
+      },
+      "continue": true
     },
+    { "src": "/assets/(.*)", "headers": { "Cache-Control": "public, max-age=31536000, immutable" }, "continue": true },
+    { "src": "/textures/(.*)", "headers": { "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800" }, "continue": true },
+    { "src": "/data/catalog\\.json", "headers": { "Cache-Control": "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400" }, "continue": true },
+    { "src": "/og-default\\.png", "headers": { "Cache-Control": "public, max-age=86400, s-maxage=604800" }, "continue": true },
     {
-      "source": "/assets/(.*)",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      "src": "/",
+      "has": [
+        { "type": "query", "key": "q" },
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(Twitterbot|facebookexternalhit|Facebot|Slackbot|Discordbot|LinkedInBot|WhatsApp|TelegramBot|Applebot|redditbot|Bluesky|Mastodon|SkypeUriPreview|Embedly|Pinterestbot|vkShare).*"
+        }
+      ],
+      "dest": "/api/s"
     },
-    {
-      "source": "/textures/(.*)",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
-    },
-    {
-      "source": "/data/catalog.json",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400" }]
-    },
-    {
-      "source": "/og-default.png",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400, s-maxage=604800" }]
-    }
+    { "src": "/s/(?<id>[^/]+)", "dest": "/api/s?id=$id" },
+    { "handle": "filesystem" },
+    { "src": "/(?!api/|s/)[^.]*", "dest": "/index.html" }
   ]
 }

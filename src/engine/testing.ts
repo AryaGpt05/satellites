@@ -4,12 +4,18 @@
  */
 import raw from '../../public/data/catalog.json?raw'
 import type { CatalogFile } from '@/types'
-import { ingestCatalog, type LoadedCatalog } from './catalog'
+import { catalogRows, ingestCatalog, type AnyCatalogFile, type LoadedCatalog } from './catalog'
 
 let file: CatalogFile | undefined
 
+/** The shipped catalog as v1 rows, whatever format the file is in (v2 rows have names only for profiled objects). */
 export function catalogFile(): CatalogFile {
-  return (file ??= JSON.parse(raw) as CatalogFile)
+  if (!file) {
+    const f = JSON.parse(raw) as AnyCatalogFile
+    const rows = catalogRows(f)
+    file = { fetchedAt: f.fetchedAt, source: f.source, count: rows.length, rows }
+  }
+  return file
 }
 
 export function loadTestCatalog(): LoadedCatalog {

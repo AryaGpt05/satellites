@@ -1,7 +1,8 @@
 /**
  * Live usage stats for the landing footnote, from the backend's `getStats()`. That call never throws:
  * it resolves `null` when the database isn't configured, unreachable or slow. Anything missing,
- * malformed or zero renders nothing — never a placeholder number.
+ * malformed or too small to read as proof renders nothing — never a placeholder number, and never a
+ * ghost-town "4 places checked" (PRD-14).
  */
 import { useEffect, useState } from 'react'
 import { getStats } from '@/lib/backend'
@@ -10,6 +11,10 @@ export interface LookupStats {
   total: number
   last24h: number
 }
+
+/** Below these the line stays hidden: small live counts read as an empty product. */
+export const MIN_TOTAL = 1000
+export const MIN_LAST_24H = 50
 
 /** Give up quietly after this; the line is a nicety (the backend has its own, similar timeout). */
 const STATS_TIMEOUT_MS = 6000
@@ -22,8 +27,8 @@ export function validStats(v: unknown): v is LookupStats {
     typeof last24h === 'number' &&
     Number.isFinite(total) &&
     Number.isFinite(last24h) &&
-    total > 0 &&
-    last24h >= 0 &&
+    total >= MIN_TOTAL &&
+    last24h >= MIN_LAST_24H &&
     last24h <= total
   )
 }

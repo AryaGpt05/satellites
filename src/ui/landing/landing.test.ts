@@ -46,7 +46,11 @@ describe('example places', () => {
   it('spans hemispheres', () => {
     expect(EXAMPLE_PLACES.some((p) => p.lat < 0)).toBe(true)
     expect(EXAMPLE_PLACES.some((p) => p.lon > 90)).toBe(true)
-    expect(EXAMPLE_PLACES.some((p) => p.lat > 66.5)).toBe(true)
+    expect(EXAMPLE_PLACES.some((p) => p.lon < -60)).toBe(true)
+  })
+  it('stays out of the polar night (every chip must be able to deliver a picture in winter)', () => {
+    for (const p of EXAMPLE_PLACES) expect(Math.abs(p.lat)).toBeLessThan(60)
+    expect(EXAMPLE_PLACES.map((p) => p.chip)).toContain('Palm Jumeirah')
   })
 })
 
@@ -62,9 +66,16 @@ describe('lookup stats guard', () => {
     expect(validStats({ total: 1204, last24h: 87 })).toBe(true)
     expect(validStats(null)).toBe(false)
     expect(validStats({ total: 0, last24h: 0 })).toBe(false)
+    expect(validStats({ total: 10_000, last24h: 20_000 })).toBe(false)
     expect(validStats({ total: 10, last24h: 11 })).toBe(false)
     expect(validStats({ total: NaN, last24h: 1 })).toBe(false)
     expect(validStats({ total: '12', last24h: 1 })).toBe(false)
+  })
+  it('hides counts too small to read as proof', () => {
+    expect(validStats({ total: 4, last24h: 4 })).toBe(false)
+    expect(validStats({ total: 999, last24h: 120 })).toBe(false)
+    expect(validStats({ total: 5000, last24h: 49 })).toBe(false)
+    expect(validStats({ total: 1000, last24h: 50 })).toBe(true)
   })
 })
 

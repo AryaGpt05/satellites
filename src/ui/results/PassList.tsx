@@ -1,29 +1,38 @@
 /**
- * 03 / PASSES, grouped by verdict (see lib/groups.ts for the model). Photographs are individual rows
- * with a live thumbnail of the real crop; everything else is one row per satellite, expandable to its
- * passes. Long groups show their top rows, then page in 40 at a time.
+ * PASSES, grouped by verdict (see lib/groups.ts for the model). Photographs are individual rows with
+ * a live thumbnail of the real crop, clearest first (decision #2); everything else is one row per
+ * satellite, expandable to its passes. Long groups show their top rows, then page in 40 at a time.
+ *
+ * Signal colour only where a detailed image of the place exists (V07): photographed rows carry no tag
+ * at all, except the two honest exceptions, 'Mosaic' (coarse daily weather picture) and
+ * 'Clouded · 86%' (warn), whose thumbnail is dimmed and hatched instead of a bright white square.
  */
 import { memo, useEffect, useRef, useState } from 'react'
 import { useApp } from '@/state/store'
-import type { Pass } from '@/types'
+import type { Capture, Pass } from '@/types'
 import { Glyph, Tag, cx } from '@/ui/system'
+import { Ago, reportNow } from './Ago'
+import { Mark } from './Mark'
 import { prefetchPassImage } from './actions'
+import { isClouded } from './lib/bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic } from './lib/captures'
 import { int } from './lib/copy'
 import { visibleCount, type ListItem, type PassGroup, type PassItem, type SatItem } from './lib/groups'
-import { glyphForPass, markColorVar, VERDICT_GLYPH, VERDICT_TAG, VERDICT_TITLE, type Verdict } from './lib/meta'
-import { fmtLocalDay, fmtLocalStamp, fmtLocalTime, fmtRelative } from './lib/time'
+import { glyphForPass, markColorVar, VERDICT_GLYPH, VERDICT_META, VERDICT_TITLE, verdictUnit, type Verdict } from './lib/meta'
+import { fmtSpokenDay, spokenRelative } from './lib/time'
 import type { ResultsModel } from './model'
 import s from './PassList.module.css'
 
 interface Props {
   model: ResultsModel
   selectedId?: string
-  now: number
   onSelect: (p: Pass) => void
 }
 
-export function PassList({ model, selectedId, now, onSelect }: Props) {
+/** Thumbnails of the first rows load with the report, not when scrolled near (PRD-06). */
+const EAGER_THUMBS = 3
+
+export function PassList({ model, selectedId, onSelect }: Props) {
   // A row's pointerleave never fires when the list unmounts under the pointer (a click opens the
   // detail), so drop the globe's hover highlight with the list.
   useEffect(() => () => useApp.getState().setHoveredNorad(undefined), [])
@@ -32,13 +41,13 @@ export function PassList({ model, selectedId, now, onSelect }: Props) {
   return (
     <div className={s.list}>
       {model.groups.map((g) => (
-        <Group key={g.verdict} group={g} model={model} selectedId={selectedId} now={now} onSelect={onSelect} />
+        <Group key={g.verdict} group={g} model={model} selectedId={selectedId} onSelect={onSelect} />
       ))}
     </div>
   )
 }
 
-function Group({ group, model, selectedId, now, onSelect }: { group: PassGroup } & Props) {
+function Group({ group, model, selectedId, onSelect }: { group: PassGroup } & Props) {
   const [pages, setPages] = useState(0)
   const [open, setOpen] = useState<Set<string>>(() => new Set())
   const total = group.items.length
@@ -70,34 +79,30 @@ function Group({ group, model, selectedId, now, onSelect }: { group: PassGroup }
       return n
     })
 
+  const imaged = group.verdict === 'imaged'
   return (
     <section className={s.group} id={`passes-${group.verdict}`} aria-label={VERDICT_TITLE[group.verdict]}>
-      <header className={s.groupHead}>
-        <span className={cx(s.groupTitle, group.verdict === 'imaged' && s.signal)}>
-          <Glyph name={VERDICT_GLYPH[group.verdict]} size={12} color={group.verdict === 'imaged' ? 'var(--signal)' : undefined} />
+      <header className={s.groupHead} title={VERDICT_META[group.verdict].definition}>
+        <span className={cx(s.groupTitle, imaged && s.signal)}>
+          <Glyph name={VERDICT_GLYPH[group.verdict]} size={12} color={imaged ? 'var(--signal)' : undefined} />
           {VERDICT_TITLE[group.verdict]}
+          {imaged && group.items.some((i) => i.kind === 'pass') ? <span className={s.order}> · clearest first</span> : null}
         </span>
         <span className={s.groupCount}>
-          {int(group.passCount)} {group.verdict === 'imaged' ? (group.passCount === 1 ? 'image' : 'images') : group.passCount === 1 ? 'pass' : 'passes'}
-          <span className={s.dim}> · {int(group.satCount)} {group.satCount === 1 ? 'sat' : 'sats'}</span>
+          {int(group.passCount)} {verdictUnit(group.verdict, group.passCount)}
+          <span className={cx(s.dim, s.satCount, imaged && s.satCountImaged)}>
+            {' '}
+            · {int(group.satCount)} {group.satCount === 1 ? 'sat' : 'sats'}
+          </span>
         </span>
       </header>
       <ul className={s.rows}>
-        {group.items.slice(0, shown).map((item) => (
+        {group.items.slice(0, shown).map((item, i) => (
           <li key={item.key}>
             {item.kind === 'pass' ? (
-              <PassRow item={item} model={model} selected={item.pass.id === selectedId} now={now} onSelect={onSelect} />
+              <PassRow item={item} model={model} selected={item.pass.id === selectedId} eager={i < EAGER_THUMBS} onSelect={onSelect} />
             ) : (
-              <SatRow
-                item={item}
-                verdict={group.verdict}
-                model={model}
-                expanded={open.has(item.key)}
-                onToggle={() => toggle(item.key)}
-                selectedId={selectedId}
-                now={now}
-                onSelect={onSelect}
-              />
+              <SatRow item={item} verdict={group.verdict} model={model} expanded={open.has(item.key)} onToggle={() => toggle(item.key)} selectedId={selectedId} onSelect={onSelect} />
             )}
           </li>
         ))}
@@ -124,56 +129,86 @@ function Group({ group, model, selectedId, now, onSelect }: { group: PassGroup }
 
 const hover = (p: Pass | undefined) => useApp.getState().setHoveredNorad(p?.norad)
 
+/** "Clouded · 86%" when the picture is mostly cloud, "Mosaic" for a daily weather mosaic, else nothing. */
+function exceptionTag(c: Capture | undefined): { text: string; warn: boolean } | null {
+  if (!c) return null
+  if (isDailyMosaic(c)) return { text: 'Mosaic', warn: false }
+  if (isClouded(c)) return { text: `Clouded · ${c.cloudCoverPct !== undefined ? `${int(c.cloudCoverPct)}%` : 'at spot'}`, warn: true }
+  return null
+}
+
 const PassRow = memo(function PassRow({
   item,
   model,
   selected,
-  now,
+  eager,
   onSelect,
 }: {
   item: PassItem
   model: ResultsModel
   selected: boolean
-  now: number
+  eager: boolean
   onSelect: (p: Pass) => void
 }) {
   const { pass: p, meta } = item
   const capture = captureFor(model.report, p)
-  const imaged = p.verdict === 'imaged'
+  const t = model.times(p)
+  const tag = exceptionTag(capture)
+  const clouded = !!capture && !isDailyMosaic(capture) && isClouded(capture)
+  const prefetch = () => prefetchPassImage(model.report, p)
+  const label = [
+    meta.name,
+    VERDICT_META[p.verdict].verb,
+    `${fmtSpokenDay(p.tClosest, model.tz)} ${t.time} ${t.zone}`,
+    spokenRelative(p.tClosest, reportNow(model.clock)),
+    capture?.cloudCoverPct !== undefined ? `cloud ${int(capture.cloudCoverPct)} percent` : undefined,
+    tag?.warn ? 'clouded over' : undefined,
+  ]
+    .filter(Boolean)
+    .join(', ')
   return (
     <button
       type="button"
       className={cx(s.row, selected && s.selected)}
       aria-current={selected || undefined}
+      aria-label={label}
       data-pass-row
       onClick={() => onSelect(p)}
       onPointerEnter={() => {
         hover(p)
-        prefetchPassImage(model.report, p)
+        prefetch()
       }}
+      onPointerDown={prefetch}
       onPointerLeave={() => hover(undefined)}
-      onFocus={() => prefetchPassImage(model.report, p)}
+      onFocus={prefetch}
     >
       <span className={s.glyph}>
-        <Glyph name={glyphForPass(p.verdict, meta.category)} size={14} color={markColorVar(p.verdict, meta.category)} />
+        <Mark name={glyphForPass(p.verdict, meta.category)} size={14} color={markColorVar(p.verdict, meta.category)} />
       </span>
       <span className={s.main}>
         <span className={s.nameLine}>
           <span className={s.name}>{meta.name}</span>
-          <Tag signal={imaged} className={s.tag}>
-            {imaged && capture && isDailyMosaic(capture) ? 'Mosaic' : VERDICT_TAG[p.verdict]}
-          </Tag>
+          {tag ? <Tag className={cx(s.tag, tag.warn && s.tagWarn)}>{tag.text}</Tag> : null}
         </span>
         <span className={s.metaLine}>
-          {fmtLocalStamp(p.tClosest, model.tz)}
-          <span className={s.dim}> · {fmtRelative(p.tClosest, now)}</span>
+          {t.day} · {t.time}
+          {/* Narrow phones drop the zone (the timeline and the footnote name it) before the age. */}
+          <span className={s.zone}> {t.zone}</span>
+          <span className={s.dim}>
+            {' · '}
+            <Ago t={p.tClosest} base={model.clock} />
+          </span>
         </span>
         <span className={s.metaLine}>
-          {p.offNadirDeg.toFixed(1)}° off-nadir · {int(p.groundDistanceKm)} km
+          {p.offNadirDeg.toFixed(1)}° off-nadir
+          {/* …and the ground distance before the cloud, which is what a photograph is judged by. */}
+          <span className={capture?.cloudCoverPct !== undefined ? s.km : undefined}> · {int(p.groundDistanceKm)} km</span>
           {capture?.cloudCoverPct !== undefined ? <span className={s.dim}> · cloud {int(capture.cloudCoverPct)}%</span> : null}
         </span>
       </span>
-      {capture && !isDailyMosaic(capture) ? <Thumb url={displayUrl(capture, { ...cropSpec(capture.collection), px: 112 })} /> : null}
+      {capture && !isDailyMosaic(capture) ? (
+        <Thumb url={displayUrl(capture, { ...cropSpec(capture.collection), px: 112 })} eager={eager} clouded={clouded} />
+      ) : null}
     </button>
   )
 })
@@ -185,7 +220,6 @@ const SatRow = memo(function SatRow({
   expanded,
   onToggle,
   selectedId,
-  now,
   onSelect,
 }: {
   item: SatItem
@@ -194,12 +228,13 @@ const SatRow = memo(function SatRow({
   expanded: boolean
   onToggle: () => void
   selectedId?: string
-  now: number
   onSelect: (p: Pass) => void
 }) {
   const { meta, passes, latest, closest } = item
   const containsSelected = !!selectedId && passes.some((p) => p.id === selectedId)
   const listId = `sat-${item.key.replace(/[^a-z0-9-]/gi, '')}`
+  const lt = model.times(latest)
+  const label = `${meta.name}${meta.operator ? `, ${meta.operator}` : ''}, ${int(passes.length)} ${verdictUnit(verdict, passes.length)}, latest ${fmtSpokenDay(latest.tClosest, model.tz)} ${lt.time}`
   return (
     <>
       <button
@@ -207,12 +242,13 @@ const SatRow = memo(function SatRow({
         className={cx(s.row, s.satRow, containsSelected && !expanded && s.selected)}
         aria-expanded={expanded}
         aria-controls={listId}
+        aria-label={label}
         onClick={onToggle}
         onPointerEnter={() => hover(latest)}
         onPointerLeave={() => hover(undefined)}
       >
         <span className={s.glyph}>
-          <Glyph name={glyphForPass(verdict, meta.category)} size={14} color={markColorVar(verdict, meta.category)} />
+          <Mark name={glyphForPass(verdict, meta.category)} size={14} color={markColorVar(verdict, meta.category)} />
         </span>
         <span className={s.main}>
           <span className={s.nameLine}>
@@ -220,17 +256,21 @@ const SatRow = memo(function SatRow({
             {meta.operator ? <span className={s.operator}>{meta.operator}</span> : null}
           </span>
           <span className={s.metaLine}>
-            <span className={s.latestWord}>Latest </span>
-            {fmtLocalDay(latest.tClosest, model.tz)} · {fmtLocalTime(latest.tClosest, model.tz)}
-            <span className={s.dim}> · {fmtRelative(latest.tClosest, now)}</span>
+            <span className={s.giveWay}>Latest </span>
+            {lt.day} · {lt.time}
+            <span className={s.dim}>
+              {' · '}
+              <Ago t={latest.tClosest} base={model.clock} />
+            </span>
           </span>
           <span className={s.metaLine}>
-            Closest {closest.offNadirDeg.toFixed(1)}° off-nadir · {int(closest.groundDistanceKm)} km
+            <span className={s.giveWay}>Closest </span>
+            {closest.offNadirDeg.toFixed(1)}° off-nadir · {int(closest.groundDistanceKm)} km
           </span>
         </span>
         <span className={s.count}>
           <span className={s.countNum}>{int(passes.length)}</span>
-          <span className={s.countUnit}>{verdict === 'imaged' ? (passes.length === 1 ? 'image' : 'images') : passes.length === 1 ? 'pass' : 'passes'}</span>
+          <span className={s.countUnit}>{verdictUnit(verdict, passes.length)}</span>
         </span>
         <span className={cx(s.chev, expanded && s.chevOpen)} aria-hidden>
           <Glyph name="arrow-right" size={11} />
@@ -250,11 +290,15 @@ const SatRow = memo(function SatRow({
                   hover(p)
                   prefetchPassImage(model.report, p)
                 }}
+                onPointerDown={() => prefetchPassImage(model.report, p)}
                 onPointerLeave={() => hover(undefined)}
               >
                 <span>
-                  {fmtLocalStamp(p.tClosest, model.tz)}
-                  <span className={s.dim}> · {fmtRelative(p.tClosest, now)}</span>
+                  {model.times(p).stamp}
+                  <span className={s.dim}>
+                    {' · '}
+                    <Ago t={p.tClosest} base={model.clock} />
+                  </span>
                 </span>
                 <span className={s.subGeo}>
                   {p.offNadirDeg.toFixed(1)}° · {int(p.groundDistanceKm)} km
@@ -268,25 +312,29 @@ const SatRow = memo(function SatRow({
   )
 })
 
-/** Lazy thumbnail of the real crop (loads when scrolled near). */
-function Thumb({ url }: { url: string }) {
+/** Thumbnail of the real crop: eager for the first rows, else loads when scrolled near. */
+function Thumb({ url, eager, clouded }: { url: string; eager: boolean; clouded: boolean }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const [visible, setVisible] = useState(false)
+  const [visible, setVisible] = useState(eager)
   const [state, setState] = useState<'idle' | 'ok' | 'err'>('idle')
   useEffect(() => {
+    if (visible) return
     const el = ref.current
     if (!el) return
     if (typeof IntersectionObserver === 'undefined') return setVisible(true)
     const io = new IntersectionObserver((e) => e.some((x) => x.isIntersecting) && setVisible(true), { rootMargin: '200px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [])
+  }, [visible])
   return (
-    <span ref={ref} className={cx(s.thumb, state === 'ok' && s.thumbOk)} aria-hidden>
+    <span ref={ref} className={cx(s.thumb, state === 'ok' && s.thumbOk, clouded && s.thumbClouded)} aria-hidden>
       {visible && state !== 'err' ? (
         <img src={url} alt="" crossOrigin="anonymous" decoding="async" onLoad={() => setState('ok')} onError={() => setState('err')} />
       ) : null}
+      {clouded ? <span className={s.hatch} /> : null}
       <span className={s.thumbMark} />
+      {/* The word only: the row's tag carries the number, and "CLOUD 100%" does not fit a 56 px thumb. */}
+      {clouded ? <span className={s.cloudChip}>Cloud</span> : null}
     </span>
   )
 }

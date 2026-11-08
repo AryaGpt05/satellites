@@ -2,7 +2,7 @@
   position: relative;
 }
 /* Short desktop windows: a slightly smaller line so the hero fits between the corner readouts. */
-@media (min-width: 761px) and (max-height: 760px) {
+@media (min-width: 761px) and (orientation: landscape) and (max-height: 760px), (min-width: 1101px) and (max-height: 760px) {
   .field.field {
     --h: 52px;
     --fs: 18px;
@@ -19,14 +19,27 @@
   justify-content: center;
   flex: none;
 }
+/* The "/" key cap sits in the line's trailing slot, before "Use my location". */
+.kbd {
+  margin-right: 6px;
+}
 .clear {
   width: 28px;
   height: 28px;
   color: var(--bone-3);
   transition: color var(--d-hover) var(--ease-out);
 }
-.clear:hover {
+@media (hover: hover) and (pointer: fine) {
+  .clear:hover {
+    color: var(--bone);
+  }
+  .go:hover {
+    background: var(--signal-hover);
+  }
+}
+.clear:active {
   color: var(--bone);
+  transition-duration: 0ms;
 }
 /* The one primary action on the landing: appears only once there is something to act on. */
 .go {
@@ -37,8 +50,9 @@
   animation: go-in var(--d-sm) var(--ease-out) both;
   transition: background-color var(--d-hover) var(--ease-out);
 }
-.go:hover {
+.go:active {
   background: var(--signal-hover);
+  transition-duration: 0ms;
 }
 .go:disabled {
   opacity: 0.4;
@@ -152,11 +166,26 @@
   color: var(--bone-2);
 }
 
+/* phones: no room for coordinates beside the names */
 @media (max-width: 760px) {
   .optCoord {
     display: none;
   }
   .list {
     max-height: 52vh;
+  }
+}
+
+/* Touch: 44 px hit boxes; the glyphs and the line stay as they are. */
+@media (pointer: coarse) {
+  .clear {
+    width: 44px;
+    height: 44px;
+    margin: -8px -8px -8px 0;
+  }
+  .go {
+    width: 44px;
+    height: 44px;
+    margin: -2px 0;
   }
 }

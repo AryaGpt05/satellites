@@ -7,6 +7,7 @@ import type { Pass } from '@/types'
 import { getRow } from './catalog'
 import { findPasses, passTargetFor, type PassQuery, type PassTarget } from './passes'
 import type { WorkerRequest, WorkerResponse } from './passes.worker'
+import { packTracks } from './tracks'
 import { loadTestCatalog, WATERLOO } from './testing'
 
 type Mode = 'ok' | 'fail-load' | 'error-reply'
@@ -31,7 +32,7 @@ class FakeWorker {
       const reply: WorkerResponse =
         FakeWorker.mode === 'error-reply'
           ? { type: 'error', chunkId: req.chunkId, message: 'boom' }
-          : { type: 'result', chunkId: req.chunkId, passes: findPasses(req.targets, req.query), ms: 0 }
+          : { type: 'result', chunkId: req.chunkId, ...packTracks(findPasses(req.targets, req.query)), ms: 0 }
       this.onmessage?.({ data: reply } as MessageEvent<WorkerResponse>)
     }, 1)
   }
@@ -161,5 +162,34 @@ describe('pass worker pool', () => {
     await Promise.all([a, b])
     // The first five dispatches are the urgent satellites, one each.
     expect(FakeWorker.served.slice(0, 5)).toEqual(urgent.map((t) => [t.norad]))
+  })
+})
+
+describe('packed tracks', () => {
+  it('round-trips tracks through the transferable buffer, lazily and exactly enough', async () => {
+    const { packTracks, unpackTracks, clonePass } = await import('./tracks')
+    const passes = findPasses(targets.slice(0, 10), query)
+    expect(passes.length).toBeGreaterThan(0)
+    const { passes: bare, tracks } = packTracks(passes)
+    expect(bare.every((p) => !('track' in p))).toBe(true)
+    const back = unpackTracks(bare, tracks)
+    // Not decoded until read; a clone stays lazy and shares the decoded array.
+    const copy = clonePass(back[0])
+    expect(Object.getOwnPropertyDescriptor(copy, 'track')?.get).toBeTypeOf('function')
+    back.forEach((p, i) => {
+      const ref = passes[i]
+      expect(p.track).toHaveLength(ref.track.length)
+      p.track.forEach((q, k) => {
+        expect(q.t).toBe(ref.track[k].t)
+        expect(q.lat).toBeCloseTo(ref.track[k].lat, 4)
+        expect(q.lon).toBeCloseTo(ref.track[k].lon, 4)
+        expect(q.altKm).toBeCloseTo(ref.track[k].altKm, 2)
+      })
+      expect({ ...p, track: undefined }).toEqual({ ...ref, track: undefined })
+    })
+    expect(copy.track).toBe(back[0].track)
+    // Assigning replaces the accessor with a plain value.
+    back[1].track = []
+    expect(back[1].track).toEqual([])
   })
 })

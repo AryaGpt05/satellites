@@ -23,6 +23,9 @@ import {
   searchPlaces,
   sublabelOf,
   timeZoneAt,
+  ensureTz,
+  tzReady,
+  nauticalZone,
   type PhotonResponse,
 } from './geocode'
 import type { Place } from '@/types'
@@ -189,7 +192,17 @@ describe('coordinates', () => {
 })
 
 describe('time zones', () => {
-  it('looks up IANA zones offline', () => {
+  it('answers with the nautical zone until the table has loaded', () => {
+    if (tzReady()) return // another test loaded it first
+    expect(timeZoneAt(43.4723, -80.5449)).toBe('Etc/GMT+5')
+    expect(nauticalZone(139.65)).toBe('Etc/GMT-9')
+    expect(nauticalZone(-0.12)).toBe('UTC')
+    expect(nauticalZone(179.9)).toBe('Etc/GMT-12')
+  })
+
+  it('looks up IANA zones offline', async () => {
+    await ensureTz()
+    expect(tzReady()).toBe(true)
     expect(timeZoneAt(43.4723, -80.5449)).toBe('America/Toronto')
     expect(timeZoneAt(35.6762, 139.6503)).toBe('Asia/Tokyo')
     expect(timeZoneAt(51.5, 360 - 0.12)).toBe('Europe/London') // longitude wrapped

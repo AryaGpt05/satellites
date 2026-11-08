@@ -6,7 +6,7 @@
  */
 import type { Capture, GeoWatcher, Pass, Report } from '@/types'
 import { isDailyMosaic, sensorName } from './captures'
-import type { MetaFn, SatMeta } from './meta'
+import { VERDICT_META, type MetaFn, type SatMeta } from './meta'
 import { fmtLocalTime, zoneAbbr } from './time'
 
 export type Part = string | { n: string; u?: string }
@@ -46,7 +46,27 @@ export function compassAbbr(deg: number): string {
   return ABBR16[Math.round(norm(deg) / 22.5) % 16]
 }
 
+// ── places ────────────────────────────────────────────────────────────────────────────────
+
+/** Water bodies and deserts take an article in prose: "photographed the Pacific Ocean". */
+const NEEDS_ARTICLE = /(Ocean|Sea|Gulf|Bay|Strait|Desert)$/
+
+/** The place as it reads mid-sentence: "Waterloo", "the Pacific Ocean". */
+export function placeInProse(label: string): string {
+  return NEEDS_ARTICLE.test(label) && !/^the\s/i.test(label) ? `the ${label}` : label
+}
+
+/** Split for the headline, where only the name is set in the serif: ["the ", "Pacific Ocean"]. */
+export function placeParts(label: string): [string, string] {
+  return NEEDS_ARTICLE.test(label) && !/^the\s/i.test(label) ? ['the ', label] : ['', label]
+}
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
 // ── headline ──────────────────────────────────────────────────────────────────────────────
+
+/** Why nothing photographed the place, as a kind (the Summary picks words and layout from it). */
+export type ZeroKind = 'archive' | 'dark' | 'unpublished' | 'none'
 
 export interface Headline {
   /** Distinct satellites with at least one real image */
@@ -61,11 +81,31 @@ export interface Headline {
   mosaics: number
   /** Plain reason when nothing photographed the place */
   zeroReason?: string
+  zeroKind?: ZeroKind
+  /** The sun never rose (polar night): a darkness headline, not a "no image" one */
+  sunNeverRose?: boolean
+  /** Radar satellites that could have mapped the place (they need no light) */
+  radar?: { names: string[]; sats: number; passes: number }
 }
 
-export function headline(report: Pick<Report, 'passes' | 'captures' | 'notes'>, meta: MetaFn): Headline {
+/** The archives failed (flag from the engine, or its outage note in older reports). */
+export function archiveDown(report: Pick<Report, 'notes' | 'archiveFailed'>): boolean {
+  if (report.archiveFailed !== undefined) return report.archiveFailed
+  return /archives? (could not be reached|were too slow)/i.test((report.notes ?? []).join(' '))
+}
+
+/**
+ * @param sunMaxDeg  highest sun elevation at the place over the window (from the timeline's sun
+ *                   samples), so polar night is told by the sun, not inferred from pass times.
+ */
+export function headline(
+  report: Pick<Report, 'passes' | 'captures' | 'notes' | 'archiveFailed'>,
+  meta: MetaFn,
+  sunMaxDeg?: number,
+): Headline {
   const imagedSats = new Set<number>()
   const viewSats = new Set<number>()
+  const radarSats = new Map<number, number>()
   let detailed = 0
   let mosaics = 0
   const byId = new Map(report.captures.map((c) => [c.id, c]))
@@ -76,6 +116,7 @@ export function headline(report: Pick<Report, 'passes' | 'captures' | 'notes'>, 
       if (c && isDailyMosaic(c)) mosaics++
       else detailed++
     } else viewSats.add(p.norad)
+    if (p.verdict === 'could' && meta(p.norad).category === 'radar') radarSats.set(p.norad, (radarSats.get(p.norad) ?? 0) + 1)
   }
   for (const n of imagedSats) viewSats.delete(n)
   const h: Headline = {
@@ -85,18 +126,51 @@ export function headline(report: Pick<Report, 'passes' | 'captures' | 'notes'>, 
     detailed,
     mosaics,
   }
-  if (!h.photographed) h.zeroReason = zeroReason(report, meta)
+  if (radarSats.size) {
+    const ranked = [...radarSats.entries()].sort((a, b) => b[1] - a[1])
+    h.radar = {
+      names: ranked.slice(0, 2).map(([n]) => meta(n).name),
+      sats: radarSats.size,
+      passes: ranked.reduce((a, [, c]) => a + c, 0),
+    }
+  }
+  if (!h.photographed) {
+    const z = zeroReason(report, meta, sunMaxDeg)
+    h.zeroReason = z.text
+    h.zeroKind = z.kind
+    h.sunNeverRose = z.neverRose
+  }
   return h
 }
 
-function zeroReason(report: Pick<Report, 'passes' | 'notes'>, meta: MetaFn): string {
-  const notes = (report.notes ?? []).join(' ')
-  if (/archives? (could not be reached|were too slow)/i.test(notes)) return 'the image archives did not answer in time'
+function zeroReason(
+  report: Pick<Report, 'passes' | 'notes' | 'archiveFailed'>,
+  meta: MetaFn,
+  sunMaxDeg?: number,
+): { kind: ZeroKind; text: string; neverRose?: boolean } {
+  if (archiveDown(report)) return { kind: 'archive', text: 'the image archives did not answer in time' }
+  if (sunMaxDeg !== undefined && sunMaxDeg < 0) return { kind: 'dark', text: 'the sun never rose', neverRose: true }
   const open = report.passes.filter((p) => p.verdict === 'likely' && meta(p.norad).category === 'open-optical')
   if (open.length)
-    return `Sentinel-2 or Landsat crossed it ${open.length === 1 ? 'once' : `${int(open.length)} times`} in daylight, but no scene has been published yet`
-  if (report.passes.length && report.passes.every((p) => p.sunElevationDeg < 5)) return 'the sun barely rose there'
-  return 'no open imaging satellite crossed it in daylight'
+    return {
+      kind: 'unpublished',
+      text: `Sentinel-2 or Landsat crossed it ${open.length === 1 ? 'once' : `${int(open.length)} times`} in daylight, but no scene has been published yet`,
+    }
+  if ((sunMaxDeg !== undefined && sunMaxDeg < 5) || (report.passes.length && report.passes.every((p) => p.sunElevationDeg < 5)))
+    return { kind: 'dark', text: 'the sun barely rose there' }
+  return { kind: 'none', text: 'no open imaging satellite crossed it in daylight' }
+}
+
+/** "Radar doesn’t need light. Umbra, Capella and 7 other radar satellites passed within range 1,204 times." */
+export function radarSentence(r: NonNullable<Headline['radar']>): Sentence {
+  const others = r.sats - r.names.length
+  const names =
+    others > 0
+      ? `${r.names.join(', ')} and ${int(others)} other radar ${others === 1 ? 'satellite' : 'satellites'}`
+      : r.names.length === 2
+        ? `${r.names[0]} and ${r.names[1]}`
+        : r.names[0]
+  return [`Radar doesn’t need light. ${names} passed within range `, num(int(r.passes)), r.passes === 1 ? ' time.' : ' times.']
 }
 
 // ── geostationary ─────────────────────────────────────────────────────────────────────────
@@ -115,7 +189,14 @@ export interface PassCopyCtx {
   capture?: Capture
   timeZone: string
   placeLabel: string
+  /** The Sentinel-2 / Landsat search failed: say so instead of "archives can lag" */
+  archiveFailed?: boolean
+  /** "Now" for the age of the pass (report-relative); defaults to Date.now() */
+  now?: number
 }
+
+/** After this long, a missing scene is not "lag": it doesn't exist. */
+const SCENE_LAG_MS = 48 * 3_600_000
 
 /** "11:21:13 EST" */
 function localClock(ms: number, tz: string, seconds = true): Part {
@@ -148,8 +229,9 @@ function looking(off: number): Sentence {
  * One precise paragraph about a pass, as sentences. The order is always: what crossed, when, where,
  * how it moved → what that means for the image → what we can't know.
  */
-export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel }: PassCopyCtx): Sentence[] {
+export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel: label, archiveFailed, now = Date.now() }: PassCopyCtx): Sentence[] {
   const name = meta.name
+  const placeLabel = placeInProse(label)
   const moving: Part[] = [`, moving ${compassWord(p.headingDeg)} at `, num(dec2(p.groundSpeedKmS), 'km/s'), '.']
   const out: Sentence[] = []
   switch (p.verdict) {
@@ -178,7 +260,11 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
         ...(swath ? [', inside its ', num(int(swath), 'km'), ' swath.'] : ['.']),
       ])
       if (meta.category === 'open-optical') {
-        out.push(['It was daylight, so it almost certainly recorded this spot. No scene from this pass has been published yet; archives can lag by a day or more.'])
+        if (archiveFailed) out.push(['It was daylight, so it would have recorded this spot. The archive could not be searched just now.'])
+        else if (now - p.tClosest > SCENE_LAG_MS)
+          out.push(['No scene exists for this pass. Sentinel-2 records only land and coastal water, and may not have scheduled this spot.'])
+        else
+          out.push(['It was daylight, so it almost certainly recorded this spot. No scene from this pass has been published yet; archives can lag by a day or more.'])
       } else if (p.sunElevationDeg < 0) {
         out.push(['It was dark here. Weather imagers keep scanning at night in infrared, so it saw your clouds, not your streets.'])
       } else if (meta.profile?.gibs) {
@@ -194,7 +280,7 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
       const nadir = p.offNadirDeg < NADIR_DEG
       if (p.inSwath && swath && !meta.profile?.maxOffNadirDeg) {
         // Fixed-swath commercial imagers (e.g. Planet's Doves) record continuously, but privately.
-        out.push([`${placeLabel} was inside its `, num(int(swath), 'km'), ' swath. Its operator does not publish where it imaged, so we can’t know whether it did.'])
+        out.push([`${cap(placeLabel)} was inside its `, num(int(swath), 'km'), ' swath. Its operator does not publish where it imaged, so we can’t know whether it did.'])
       } else if (meta.category === 'radar') {
         out.push([
           'Radar sees through cloud and darkness. ',
@@ -233,11 +319,11 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
 export function shareHeadline(verdict: Pass['verdict'], name: string, place: string): { lead: string; place: string } {
   switch (verdict) {
     case 'imaged':
-      return { lead: `${name} photographed`, place }
+      return { lead: `${name} ${VERDICT_META.imaged.verb}`, place }
     case 'likely':
-      return { lead: `${name} looked down on`, place }
+      return { lead: `${name} ${VERDICT_META.likely.verb}`, place }
     case 'could':
-      return { lead: `${name} passed within view of`, place }
+      return { lead: `${name} ${VERDICT_META.could.verb} of`, place }
     case 'overhead':
       return { lead: `${name} passed over`, place }
   }

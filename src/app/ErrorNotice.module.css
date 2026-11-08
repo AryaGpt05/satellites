@@ -9,8 +9,45 @@
   background: var(--ink-1);
   border: 1px solid var(--line-strong);
   border-left: 2px solid var(--warn);
+  animation: fault-in var(--d-md) var(--ease-out) both;
 }
 .msg {
   margin: 0;
   color: var(--bone);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+@keyframes fault-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Stacked layout: a bottom card across the width, clear of the home indicator. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  .wrap {
+    left: calc(var(--bezel-inset) + 8px);
+    right: calc(var(--bezel-inset) + 8px);
+    bottom: calc(var(--bezel-inset) + 12px + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
+  .actions > * {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wrap {
+    animation-duration: 200ms;
+  }
+  @keyframes fault-in {
+    from {
+      opacity: 0;
+    }
+  }
 }

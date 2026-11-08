@@ -3,20 +3,24 @@
  *
  *   /api/og?id=<shareId>          a stored share (read via get_share, without counting a view)
  *   /api/og?place=…&lat=…&…       explicit parameters (see shareFromParams), no database needed
+ *   /api/og?kind=place&place=…&lat=…&lon=…   an address-bar link (no pass): the default card
+ *   /api/og?kind=summary&q=…&n=…&sv=…&sc=…   a week's summary (SH6): counts + the best look
  *   /api/og                       the default card, also baked into public/og-default.png
  *
- * The left square is the real archived crop, fetched server-side from Planetary Computer / NASA
- * GIBS and embedded. If the archive is slow or has nothing, the card draws the pass geometry
+ * Every card is built from the shared spec (api/_lib/cardSpec.ts), the same one the app's preview and
+ * PNG use. The left square is the real archived crop, fetched server-side from Planetary Computer /
+ * NASA GIBS and embedded. If the archive is slow or has nothing, the card draws the pass geometry
  * instead and is cached briefly so a later request can pick the image up.
  *
- * Runs on the Node.js runtime (fonts are read from api/_fonts via fs).
+ * Runs on the Node.js runtime (fonts and the default plate are read from api/_fonts, api/_assets).
  */
-import { CARD_H, CARD_W, PLATE, defaultCard, shareCard } from './_lib/card.js'
+import { CARD_H, CARD_W, PLATE, defaultCard, defaultPlateDataUri, shareCard } from './_lib/card.js'
+import { buildCardSpec, buildSummarySpec, type CardSpec } from './_lib/cardSpec.js'
 import { displayHost, siteOrigin } from './_lib/env.js'
 import { loadFonts } from './_lib/fonts.js'
 import { loadOg } from './_lib/og-runtime.js'
-import { cropPlan, fetchImageDataUri, type CropPlan } from './_lib/imagery.js'
-import { SHARE_ID_RE, fetchShare, shareFromParams, type ShareRecord } from './_lib/share.js'
+import { cropPlan, fetchImageDataUri } from './_lib/imagery.js'
+import { SHARE_ID_RE, cardInputFromShare, fetchShare, shareFromParams, shareTimeZone, summaryFromParams, type ShareRecord } from './_lib/share.js'
 
 /** PC renders a 630² crop in 1–3 s, occasionally much longer; stay well inside maxDuration. */
 const IMAGE_TIMEOUT_MS = 9000
@@ -45,7 +49,7 @@ async function render(element: ReturnType<typeof defaultCard>, cacheControl: str
 }
 
 type CardImage =
-  | { kind: 'image'; dataUri: string; plan: CropPlan }
+  | { kind: 'image'; dataUri: string }
   | { kind: 'none' } //      not an imaged share: the geometry plate is the design
   | { kind: 'permanent' } // imaged, but no capture or one that can't be cropped here (final)
   | { kind: 'transient' } // the archive was slow or failed just now (retry soon)
@@ -55,7 +59,22 @@ async function cardImage(share: ShareRecord): Promise<CardImage> {
   const plan = share.capture ? cropPlan(share.capture, share.lat, share.lon, PLATE) : null
   if (!plan) return { kind: 'permanent' }
   const dataUri = await fetchImageDataUri(plan.url, IMAGE_TIMEOUT_MS)
-  return dataUri ? { kind: 'image', dataUri, plan } : { kind: 'transient' }
+  return dataUri ? { kind: 'image', dataUri } : { kind: 'transient' }
+}
+
+/** A week's summary: the best look's crop (when it has one) beside the count of satellites. */
+async function renderSummary(q: URLSearchParams, host: string): Promise<Response | null> {
+  const sum = summaryFromParams(q)
+  if (!sum) return null
+  const spec = buildSummarySpec({ ...sum, timeZone: shareTimeZone(sum), host })
+  const cap = sum.best?.capture
+  const plan = cap ? cropPlan(cap, sum.lat, sum.lon, PLATE) : null
+  const dataUri = plan ? await fetchImageDataUri(plan.url, IMAGE_TIMEOUT_MS) : null
+  return render(shareCard({ spec, image: dataUri ? { dataUri } : null }), plan && !dataUri ? CACHE.degraded : CACHE.final)
+}
+
+async function renderDefault(host: string, cache: string): Promise<Response> {
+  return render(defaultCard({ host, plateDataUri: await defaultPlateDataUri() }), cache)
 }
 
 export async function handleOg(request: Request): Promise<Response> {
@@ -71,22 +90,26 @@ export async function handleOg(request: Request): Promise<Response> {
         if (r.status === 'found') share = r.share
         else degraded = true
       } else degraded = true
-    } else {
+    } else if (url.searchParams.get('kind') === 'summary') {
+      const res = await renderSummary(url.searchParams, host)
+      if (res) return res
+    } else if (url.searchParams.get('kind') !== 'place') {
       share = shareFromParams(url.searchParams)
     }
 
-    if (!share) return await render(defaultCard({ host }), degraded ? CACHE.degraded : CACHE.default)
+    // No pass to draw (the root link, an address-bar place link, a missing share): the default card,
+    // whose real photograph and invitation suit any place.
+    if (!share) return await renderDefault(host, degraded ? CACHE.degraded : CACHE.default)
 
     const img = await cardImage(share)
-    const image = img.kind === 'image' ? { dataUri: img.dataUri, plan: img.plan } : null
-    const imageMiss = img.kind === 'permanent' ? 'permanent' : 'transient'
+    const spec: CardSpec = buildCardSpec(cardInputFromShare(share, host, img.kind === 'permanent' ? 'permanent' : undefined))
     // Only a transient archive miss is worth re-rendering soon; everything else is final.
     const cache = degraded || img.kind === 'transient' ? CACHE.degraded : CACHE.final
-    return await render(shareCard({ share, image, imageMiss, host }), cache)
+    return await render(shareCard({ spec, image: img.kind === 'image' ? { dataUri: img.dataUri } : null }), cache)
   } catch (err) {
     console.error('[og] render failed', err)
     try {
-      return await render(defaultCard({ host }), CACHE.degraded)
+      return await renderDefault(host, CACHE.degraded)
     } catch {
       return new Response('card unavailable', { status: 500, headers: { 'cache-control': 'no-store' } })
     }

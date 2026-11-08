@@ -5,6 +5,8 @@
  * Everything that arrives here is untrusted (the RPC output was user input once; query params
  * are anyone's). Each field is re-validated and clamped before it reaches a renderer.
  */
+import tzlookup from '@photostructure/tz-lookup'
+import { CLOUDED_PCT, VERDICT_WORDS, localStamp, type CardInput, type SummaryInput } from './cardSpec.js'
 import { supabaseConfig } from './env.js'
 
 export type Verdict = 'imaged' | 'likely' | 'could' | 'overhead'
@@ -30,8 +32,13 @@ export interface ShareCapture {
   platform?: string
   datetime?: number
   cloudCoverPct?: number
+  /** Cloud class of the pixel at the place, if the share stored it (see isCloudedCapture). */
+  spot?: SpotCloud
   gsdM?: number
 }
+
+const SPOT_CLOUD = ['clear', 'cirrus', 'cloud', 'shadow', 'unknown'] as const
+type SpotCloud = (typeof SPOT_CLOUD)[number]
 
 /** The subset of a Pass the card uses (the stored pass has a few more fields). Ranges match create_share. */
 export interface SharePass {
@@ -109,6 +116,7 @@ export function captureOf(v: unknown): ShareCapture | undefined {
     platform: text(v.platform, 40),
     datetime: num(v.datetime, 0, 8.64e15),
     cloudCoverPct: num(v.cloudCoverPct, 0, 100),
+    spot: (SPOT_CLOUD as readonly unknown[]).includes(v.spot) ? (v.spot as SpotCloud) : undefined,
     gsdM: num(v.gsdM, 0.1, 100_000),
   }
 }
@@ -197,9 +205,103 @@ export function shareFromParams(q: URLSearchParams): ShareRecord | null {
       azimuthDeg: num(q.get('az'), 0, 360),
       headingDeg: num(q.get('hdg'), 0, 360),
       elevationDeg: num(q.get('el'), -90, 90),
+      groundSpeedKmS: num(q.get('spd'), 0, 12),
       verdict,
     },
   }
+}
+
+// ── Places (address-bar links: /?q=lat,lon&n=label) ─────────────────────────────────────────
+
+export interface SharedPlace {
+  label: string
+  /** Rounded to 2 decimals (≈ 1 km), whatever precision the link carried */
+  lat: number
+  lon: number
+}
+
+/**
+ * A place from an address-bar link (`q=43.4723,-80.5449&n=Waterloo`) or explicit card params
+ * (`place=…&lat=…&lon=…`). Coordinates are coarsened to 0.01° before anything prints them.
+ * Null unless the coordinates are valid. The label falls back to the coordinates.
+ */
+export function placeFromParams(q: URLSearchParams): SharedPlace | null {
+  let lat: number | undefined
+  let lon: number | undefined
+  const pair = q.get('q')
+  if (pair) {
+    const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(pair)
+    if (m) {
+      lat = num(m[1], -90, 90)
+      lon = num(m[2], -180, 180)
+    }
+  } else {
+    lat = num(q.get('lat'), -90, 90)
+    lon = num(q.get('lon'), -180, 180)
+  }
+  if (lat === undefined || lon === undefined) return null
+  const r = { lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100 }
+  // A label that names a street address or exact coordinates is not printed (as cityLevelLabel in the app).
+  const raw = text(q.get('n') ?? q.get('place'), 80)
+  const label = raw && !/\d/.test(raw) ? raw : `${Math.abs(r.lat).toFixed(2)}°${r.lat >= 0 ? 'N' : 'S'} ${Math.abs(r.lon).toFixed(2)}°${r.lon >= 0 ? 'E' : 'W'}`
+  return { label, ...r }
+}
+
+// ── Summary links (share SH6): the week at a place, carried in the link itself ─────────────
+
+/** Summary params a summary link carries next to q / n (nothing is stored server-side). */
+export const SUMMARY_KEYS = ['sv', 'sc', 'sw', 'bc', 'bi', 'bs', 'bt', 'bg'] as const
+
+/**
+ * A summary from a link: `sv` satellites that photographed, `sc` the four verdict counts
+ * ("31,220,1544,66"), `sw` the window end (ms), and the best look: `bc` collection, `bi` item id,
+ * `bs` satellite name, `bt` time (ms), `bg` pixel size (m). Null unless place, sv and sc are valid.
+ */
+export type LinkSummary = Omit<SummaryInput, 'host' | 'timeZone' | 'best'> & {
+  place: SharedPlace
+  best?: { satName: string; tClosest?: number; capture: ShareCapture }
+}
+
+export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
+  const place = placeFromParams(q)
+  const satellites = num(q.get('sv'), 0, 100_000)
+  const counts = (q.get('sc') ?? '').split(',').map((v) => num(v, 0, 10_000_000))
+  if (!place || satellites === undefined || counts.length !== 4 || counts.some((v) => v === undefined)) return null
+  const [imaged, likely, could, overhead] = counts.map((v) => Math.round(v!))
+  const capture = captureOf({ collection: q.get('bc'), itemId: q.get('bi'), gsdM: q.get('bg') })
+  const satName = text(q.get('bs'), 40)
+  const tClosest = num(q.get('bt'), 0, 8.64e15)
+  return {
+    place,
+    placeLabel: place.label,
+    lat: place.lat,
+    lon: place.lon,
+    satellites: Math.round(satellites),
+    counts: { imaged, likely, could, overhead },
+    windowEnd: num(q.get('sw'), 0, 8.64e15),
+    best: capture && satName ? { satName, tClosest, capture } : undefined,
+  }
+}
+
+/** "7 satellites photographed Waterloo this week" */
+export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>): string {
+  const n = s.satellites
+  return n > 0 ? `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${s.placeLabel} this week` : `What passed over ${s.placeLabel} this week`
+}
+
+export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel'>): string {
+  const passes = s.counts.likely + s.counts.could + s.counts.overhead
+  const best = s.best ? ` The clearest picture is from ${s.best.satName}.` : ''
+  return `${s.counts.imaged} real images and ${passes.toLocaleString('en-US')} more passes over ${s.placeLabel} in the last 7 days.${best} What photographed you this week?`
+}
+
+/** "What photographed Waterloo this week" */
+export function placeTitle(p: SharedPlace): string {
+  return `What photographed ${p.label} this week`
+}
+
+export function placeDescription(p: SharedPlace): string {
+  return `Every satellite that passed over ${p.label} in the last 7 days, and the actual pictures they took. What photographed you this week?`
 }
 
 // ── Fetch ───────────────────────────────────────────────────────────────────────────────────
@@ -245,7 +347,7 @@ export function satLabel(s: ShareRecord): string {
  */
 export function headlineParts(s: ShareRecord): { lead: string; place: string; tail: string } {
   const sat = satLabel(s)
-  const verb = { imaged: 'photographed', likely: 'swept over', could: 'passed within view of', overhead: 'passed over' }[s.verdict]
+  const verb = VERDICT_WORDS[s.verdict].verb
   // A place already cut short with an ellipsis takes no full stop ("…" not "….").
   return { lead: `${sat} ${verb}`, place: s.placeLabel, tail: s.placeLabel.endsWith('…') ? '' : '.' }
 }
@@ -284,27 +386,75 @@ export function compass(deg: number): string {
   return COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]
 }
 
+/** The IANA zone at the share's place ("America/Toronto"), or UTC if the lookup fails. */
+export function shareTimeZone(s: Pick<ShareRecord, 'lat' | 'lon'>): string {
+  try {
+    return tzlookup(s.lat, s.lon)
+  } catch {
+    return 'UTC'
+  }
+}
+
+/** "11:21 EST on Sun 1 Nov 2026" at the place (the card's stamp, in prose order). */
+function localWhen(ms: number, timeZone: string): string {
+  const [day, time] = localStamp(ms, timeZone).split(' · ')
+  return `${time} on ${day}`
+}
+
 /**
- * og:description in the product voice (DESIGN §7), using only known numbers:
- * "Sentinel-2C crossed 795 km above Waterloo at 16:14 UTC on 1 Nov 2026, moving south.
- *  It was looking 5.3° off nadir. Cloud cover: 26%."
+ * og:description in the product voice (DESIGN §7), using only known numbers, ending on the
+ * question that brings the reader in:
+ * "Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south.
+ *  It was looking 5.3° off nadir. Cloud cover: 26%. What photographed you this week?"
  */
 export function description(s: ShareRecord): string {
   const sat = satLabel(s)
   const p = s.pass
   const t = momentOf(s)
   const alt = p.altitudeKm !== undefined ? ` ${Math.round(p.altitudeKm)} km above` : ' over'
-  const when = t !== undefined ? ` at ${fmtUtc(t).slice(11, 16)} UTC on ${fmtDate(t)}` : ''
+  const when = t !== undefined ? ` at ${localWhen(t, shareTimeZone(s))}` : ''
   const moving = p.headingDeg !== undefined ? `, moving ${compass(p.headingDeg)}` : ''
   const parts: string[] = []
   if (s.verdict === 'could') {
-    parts.push(`${sat} passed within view of ${s.placeLabel}${when}${moving}.`, "It could have pointed here. We can't know whether it did.")
+    parts.push(`${sat} ${VERDICT_WORDS.could.verb} ${s.placeLabel}${when}${moving}.`, "It could have pointed here. Its operator doesn't say whether it did.")
   } else {
     parts.push(`${sat} ${s.verdict === 'overhead' ? 'passed' : 'crossed'}${alt} ${s.placeLabel}${when}${moving}.`)
     if (s.verdict === 'imaged' && p.offNadirDeg !== undefined) parts.push(p.offNadirDeg < 2 ? 'It was looking straight down.' : `It was looking ${p.offNadirDeg.toFixed(1)}° off nadir.`)
-    if (s.verdict === 'imaged' && s.capture?.cloudCoverPct !== undefined) parts.push(`Cloud cover: ${Math.round(s.capture.cloudCoverPct)}%.`)
+    const pct = s.capture?.cloudCoverPct
+    if (s.verdict === 'imaged' && pct !== undefined && pct >= CLOUDED_PCT) parts.push(`It saw mostly cloud (${Math.round(pct)}%).`)
+    else if (s.verdict === 'imaged' && s.capture?.spot === 'cloud') parts.push('Cloud covered the spot.')
+    else if (s.verdict === 'imaged' && pct !== undefined) parts.push(`Cloud cover: ${Math.round(pct)}%.`)
     if (s.verdict === 'likely') parts.push(`${s.placeLabel} was inside its swath.`)
   }
-  parts.push('See every satellite that passed over any place this week.')
+  parts.push('What photographed you this week?')
   return parts.join(' ')
+}
+
+/**
+ * The card input for a stored share (the client builds the same from the live pass: see
+ * src/ui/share/card.ts), so both sides print identical fields.
+ */
+export function cardInputFromShare(s: ShareRecord, host: string, imageMiss?: CardInput['imageMiss']): CardInput {
+  const p = s.pass
+  return {
+    verdict: s.verdict,
+    satName: satLabel(s),
+    placeLabel: s.placeLabel,
+    lat: s.lat,
+    lon: s.lon,
+    tClosest: momentOf(s),
+    timeZone: shareTimeZone(s),
+    pass: {
+      altitudeKm: p.altitudeKm,
+      offNadirDeg: p.offNadirDeg,
+      elevationDeg: p.elevationDeg,
+      groundSpeedKmS: p.groundSpeedKmS,
+      groundDistanceKm: p.groundDistanceKm,
+      azimuthDeg: p.azimuthDeg,
+      headingDeg: p.headingDeg,
+    },
+    capture: s.capture,
+    imageMiss,
+    host,
+  }
 }

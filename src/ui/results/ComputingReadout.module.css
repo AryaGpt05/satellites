@@ -1,36 +1,23 @@
 /*
- * The computing readout occupies the results dock (right, 432px, same top edge as the panel), so the
- * camera's flight to the place (framed left of centre for the panel) stays clear and the results
- * panel takes over in place. Phones: full width at the bottom, under the globe.
+ * The computing readout: the body of the results panel while the engine runs (see ComputingBody.tsx).
+ * No container of its own: the panel (Sheet) is the container, from computing through results.
  */
-.root {
-  position: fixed;
-  z-index: var(--z-panel);
-  top: calc(var(--bezel-inset) + 56px);
-  right: calc(var(--bezel-inset) + var(--margin));
-  width: min(var(--panel-w), calc(100vw - 2 * (var(--bezel-inset) + var(--margin))));
+.body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 20px 22px 16px;
-  background: var(--ink-1);
-  border: 1px solid var(--line-strong);
-  color: var(--bone);
-  animation: enter var(--d-md) var(--ease-out) both;
+  /* Enters after the landing's exit has cleared (phones stack both in the same place). */
+  animation: enter var(--d-md) var(--ease-out) 200ms backwards;
 }
 @keyframes enter {
   from {
     opacity: 0;
-    clip-path: inset(0 0 100% 0);
-  }
-  to {
-    opacity: 1;
-    clip-path: inset(0 0 0 0);
+    transform: translateY(6px);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .root {
-    animation: fade var(--d-md) linear both;
+  .body {
+    animation: fade 200ms linear 120ms backwards;
   }
 }
 @keyframes fade {
@@ -38,92 +25,29 @@
     opacity: 0;
   }
 }
-@media (max-width: 760px) {
-  .root {
-    top: auto;
-    left: var(--bezel-inset);
-    right: var(--bezel-inset);
-    bottom: var(--bezel-inset);
-    width: auto;
-    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
-    gap: 12px;
-  }
-}
 
-.rule {
-  font-variant-numeric: tabular-nums;
-}
-.ruleMain {
-  color: var(--bone-2);
-}
-.clock {
-  order: 3;
-  color: var(--bone-2);
-}
-/* put the clock after the hairline: Rule renders ::after (flex:1) before our clock with order */
-.rule::after {
-  order: 2;
-}
-
-.place {
+.readout {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.name {
-  margin: 0;
-  font-family: var(--font-sans);
-  font-stretch: 75%;
-  font-weight: 560;
-  font-size: clamp(36px, 4vw, 52px);
-  line-height: 0.92;
-  letter-spacing: var(--track-display);
-  overflow-wrap: anywhere;
-}
-.sub {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 14px;
-  font-family: var(--font-mono);
-  font-stretch: 87.5%;
-  font-size: var(--fs-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--bone-3);
-}
-.coords {
-  color: var(--bone-2);
+  gap: 12px;
 }
 
 .lines {
-  margin: 4px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   border-top: 1px solid var(--line);
 }
 .line {
   display: grid;
-  grid-template-columns: 22px 46px minmax(0, 1fr) auto 26px;
-}
-@media (max-width: 760px) {
-  .line {
-    grid-template-columns: 40px minmax(0, 1fr) auto 18px;
-    gap: 6px;
-    font-size: 10px;
-  }
-  .idx {
-    display: none;
-  }
-}
-.line {
+  grid-template-columns: 28px minmax(0, 1fr) 56px 24px;
   align-items: baseline;
-  gap: 8px;
-  padding: 7px 0;
+  gap: 0 8px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--line);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 10px;
+  font-size: var(--fs-meta, 10px);
   letter-spacing: 0.035em;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -131,10 +55,7 @@
   transition: color var(--d-sm) var(--ease-out);
 }
 .idx {
-  color: var(--bone-4);
-}
-.tag {
-  color: var(--bone-3);
+  color: var(--bone-3-mark, rgb(236 232 224 / 0.4));
 }
 .msg {
   overflow: hidden;
@@ -146,18 +67,16 @@
 }
 .status {
   text-align: right;
-  font-size: 9.5px;
+  font-size: var(--fs-micro, 9.5px);
 }
 .idle {
-  color: var(--bone-4);
-}
-.idle .tag {
   color: var(--bone-4);
 }
 .run {
   color: var(--bone);
 }
-.run .tag {
+/* The active step's label carries the signal (V21: no separate code column). */
+.run .msg {
   color: var(--signal);
 }
 .done {
@@ -184,6 +103,7 @@
   height: 1px;
   margin-top: 4px;
   background: var(--line-strong);
+  container-type: inline-size;
 }
 .fill {
   position: absolute;
@@ -194,11 +114,12 @@
 }
 .lead {
   position: absolute;
+  left: 0;
   top: -3px;
   width: 1px;
   height: 7px;
   background: var(--signal);
-  transition: left 280ms var(--ease-out);
+  transition: transform 280ms var(--ease-out);
 }
 .foot {
   display: flex;
@@ -229,15 +150,29 @@
   line-height: 1.6;
   color: var(--warn);
 }
-.actions {
+
+/* ── a shared picture, shown while the recipient's report computes ── */
+.shared {
   display: flex;
-  justify-content: flex-end;
-  margin-top: -4px;
+  flex-direction: column;
+  gap: 10px;
 }
-.cancel {
-  margin-right: -12px;
-  gap: 8px;
-  color: var(--bone-2);
+.sharedFrame {
+  aspect-ratio: 16 / 9;
+}
+.sharedCaption {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: var(--bone-3);
+}
+.sharedCaption b {
+  font-weight: 400;
+  color: var(--signal);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -250,7 +185,19 @@
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  .line {
+    font-size: var(--fs-meta, 11px);
+  }
+}
+/* Phones: a narrower duration column ("0.00 S" is six characters) gives the engine's message room. */
+@media (max-width: 420px) {
+  .line {
+    grid-template-columns: 24px minmax(0, 1fr) 48px 20px;
+    letter-spacing: 0.02em;
+  }
+}
+@media (max-width: 420px) {
   .windowWord {
     display: none;
   }

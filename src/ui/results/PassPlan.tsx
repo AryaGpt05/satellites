@@ -4,7 +4,8 @@
  * satellite riding the track in sync with replay time. North up, local equirectangular projection.
  * Doubles as the left half of the share card for passes without a picture.
  */
-import { useId, useMemo } from 'react'
+import { useId, useMemo, useRef } from 'react'
+import { sceneClock, useSceneFrame } from '@/state/sceneClock'
 import { useApp } from '@/state/store'
 import type { Pass } from '@/types'
 import { cx } from '@/ui/system'
@@ -26,16 +27,30 @@ interface Props {
 }
 
 export function PassPlan({ pass: p, meta, lat, lon, live = true, className, labels = true }: Props) {
-  // Scene time only while replaying / scrubbing (live time would re-render this at 10 Hz for nothing).
-  const simTime = useApp((st) => (live && st.timeMode !== 'live' ? st.simTime : undefined))
   const clipId = `plan-clip-${useId().replace(/:/g, '')}`
   const g = useMemo(() => planGeometry(p, meta, lat, lon), [p, meta, lat, lon])
   const R = g.extent
-  const sat = simTime !== undefined ? satPosition(p, g, simTime) : g.sub
+  const tick = R * 0.03
+  // The satellite rides the track every frame from the scene clock, via attributes (R20): React never
+  // re-renders this for time.
+  const satRef = useRef<SVGRectElement>(null)
+  const lastT = useRef(Number.NaN)
+  useSceneFrame(() => {
+    const st = useApp.getState()
+    const t = st.timeMode === 'live' ? undefined : sceneClock.mode === st.timeMode ? sceneClock.simTime : st.simTime
+    if (t === lastT.current || (t === undefined && Number.isNaN(lastT.current))) return
+    lastT.current = t ?? Number.NaN
+    const q = t !== undefined ? satPosition(p, g, t) : g.sub
+    const el = satRef.current
+    if (!el) return
+    el.setAttribute('x', (q.x - tick).toFixed(2))
+    el.setAttribute('y', (q.y - tick).toFixed(2))
+    el.setAttribute('transform', `rotate(45 ${q.x.toFixed(2)} ${q.y.toFixed(2)})`)
+  }, live)
+  const sat = g.sub
   const chev = 0.045 * R
   const bar = scaleBarKm(2 * R)
   const pts = (a: Pt[]) => a.map((q) => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(' ')
-  const tick = R * 0.03
   const prof = meta.profile
 
   return (
@@ -83,7 +98,7 @@ export function PassPlan({ pass: p, meta, lat, lon, live = true, className, labe
             <line y1={0} y2={0} x1={R * 0.06} x2={R * 0.1} />
           </g>
           <circle r={R * 0.008} className={s.placeDot} />
-          <rect x={sat.x - tick} y={sat.y - tick} width={tick * 2} height={tick * 2} className={s.sat} transform={`rotate(45 ${sat.x} ${sat.y})`} />
+          <rect ref={satRef} x={sat.x - tick} y={sat.y - tick} width={tick * 2} height={tick * 2} className={s.sat} transform={`rotate(45 ${sat.x} ${sat.y})`} />
         </g>
       </svg>
       {labels ? (

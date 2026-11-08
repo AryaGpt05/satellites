@@ -1,331 +1,476 @@
 /**
- * The share card's content (shared by the DOM preview and the PNG renderer), and the PNG renderer.
+ * The share card in the browser: its spec (from the shared builder in api/_lib/cardSpec.ts, so the
+ * preview, this PNG and the server's Open Graph card print identical fields) and the PNG renderer.
  *
- * 1200 × 630 (OG size). Left: the real crop, centred on the ROUNDED place (privacy), with the reticle.
- * Right: wordmark, condensed headline ("Sentinel-2C photographed / Waterloo."), date and time at the
- * place, three readouts, rounded coordinates. No image (could / likely / overhead) → plan view instead.
+ * 1200 × 630 (OG size). Left: the real crop, centred on the ROUNDED place (privacy), with the reticle,
+ * source chip, scale bar and the archive's credit; or the pass geometry when there is no picture.
+ * Right: wordmark + local time, verdict row, headline, three readouts, the invitation footer.
  */
 import { gibsWmsUrl, pcCropUrl, preloadImage } from '@/imagery'
 import type { Capture, Pass, Report } from '@/types'
-import { palette } from '@/ui/system/palette'
-import { captureFor, cropSpec, isDailyMosaic, sensorName } from '../results/lib/captures'
-import { dec1, int, shareHeadline } from '../results/lib/copy'
+import {
+  CARD_COLOR as C,
+  CARD_FS,
+  CARD_H,
+  CARD_W,
+  CHIP_BOX,
+  HEAD,
+  PANEL,
+  PLATE,
+  TONE_COLOR,
+  TRACK,
+  buildCardSpec,
+  buildSummarySpec,
+  hatchPath,
+  plateOrFallback,
+  verdictGlyphPrims,
+  type CardCrop,
+  type CardSpec,
+  type Chip,
+  type PlanPlate,
+  type Prim,
+  type ScaleBar,
+} from '../../../api/_lib/cardSpec'
+import { pickBestLook } from '../results/lib/bestLook'
+import { captureFor } from '../results/lib/captures'
 import type { SatMeta } from '../results/lib/meta'
-import { planGeometry } from '../results/lib/plan'
-import { fmtLocalTime, localParts, zoneAbbr } from '../results/lib/time'
-import { roundedPlace } from './links'
+import { roundedPlace, type SummaryLinkInput } from './links'
 
-export const CARD_W = 1200
-export const CARD_H = 630
+export { CARD_H, CARD_W, PLATE, type CardSpec }
 
-export interface CardSpec {
-  lead: string
-  place: string
-  /** "Sun 1 Nov 2026" */
-  date: string
-  /** "11:21:13 EST" */
-  time: string
-  readouts: { label: string; value: string; unit?: string }[]
-  /** rounded, e.g. "43.47°N 80.54°W" */
-  coords: string
-  /** image to show on the left (crop centred on the rounded place), if any */
-  imageUrl?: string
-  /** small caption over the left square, e.g. "Sentinel-2C · MSI · 10 m" or "Flock 4Q-13 · ground track · swath 32 km" */
-  imageLabel?: string
-  verdict: Pass['verdict']
-  host: string
+export interface CardOptions {
+  /** The picture is mostly cloud (results' isClouded): the clouded variant. */
+  clouded?: boolean
 }
 
-const fmtCoord = (v: number, pos: string, neg: string) => `${Math.abs(v).toFixed(2)}°${v >= 0 ? pos : neg}`
-
-/** Crop URL centred on an arbitrary point (the rounded share point), per provider. */
-export function cropAt(capture: Capture, lat: number, lon: number, px: number): string {
-  const spec = { ...cropSpec(capture.collection), px }
+/** Crop URL for a capture at the card's scale, centred on an arbitrary point (the rounded share point). */
+export function cropUrlFor(capture: Pick<Capture, 'provider' | 'collection' | 'itemId' | 'cropUrl'>, crop: CardCrop, lat: number, lon: number): string | undefined {
+  const opts = { halfSizeKm: crop.halfSizeKm, px: PLATE }
   if (capture.provider === 'planetary-computer' && (capture.collection === 'sentinel-2-l2a' || capture.collection === 'landsat-c2-l2')) {
-    return pcCropUrl(capture.collection, capture.itemId, { lat, lon }, spec).replace(/\.png\?/, '.jpg?')
+    // Planetary Computer renders the same crop as JPEG at a fraction of the PNG's size.
+    return pcCropUrl(capture.collection, capture.itemId, { lat, lon }, opts).replace(/\.png\?/, '.jpg?')
   }
   if (capture.provider === 'gibs') {
     const [layer, time] = capture.itemId.split('@')
-    if (layer && time) return gibsWmsUrl(layer, time, { lat, lon }, spec)
+    return layer && time ? gibsWmsUrl(layer, time, { lat, lon }, opts) : undefined
   }
-  return capture.cropUrl(spec)
+  try {
+    return capture.cropUrl(opts)
+  } catch {
+    return undefined
+  }
 }
 
-export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: string, host: string): CardSpec {
-  const place = report.place
-  const r = roundedPlace(place.lat, place.lon)
+/** The card for a pass, as the sharer sees it (the server builds the same from the stored share). */
+export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: string, host: string, opts: CardOptions = {}): CardSpec {
+  const r = roundedPlace(report.place.lat, report.place.lon)
   const capture = captureFor(report, pass)
-  const h = shareHeadline(pass.verdict, meta.name, place.label)
-  const p = localParts(pass.tClosest, timeZone)
-  const readouts: CardSpec['readouts'] = [{ label: 'Altitude', value: int(pass.altitudeKm), unit: 'km' }]
-  if (pass.verdict === 'overhead') {
-    readouts.push({ label: 'Elevation', value: `${int(pass.elevationDeg)}°` }, { label: 'Speed', value: dec1(pass.groundSpeedKmS), unit: 'km/s' })
-  } else {
-    const res = capture?.gsdM ?? meta.profile?.resolutionM
-    readouts.push(
-      { label: 'Off-nadir', value: `${dec1(pass.offNadirDeg)}°` },
-      res !== undefined
-        ? {
-            // Without an image this is the instrument's best resolution, not a pixel of anything shown.
-            label: capture ? (isDailyMosaic(capture) ? 'Mosaic pixel' : 'Pixel') : 'Resolution',
-            value: res < 1 ? res.toFixed(2) : int(res),
-            unit: 'm',
-          }
-        : { label: 'Distance', value: int(pass.groundDistanceKm), unit: 'km' },
-    )
-  }
-  return {
-    lead: h.lead,
-    place: h.place,
-    date: `${p.weekday} ${p.day} ${p.monthName} ${p.year}`,
-    time: `${fmtLocalTime(pass.tClosest, timeZone, true)} ${zoneAbbr(pass.tClosest, timeZone)}`,
-    readouts,
-    coords: `${fmtCoord(r.lat, 'N', 'S')} ${fmtCoord(r.lon, 'E', 'W')}`,
-    imageUrl: capture ? cropAt(capture, r.lat, r.lon, 640) : undefined,
-    imageLabel: capture ? `${meta.name} · ${sensorName(capture)} · ${int(capture.gsdM)} m` : planLabel(meta),
+  const spec = buildCardSpec({
     verdict: pass.verdict,
+    satName: meta.name,
+    placeLabel: report.place.label,
+    lat: r.lat,
+    lon: r.lon,
+    tClosest: pass.tClosest,
+    timeZone,
+    pass,
+    capture: capture
+      ? {
+          collection: capture.collection,
+          itemId: capture.itemId,
+          provider: capture.provider,
+          platform: capture.platform,
+          gsdM: capture.gsdM,
+          cloudCoverPct: capture.cloudCoverPct,
+          spot: capture.spot,
+          datetime: capture.datetime,
+        }
+      : undefined,
+    clouded: opts.clouded,
     host,
+  })
+  if (spec.plate.kind === 'image' && capture) spec.plate.imageUrl = cropUrlFor(capture, spec.plate.crop, r.lat, r.lon)
+  return spec
+}
+
+/** The week at a place (share SH6): distinct satellites that photographed it, the four counts, the best look. */
+export function summaryFacts(report: Report, placeLabel: string, satName: (norad: number) => string): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { altitudeKm: number; capture: Capture } } {
+  const counts = { imaged: 0, likely: 0, could: 0, overhead: 0 }
+  const photographed = new Set<number>()
+  for (const p of report.passes) {
+    counts[p.verdict]++
+    if (p.verdict === 'imaged') photographed.add(p.norad)
   }
+  const look = pickBestLook(report)
+  const best =
+    look && look.kind !== 'geo'
+      ? {
+          collection: look.capture.collection,
+          itemId: look.capture.itemId,
+          satName: satName(look.pass.norad),
+          tClosest: look.pass.tClosest,
+          gsdM: look.capture.gsdM,
+          altitudeKm: look.pass.altitudeKm,
+          capture: look.capture,
+        }
+      : undefined
+  return { label: placeLabel, lat: report.place.lat, lon: report.place.lon, satellites: photographed.size, counts, windowEnd: report.windowEnd, best }
 }
 
-/** Caption for the plan view (no image): what the line and the band are. */
-function planLabel(meta: SatMeta): string {
-  const p = meta.profile
-  const field = p?.maxOffNadirDeg ? `field of regard ±${int(p.maxOffNadirDeg)}°` : p?.swathKm ? `swath ${int(p.swathKm)} km` : undefined
-  return [meta.name, 'ground track', field].filter(Boolean).join(' · ')
+/** The summary card, as the sharer sees it (the server builds the same from the link's parameters). */
+export function summaryCardSpec(report: Report, placeLabel: string, satName: (norad: number) => string, timeZone: string, host: string): CardSpec {
+  const f = summaryFacts(report, placeLabel, satName)
+  const r = roundedPlace(report.place.lat, report.place.lon)
+  const c = f.best?.capture
+  const spec = buildSummarySpec({
+    placeLabel,
+    lat: r.lat,
+    lon: r.lon,
+    satellites: f.satellites,
+    counts: f.counts,
+    windowEnd: f.windowEnd,
+    timeZone,
+    best: f.best && c ? { satName: f.best.satName, tClosest: f.best.tClosest, capture: { collection: c.collection, itemId: c.itemId, gsdM: c.gsdM } } : undefined,
+    host,
+  })
+  if (spec.plate.kind === 'image' && c) spec.plate.imageUrl = cropUrlFor(c, spec.plate.crop, r.lat, r.lon)
+  return spec
 }
 
-/** Headline size so long satellite names still fit three lines in the right column. */
-export function headlineSize(lead: string): number {
-  const n = lead.length
-  if (n <= 24) return 84
-  if (n <= 32) return 72
-  if (n <= 42) return 62
-  return 54
-}
-
-// ── PNG ───────────────────────────────────────────────────────────────────────────────────
+// ── Canvas ──────────────────────────────────────────────────────────────────────────────────
 
 const SANS = '"Instrument Sans Variable", "Instrument Sans", system-ui, sans-serif'
 const MONO = '"Martian Mono Variable", "Martian Mono", ui-monospace, monospace'
 const SERIF = '"Instrument Serif", Georgia, serif'
 
 type Ctx = CanvasRenderingContext2D & { fontStretch?: string; letterSpacing?: string }
+interface Face {
+  family: string
+  size: number
+  weight?: number
+  italic?: boolean
+  /** CSS font-stretch keyword: mono is 87.5 % (semi-condensed), display 75 % (condensed) */
+  stretch?: 'normal' | 'condensed' | 'semi-condensed'
+  /** px */
+  tracking?: number
+}
 
-function wrap(ctx: Ctx, text: string, maxW: number): string[] {
-  const words = text.split(/\s+/)
+const monoFace = (size: number, tracking = size * TRACK.label, weight = 350): Face => ({ family: MONO, size, weight, stretch: 'semi-condensed', tracking })
+
+function setFace(ctx: Ctx, f: Face) {
+  const lead = `${f.italic ? 'italic ' : ''}${f.weight ?? 400}`
+  const stretch = f.stretch ?? 'normal'
+  if (Reflect.has(ctx, 'fontStretch')) {
+    ctx.font = `${lead} ${f.size}px ${f.family}`
+    ctx.fontStretch = stretch
+  } else if (stretch !== 'normal') {
+    // No ctx.fontStretch (Safari): put the keyword in the font shorthand, and fall back to the plain
+    // face if this canvas rejects it (an invalid assignment leaves the previous font in place).
+    ctx.font = '1px serif'
+    ctx.font = `${lead} ${stretch} ${f.size}px ${f.family}`
+    if (ctx.font === '1px serif') ctx.font = `${lead} ${f.size}px ${f.family}`
+  } else ctx.font = `${lead} ${f.size}px ${f.family}`
+  if (nativeTracking(ctx)) ctx.letterSpacing = `${f.tracking ?? 0}px`
+}
+
+const nativeTracking = (ctx: Ctx) => Reflect.has(ctx, 'letterSpacing')
+
+/** Width of `text` in the current face, tracking included (CSS adds it after every glyph). */
+function textWidth(ctx: Ctx, text: string, tracking: number): number {
+  if (nativeTracking(ctx)) return ctx.measureText(text).width
+  return ctx.measureText(text).width + tracking * Array.from(text).length
+}
+
+/** Draw text with tracking even where the canvas has no `letterSpacing` (per-glyph fallback). */
+function fillText(ctx: Ctx, text: string, x: number, y: number, tracking: number) {
+  if (nativeTracking(ctx) || !tracking) {
+    ctx.fillText(text, x, y)
+    return
+  }
+  let cx = x
+  for (const ch of Array.from(text)) {
+    ctx.fillText(ch, cx, y)
+    cx += ctx.measureText(ch).width + tracking
+  }
+}
+
+/** Baseline of a line box (CSS model): half-leading, then the font's ascent. */
+function baselineIn(ctx: Ctx, top: number, lineH: number): number {
+  const m = ctx.measureText('Hg')
+  const asc = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent ?? lineH * 0.8
+  const desc = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent ?? lineH * 0.2
+  return top + (lineH - (asc + desc)) / 2 + asc
+}
+
+/** Word wrap that, like the browser and satori, may also break after a hyphen. */
+function wrap(ctx: Ctx, text: string, maxW: number, tracking: number): string[] {
+  // Words, each hyphenated part kept with its hyphen ("Saint-", "Jean-", "sur-", "Richelieu,"). No
+  // regex lookbehind: Safari before 16.4 can't parse one, and this module ships to every browser.
+  const tokens = text
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((w) => w.replace(/-/g, '-\u0000').split('\u0000').filter(Boolean))
+  // Re-attach the separators: a token that ended with "-" joins the next without a space.
   const lines: string[] = []
   let line = ''
-  for (const w of words) {
-    const test = line ? `${line} ${w}` : w
-    if (ctx.measureText(test).width > maxW && line) {
+  for (const tok of tokens) {
+    const sep = line && !line.endsWith('-') ? ' ' : ''
+    const test = line + sep + tok
+    if (line && textWidth(ctx, test, tracking) > maxW) {
       lines.push(line)
-      line = w
+      line = tok
     } else line = test
   }
   if (line) lines.push(line)
   return lines
 }
 
+function drawPrims(ctx: Ctx, prims: Prim[]) {
+  for (const p of prims) {
+    ctx.save()
+    if (p.t === 'circle') {
+      ctx.beginPath()
+      ctx.arc(p.cx, p.cy, p.r, 0, Math.PI * 2)
+      if (p.fill) {
+        ctx.fillStyle = p.fill
+        ctx.fill()
+      }
+      if (p.stroke) {
+        ctx.strokeStyle = p.stroke
+        ctx.lineWidth = p.width ?? 1
+        ctx.stroke()
+      }
+    } else {
+      const path = new Path2D(p.d)
+      if (p.fill) {
+        ctx.fillStyle = p.fill
+        ctx.fill(path)
+      }
+      if (p.stroke || p.grad) {
+        if (p.grad) {
+          const g = ctx.createLinearGradient(p.grad.x1, p.grad.y1, p.grad.x2, p.grad.y2)
+          g.addColorStop(0, p.grad.from)
+          g.addColorStop(1, p.grad.to)
+          ctx.strokeStyle = g
+        } else ctx.strokeStyle = p.stroke!
+        ctx.lineWidth = p.width ?? 1
+        if (p.dash) ctx.setLineDash(p.dash)
+        ctx.stroke(path)
+      }
+    }
+    ctx.restore()
+  }
+}
+
+/** A flat ink chip: padding, 1px line-strong border, mono segments separated by CHIP_BOX.gap. */
+function drawChip(ctx: Ctx, chip: Chip, plateSize = PLATE) {
+  const f = monoFace(chip.size)
+  setFace(ctx, f)
+  const segs = chip.segs.map((s) => ({ ...s, text: s.text.toUpperCase() }))
+  const widths = segs.map((s) => textWidth(ctx, s.text, f.tracking!))
+  const lineH = chip.size * CHIP_BOX.lineH
+  const w = widths.reduce((a, b) => a + b, 0) + CHIP_BOX.gap * (segs.length - 1) + CHIP_BOX.padX * 2 + 2
+  const h = lineH + CHIP_BOX.padTop + CHIP_BOX.padBottom + 2
+  const { left, right, top, bottom } = chip.pos
+  const x = left !== undefined ? left : plateSize - (right ?? 0) - w
+  const y = top !== undefined ? top : plateSize - (bottom ?? 0) - h
+  ctx.fillStyle = C.chip
+  ctx.fillRect(x, y, w, h)
+  ctx.strokeStyle = C.lineStrong
+  ctx.lineWidth = 1
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1)
+  const base = baselineIn(ctx, y + 1 + CHIP_BOX.padTop, lineH)
+  let cx = x + 1 + CHIP_BOX.padX
+  segs.forEach((s, i) => {
+    ctx.fillStyle = TONE_COLOR[s.tone]
+    fillText(ctx, s.text, cx, base, f.tracking!)
+    cx += widths[i] + CHIP_BOX.gap
+  })
+}
+
+/** ├── 1 KM ──┤ in a chip at the plate's top right. */
+function drawScale(ctx: Ctx, s: ScaleBar) {
+  if (s.px <= 0) return
+  const f = monoFace(CARD_FS.chip)
+  setFace(ctx, f)
+  const label = s.label.toUpperCase()
+  const lw = textWidth(ctx, label, f.tracking!)
+  const lineH = CARD_FS.chip * CHIP_BOX.lineH
+  const w = s.px + CHIP_BOX.gap + lw + CHIP_BOX.padX * 2 + 2
+  const h = lineH + CHIP_BOX.padTop + CHIP_BOX.padBottom + 2
+  const x = PLATE - 24 - w
+  const y = 24
+  ctx.fillStyle = C.chip
+  ctx.fillRect(x, y, w, h)
+  ctx.strokeStyle = C.lineStrong
+  ctx.lineWidth = 1
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1)
+  const bx = x + 1 + CHIP_BOX.padX
+  const cy = y + h / 2
+  ctx.fillStyle = C.bone
+  ctx.fillRect(bx, cy - 5, 2, 10)
+  ctx.fillRect(bx + s.px - 2, cy - 5, 2, 10)
+  ctx.fillRect(bx, cy - 1, s.px, 2)
+  ctx.fillStyle = C.bone
+  fillText(ctx, label, bx + s.px + CHIP_BOX.gap, baselineIn(ctx, y + 1 + CHIP_BOX.padTop, lineH), f.tracking!)
+}
+
+function drawPlan(ctx: Ctx, plan: PlanPlate) {
+  ctx.fillStyle = C.ink1
+  ctx.fillRect(0, 0, PLATE, PLATE)
+  drawPrims(ctx, plan.prims)
+  plan.chips.forEach((c) => drawChip(ctx, c))
+  drawScale(ctx, plan.scale)
+}
+
+/** Mono caps text centred vertically in a [top, height] box; `align` right anchors at x. */
+function rowText(ctx: Ctx, text: string, x: number, box: readonly [number, number], color: string, face: Face, align: 'left' | 'right' = 'left') {
+  setFace(ctx, face)
+  const t = text.toUpperCase()
+  const w = textWidth(ctx, t, face.tracking ?? 0)
+  ctx.fillStyle = color
+  fillText(ctx, t, align === 'left' ? x : x - w, baselineIn(ctx, box[0], box[1]), face.tracking ?? 0)
+  return w
+}
+
 /**
  * Render the card to a PNG blob on a canvas (fonts are the page's own web fonts; the crop is CORS-clean
  * because every archive sends `Access-Control-Allow-Origin: *` and preloadImage asks anonymously).
- * `drawPlan` paints the left square when there is no image.
  */
-export async function renderCardPng(spec: CardSpec, drawPlan?: (ctx: CanvasRenderingContext2D, size: number) => void): Promise<Blob> {
-  const fontsToLoad = [`560 84px ${SANS}`, `400 20px ${MONO}`, `italic 400 84px ${SERIF}`]
+export async function renderCardPng(spec: CardSpec): Promise<Blob> {
+  const fontsToLoad = [`560 84px ${SANS}`, `400 24px ${SANS}`, `350 13px ${MONO}`, `500 16px ${MONO}`, `italic 400 84px ${SERIF}`]
   try {
     await Promise.all(fontsToLoad.map((f) => document.fonts?.load(f)))
   } catch {
     /* fall back to whatever is available */
   }
-  const img = spec.imageUrl ? await preloadImage(spec.imageUrl).catch(() => null) : null
+  const url = spec.plate.kind === 'image' ? spec.plate.imageUrl : undefined
+  const img = url ? await preloadImage(url).catch(() => null) : null
 
   const cv = document.createElement('canvas')
   cv.width = CARD_W
   cv.height = CARD_H
   const ctx = cv.getContext('2d') as Ctx | null
   if (!ctx) throw new Error('Canvas unavailable')
-  const S = CARD_H // left square size
+  ctx.textBaseline = 'alphabetic'
 
-  // ground
-  ctx.fillStyle = palette.ink0
+  ctx.fillStyle = C.ink0
   ctx.fillRect(0, 0, CARD_W, CARD_H)
 
-  // left: image or plan
-  if (img) ctx.drawImage(img, 0, 0, S, S)
-  else if (drawPlan) drawPlan(ctx, S)
-  // reticle at the centre of the left square
-  const c = S / 2
-  ctx.strokeStyle = palette.signal
-  ctx.lineWidth = 1.5
+  // ── the plate ──
+  const plate = plateOrFallback(spec.plate, !!img)
+  ctx.save()
   ctx.beginPath()
-  ctx.arc(c, c, 22, 0, Math.PI * 2)
-  ctx.moveTo(c, c - 46)
-  ctx.lineTo(c, c - 30)
-  ctx.moveTo(c, c + 30)
-  ctx.lineTo(c, c + 46)
-  ctx.moveTo(c - 46, c)
-  ctx.lineTo(c - 30, c)
-  ctx.moveTo(c + 30, c)
-  ctx.lineTo(c + 46, c)
-  ctx.stroke()
-  ctx.fillStyle = palette.signal
-  ctx.fillRect(c - 2, c - 2, 4, 4)
-  // image label chip
-  ctx.font = `400 15px ${MONO}`
-  ctx.textBaseline = 'middle'
-  if (spec.imageLabel) {
-    const label = spec.imageLabel.toUpperCase()
-    const w = ctx.measureText(label).width + 20
-    ctx.fillStyle = 'rgba(7,8,10,0.8)'
-    ctx.fillRect(18, 18, w, 30)
-    ctx.fillStyle = palette.bone
-    ctx.fillText(label, 28, 34)
+  ctx.rect(0, 0, PLATE, PLATE)
+  ctx.clip()
+  if (plate.kind === 'image' && img) {
+    ctx.drawImage(img, 0, 0, PLATE, PLATE)
+    if (plate.clouded) {
+      ctx.fillStyle = C.veil
+      ctx.fillRect(0, 0, PLATE, PLATE)
+      drawPrims(ctx, [{ t: 'path', d: hatchPath(PLATE), stroke: C.hatch, width: 1 }])
+    }
+    drawPrims(ctx, plate.overlay)
+    drawChip(ctx, plate.chip)
+    drawScale(ctx, plate.scale)
+    if (plate.clouded) drawChip(ctx, plate.clouded)
+    drawChip(ctx, plate.credit)
+  } else if (plate.kind === 'plan') drawPlan(ctx, plate)
+  ctx.restore()
+  ctx.fillStyle = C.lineStrong
+  ctx.fillRect(PLATE, 0, 1, CARD_H)
+
+  // ── the panel ──
+  const X = PANEL.x
+  const R = PANEL.right
+  rowText(ctx, 'Overflight', X, PANEL.top, C.bone, monoFace(CARD_FS.lockup, CARD_FS.lockup * TRACK.lockup, 500))
+  if (spec.stamp) rowText(ctx, spec.stamp, R, PANEL.top, C.bone2, monoFace(CARD_FS.row), 'right')
+  ctx.fillStyle = C.line
+  ctx.fillRect(X, PANEL.rule1, PANEL.w, 1)
+
+  // verdict row: glyph + verdict name, coordinates right
+  ctx.save()
+  ctx.translate(X, PANEL.verdict[0] + (PANEL.verdict[1] - 14) / 2)
+  drawPrims(ctx, verdictGlyphPrims(spec.verdict))
+  ctx.restore()
+  rowText(ctx, spec.verdictLabel, X + 14 + 10, PANEL.verdict, TONE_COLOR[spec.verdictTone], monoFace(CARD_FS.row))
+  rowText(ctx, spec.coords, R, PANEL.verdict, C.bone3, monoFace(CARD_FS.row), 'right')
+
+  // headline, bottom-aligned: condensed lead lines, serif place, optional sub-line
+  const S = spec.size
+  const P = S * HEAD.placeScale
+  const lead: Face = { family: SANS, size: S, weight: 560, stretch: 'condensed', tracking: -0.02 * S }
+  const place: Face = { family: SERIF, size: P, italic: true, tracking: -0.01 * P }
+  const sub: Face = { family: SANS, size: CARD_FS.sub }
+  setFace(ctx, lead)
+  const leadLines = wrap(ctx, spec.lead, PANEL.w, lead.tracking!)
+  setFace(ctx, place)
+  const placeLines = wrap(ctx, `${spec.place}${spec.tail}`, PANEL.w, place.tracking!)
+  setFace(ctx, sub)
+  const subLines = spec.sub ? wrap(ctx, spec.sub, PANEL.w, 0) : []
+  const leadLH = S * HEAD.leadLH
+  const placeLH = P * HEAD.placeLH
+  const subLH = CARD_FS.sub * HEAD.subLH
+  const total = leadLines.length * leadLH + P * HEAD.placeGap + placeLines.length * placeLH + (subLines.length ? HEAD.subGap + subLines.length * subLH : 0)
+  let y = PANEL.headBottom - total
+  ctx.fillStyle = C.bone
+  setFace(ctx, lead)
+  for (const l of leadLines) {
+    fillText(ctx, l, X, baselineIn(ctx, y, leadLH), lead.tracking!)
+    y += leadLH
   }
-  // divider
-  ctx.fillStyle = 'rgba(236,232,224,0.22)'
-  ctx.fillRect(S, 0, 1, CARD_H)
-
-  // right column
-  const x = S + 52
-  const right = CARD_W - 52
-  const maxW = right - x
-  ctx.textBaseline = 'alphabetic'
-  ctx.fillStyle = palette.bone
-  ctx.font = `400 16px ${MONO}`
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '2px'
-  ctx.fillText('OVERFLIGHT', x, 74)
-  ctx.fillStyle = 'rgba(236,232,224,0.4)'
-  const tagline = 'WHAT PHOTOGRAPHED YOU THIS WEEK'
-  ctx.font = `400 12px ${MONO}`
-  ctx.fillText(tagline, x, 98)
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px'
-
-  // headline
-  const size = headlineSize(spec.lead)
-  ctx.font = `560 ${size}px ${SANS}`
-  if ('fontStretch' in ctx) ctx.fontStretch = 'condensed'
-  const lines = wrap(ctx, spec.lead, maxW)
-  let y = 196 + (size * 0.92 * Math.max(0, 3 - lines.length - 1)) / 2
-  ctx.fillStyle = palette.bone
-  for (const l of lines) {
-    ctx.fillText(l, x, y)
-    y += size * 0.94
+  y += P * HEAD.placeGap
+  setFace(ctx, place)
+  for (const l of placeLines) {
+    fillText(ctx, l, X, baselineIn(ctx, y, placeLH), place.tracking!)
+    y += placeLH
   }
-  if ('fontStretch' in ctx) ctx.fontStretch = 'normal'
-  ctx.font = `italic 400 ${Math.round(size * 1.06)}px ${SERIF}`
-  ctx.fillText(`${spec.place}.`, x, y)
-  y += 52
-
-  // date + time
-  ctx.font = `400 18px ${MONO}`
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '1px'
-  ctx.fillStyle = 'rgba(236,232,224,0.64)'
-  ctx.fillText(`${spec.date} · ${spec.time}`.toUpperCase(), x, Math.max(y, 430))
+  if (subLines.length) {
+    y += HEAD.subGap
+    setFace(ctx, sub)
+    ctx.fillStyle = C.bone2
+    for (const l of subLines) {
+      fillText(ctx, l, X, baselineIn(ctx, y, subLH), 0)
+      y += subLH
+    }
+  }
 
   // readouts
-  const ry = 488
-  ctx.fillStyle = 'rgba(236,232,224,0.18)'
-  ctx.fillRect(x, ry - 22, maxW, 1)
-  const colW = maxW / spec.readouts.length
+  ctx.fillStyle = C.line
+  ctx.fillRect(X, PANEL.rule2, PANEL.w, 1)
+  const colW = PANEL.w / spec.readouts.length
   spec.readouts.forEach((r, i) => {
-    const cx = x + i * colW
-    ctx.font = `400 12px ${MONO}`
-    ctx.fillStyle = 'rgba(236,232,224,0.4)'
-    ctx.fillText(r.label.toUpperCase(), cx, ry)
-    ctx.font = `300 30px ${MONO}`
-    ctx.fillStyle = palette.bone
-    if ('letterSpacing' in ctx) ctx.letterSpacing = '-1px'
-    ctx.fillText(r.value, cx, ry + 40)
-    const vw = ctx.measureText(r.value).width
-    if ('letterSpacing' in ctx) ctx.letterSpacing = '1px'
+    const cx = X + i * colW + (i ? 22 : 0)
+    if (i) {
+      ctx.fillStyle = C.line
+      ctx.fillRect(X + i * colW, PANEL.roLabel[0], 1, PANEL.roValue[0] + PANEL.roValue[1] - PANEL.roLabel[0])
+    }
+    rowText(ctx, r.label, cx, PANEL.roLabel, C.bone3, monoFace(CARD_FS.row))
+    const size = spec.readoutSize ?? CARD_FS.readout
+    const vf = monoFace(size, TRACK.readout * size)
+    setFace(ctx, vf)
+    const base = baselineIn(ctx, PANEL.roValue[0], size)
+    ctx.fillStyle = C.bone
+    fillText(ctx, r.value, cx, base, vf.tracking!)
+    const vw = textWidth(ctx, r.value, vf.tracking!)
     if (r.unit) {
-      ctx.font = `400 15px ${MONO}`
-      ctx.fillStyle = 'rgba(236,232,224,0.4)'
-      ctx.fillText(r.unit.toUpperCase(), cx + vw + 8, ry + 40)
+      const uf = monoFace(CARD_FS.readoutUnit)
+      setFace(ctx, uf)
+      ctx.fillStyle = C.bone3
+      fillText(ctx, r.unit.toUpperCase(), cx + vw + 8, base, uf.tracking!)
     }
   })
 
   // footer
-  ctx.font = `400 13px ${MONO}`
-  ctx.fillStyle = 'rgba(236,232,224,0.4)'
-  ctx.fillText(spec.coords, x, CARD_H - 44)
-  const host = spec.host.toUpperCase()
-  ctx.fillText(host, right - ctx.measureText(host).width, CARD_H - 44)
-  // signal mark: an image exists
-  if (spec.verdict === 'imaged') {
-    const mx = right - 8
-    const my = 66
-    ctx.fillStyle = palette.signal
-    ctx.beginPath()
-    ctx.moveTo(mx, my - 8)
-    ctx.lineTo(mx + 8, my)
-    ctx.lineTo(mx, my + 8)
-    ctx.lineTo(mx - 8, my)
-    ctx.closePath()
-    ctx.fill()
+  ctx.fillStyle = C.line
+  ctx.fillRect(X, PANEL.rule3, PANEL.w, 1)
+  rowText(ctx, spec.footLeft, X, PANEL.foot, C.bone2, monoFace(CARD_FS.row))
+  if (spec.host) {
+    setFace(ctx, monoFace(CARD_FS.row, 0.5))
+    const w = textWidth(ctx, spec.host, 0.5)
+    ctx.fillStyle = C.bone2
+    fillText(ctx, spec.host, R - w, baselineIn(ctx, PANEL.foot[0], PANEL.foot[1]), 0.5)
   }
 
   return new Promise<Blob>((resolve, reject) => cv.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png'))
-}
-
-/** Paint the plan view (no image) into the left square of the PNG card. */
-export function planPainter(pass: Pass, meta: SatMeta, lat: number, lon: number) {
-  return (ctx: CanvasRenderingContext2D, size: number) => {
-    const g = planGeometry(pass, meta, lat, lon)
-    const k = size / (2 * g.extent)
-    const X = (v: { x: number; y: number }) => [size / 2 + v.x * k, size / 2 + v.y * k] as const
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(0, 0, size, size)
-    ctx.clip()
-    ctx.strokeStyle = 'rgba(236,232,224,0.08)'
-    ctx.lineWidth = 1
-    for (const f of [0.25, 0.5, 0.75]) {
-      ctx.beginPath()
-      ctx.moveTo(0, size * f + 0.5)
-      ctx.lineTo(size, size * f + 0.5)
-      ctx.moveTo(size * f + 0.5, 0)
-      ctx.lineTo(size * f + 0.5, size)
-      ctx.stroke()
-    }
-    if (g.band) {
-      ctx.fillStyle = 'rgba(236,232,224,0.05)'
-      ctx.beginPath()
-      g.band.forEach((p, i) => (i ? ctx.lineTo(...X(p)) : ctx.moveTo(...X(p))))
-      ctx.closePath()
-      ctx.fill()
-      ctx.setLineDash([4, 5])
-      ctx.strokeStyle = 'rgba(236,232,224,0.3)'
-      ctx.beginPath()
-      ctx.moveTo(...X(g.band[0]))
-      ctx.lineTo(...X(g.band[1]))
-      ctx.moveTo(...X(g.band[3]))
-      ctx.lineTo(...X(g.band[2]))
-      ctx.stroke()
-      ctx.setLineDash([])
-    }
-    ctx.strokeStyle = 'rgba(236,232,224,0.7)'
-    ctx.lineWidth = 1.5
-    ctx.beginPath()
-    g.track.forEach((p, i) => (i ? ctx.lineTo(...X(p)) : ctx.moveTo(...X(p))))
-    ctx.stroke()
-    const [sx, sy] = X(g.sub)
-    ctx.fillStyle = palette.bone
-    ctx.save()
-    ctx.translate(sx, sy)
-    ctx.rotate(Math.PI / 4)
-    ctx.fillRect(-6, -6, 12, 12)
-    ctx.restore()
-    ctx.setLineDash([2, 5])
-    ctx.strokeStyle = 'rgba(236,232,224,0.45)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(size / 2, size / 2)
-    ctx.lineTo(sx, sy)
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.restore()
-  }
 }

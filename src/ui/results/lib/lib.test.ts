@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Capture, Pass } from '@/types'
+import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
-import { compassAbbr, compassWord, geoSentence, headline, passSentences, plain, shareHeadline } from './copy'
+import { archiveDown, compassAbbr, compassWord, geoSentence, headline, passSentences, placeInProse, placeParts, plain, radarSentence, shareHeadline } from './copy'
 import { groupPasses, visibleCount } from './groups'
-import type { SatMeta } from './meta'
+import { glyphForPass, markColorVar, VERDICT_META, VERDICT_TAG, VERDICT_TITLE, verdictUnit, type SatMeta } from './meta'
 import { frontLine, motionVector, revealProgress, scannedPolygon, sweepRange } from './pushbroom'
 import { replayWindow, windowFraction } from './replay'
-import { fmtDuration, fmtLocalDay, fmtLocalStamp, fmtLocalTime, fmtRelative, fmtTMinus, utcOffsetMin, zoneAbbr } from './time'
+import { fmtDayMonth, fmtDuration, fmtLocalDay, fmtLocalStamp, fmtLocalTime, fmtRelative, fmtSpokenDay, fmtTMinus, localParts, partsAtOffset, spokenRelative, utcLabel, utcOffsetMin, windowOffset, zoneAbbr, zoneLabel } from './time'
 import { dayBoundaries, daylight, hitTest, hourMarks, indexLanes, nearestIndex, stepPass, sunSamples } from './timeline'
 
 const TZ = 'America/Toronto'
@@ -196,8 +197,8 @@ describe('captures', () => {
   it('labels', () => {
     expect(isDailyMosaic(viirs)).toBe(true)
     expect(isDailyMosaic(s2)).toBe(false)
-    expect(productLabel(viirs)).toBe('Daily mosaic, 375 m')
-    expect(productLabel(s2)).toBe('Sentinel-2 L2A, 10 m')
+    expect(productLabel(viirs)).toBe('Daily mosaic · 375 m')
+    expect(productLabel(s2)).toBe('Sentinel-2 L2A · 10 m')
     expect(scaleBarKm(10)).toBe(2)
     expect(scaleBarKm(240)).toBe(20)
     expect(slug('Sentinel-2C — Montréal, QC')).toBe('sentinel-2c-montreal-qc')
@@ -259,6 +260,24 @@ describe('timeline', () => {
   it('handles half-hour zones', () => {
     const days = dayBoundaries(t0, t1, 'Asia/Kolkata')
     expect(new Date(days[0].t).toISOString()).toBe('2026-10-27T18:30:00.000Z')
+  })
+  it('window offsets match Intl at every 15 minutes, across DST changes and odd zones (PERF-03)', () => {
+    const cases: [string, string][] = [
+      [TZ, '2026-10-27T04:00:00Z'], // US DST ends 1 Nov
+      ['Europe/Paris', '2026-10-21T00:00:00Z'], // EU DST ends 25 Oct
+      ['Australia/Lord_Howe', '2026-09-30T00:00:00Z'], // a 30-minute DST change, 4 Oct
+      ['Asia/Kathmandu', '2026-11-01T00:00:00Z'], // +5:45, no DST
+      ['Etc/GMT+9', '2026-11-01T00:00:00Z'],
+    ]
+    for (const [zone, start] of cases) {
+      const a = Date.parse(start)
+      const b = a + 7 * 86_400_000
+      const off = windowOffset(a, b, zone)
+      for (let t = a; t <= b; t += 15 * 60_000) {
+        expect(off(t)).toBe(utcOffsetMin(t, zone))
+        expect(partsAtOffset(t, off(t))).toEqual(localParts(t, zone))
+      }
+    }
   })
   it('hour marks skip midnight', () => {
     const h = hourMarks(t0, t0 + 86_400_000, TZ, 6)
@@ -404,5 +423,159 @@ describe('copy: degenerate geometry reads like a person wrote it', () => {
       }
       expect(shareHeadline(verdict, 'X', 'Waterloo').lead).not.toContain('photographed')
     }
+  })
+})
+
+// ── polish round 1 ──────────────────────────────────────────────────────────────────────────
+
+describe('best look (decision #1)', () => {
+  const cap = (id: string, over: Partial<Capture> = {}): Capture => ({ ...s2, id, itemId: id, ...over })
+  const geo = [{ norad: 60133, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008, gibs: { collection: 'gibs-goes-east' as const, layer: 'L' } }]
+  const report = (captures: Capture[], passes: Pass[], g = geo) => ({ captures, passes, geo: g })
+
+  it('a clear spot beats a cloudier spot even with less scene cloud', () => {
+    const a = cap('A', { spot: 'clear', cloudCoverPct: 40 })
+    const b = cap('B', { spot: 'cloud', cloudCoverPct: 5 })
+    const best = pickBestLook(report([a, b], [pass({ captureId: 'A', tClosest: 1 }), pass({ captureId: 'B', tClosest: 2 })]))
+    expect(best?.kind).toBe('detailed')
+    expect(best && best.kind !== 'geo' && best.capture.id).toBe('A')
+  })
+  it('thin cirrus ranks with clear: it loses only on scene cloud (or a tie)', () => {
+    const clear = cap('C', { spot: 'clear', cloudCoverPct: 35 })
+    const cirrus = cap('I', { spot: 'cirrus', cloudCoverPct: 12 })
+    const r1 = pickBestLook(report([clear, cirrus], [pass({ captureId: 'C', tClosest: 2 }), pass({ captureId: 'I', tClosest: 1 })]))
+    expect(r1 && r1.kind !== 'geo' && r1.capture.id).toBe('I') // less scene cloud wins
+    const tie = cap('T', { spot: 'cirrus', cloudCoverPct: 33 })
+    const r2 = pickBestLook(report([clear, tie], [pass({ captureId: 'C', tClosest: 1 }), pass({ captureId: 'T', tClosest: 2 })]))
+    expect(r2 && r2.kind !== 'geo' && r2.capture.id).toBe('C') // same bucket: clear first, even though older
+  })
+  it('then the more recent one', () => {
+    const a = cap('A', { cloudCoverPct: 21 })
+    const b = cap('B', { cloudCoverPct: 24 })
+    const best = pickBestLook(report([a, b], [pass({ captureId: 'A', tClosest: 1 }), pass({ captureId: 'B', tClosest: 2 })]))
+    expect(best && best.kind !== 'geo' && best.capture.id).toBe('B')
+  })
+  it('falls back to a daylight weather mosaic, then the geostationary frame, then nothing', () => {
+    const m = pickBestLook(report([viirs], [pass({ norad: 43013, captureId: viirs.id })]))
+    expect(m?.kind).toBe('mosaic')
+    const g = pickBestLook(report([], [pass({ verdict: 'likely' })]))
+    expect(g?.kind).toBe('geo')
+    expect(pickBestLook(report([], [pass({ verdict: 'likely' })], []))).toBeNull()
+  })
+  it('clouded: cloud at the spot or ≥ 70 % of the scene', () => {
+    expect(isClouded({ cloudCoverPct: 86 })).toBe(true)
+    expect(isClouded({ cloudCoverPct: 30, spot: 'cloud' })).toBe(true)
+    expect(isClouded({ cloudCoverPct: 30, spot: 'cirrus' })).toBe(false)
+    expect(isClouded({})).toBe(false)
+    expect(byClarity({ pass: pass({ tClosest: 1 }), capture: cap('x', { cloudCoverPct: 90 }) }, { pass: pass({ tClosest: 2 }), capture: cap('y', { cloudCoverPct: 10 }) })).toBeGreaterThan(0)
+  })
+})
+
+describe('groups: photographs clearest first (decision #2)', () => {
+  it('orders detailed captures by clarity, not time', () => {
+    const white = { ...s2, id: 'W', itemId: 'W', cloudCoverPct: 100 }
+    const clear = { ...s2, id: 'K', itemId: 'K', cloudCoverPct: 3 }
+    const groups = groupPasses({ captures: [white, clear], passes: [pass({ captureId: 'W', tClosest: 9 }), pass({ captureId: 'K', tClosest: 1 })] }, meta)
+    const ids = groups[0].items.map((i) => (i.kind === 'pass' ? i.pass.captureId : '')).filter(Boolean)
+    expect(ids).toEqual(['K', 'W'])
+  })
+  it('an archive outage puts the daylight Sentinel-2 / Landsat satellites first among the likely', () => {
+    const passes = [
+      pass({ norad: 43013, verdict: 'likely' }),
+      pass({ norad: 43013, verdict: 'likely' }),
+      pass({ norad: 43013, verdict: 'likely' }),
+      pass({ norad: 60989, verdict: 'likely', sunElevationDeg: 30 }),
+    ]
+    const normal = groupPasses({ captures: [], passes }, meta)
+    const outage = groupPasses({ captures: [], passes }, meta, { archiveFailed: true })
+    expect(normal[0].items[0].meta.name).toBe('NOAA-20')
+    expect(outage[0].items[0].meta.name).toBe('Sentinel-2C')
+  })
+})
+
+describe('one vocabulary for verdicts (R9)', () => {
+  it('derives titles, lane words and units from the single table', () => {
+    expect(VERDICT_TITLE.likely).toBe(VERDICT_META.likely.title)
+    expect(VERDICT_META.likely.title).toBe('Likely photographed')
+    expect(VERDICT_TAG.imaged).toBe('Photo')
+    expect(verdictUnit('imaged', 1)).toBe('image')
+    expect(verdictUnit('imaged', 31)).toBe('images')
+    expect(verdictUnit('could', 1)).toBe('pass')
+    expect(verdictUnit('could', 2)).toBe('passes')
+    expect(shareHeadline('likely', 'Sentinel-2C', 'Waterloo').lead).toBe('Sentinel-2C swept over')
+  })
+  it('signal marks only for detailed captures: an imaged weather satellite is a bone mosaic mark', () => {
+    expect(glyphForPass('imaged', 'open-optical')).toBe('imaged')
+    expect(markColorVar('imaged', 'open-optical')).toBe('var(--signal)')
+    expect(glyphForPass('imaged', 'weather-leo')).toBe('mosaic')
+    expect(markColorVar('imaged', 'weather-leo')).toBe('var(--bone)')
+  })
+})
+
+describe('honest copy (R7, R17)', () => {
+  it('an archive outage is a fact about the archives, not the place', () => {
+    expect(archiveDown({ archiveFailed: true })).toBe(true)
+    expect(archiveDown({ archiveFailed: false, notes: ['The Sentinel-2 and Landsat archives could not be reached'] })).toBe(false)
+    expect(archiveDown({ notes: ['The Sentinel-2 and Landsat archives could not be reached; passes are shown from orbital geometry only.'] })).toBe(true)
+    const t = plain(passSentences({ pass: pass({ verdict: 'likely' }), meta: meta(60989), timeZone: TZ, placeLabel: 'Waterloo', archiveFailed: true }))
+    expect(t).toContain('The archive could not be searched just now.')
+    expect(t).not.toContain('archives can lag')
+  })
+  it('an old pass with no scene has no scene (no "almost certainly recorded")', () => {
+    const p = pass({ verdict: 'likely' })
+    const old = plain(passSentences({ pass: p, meta: meta(60989), timeZone: TZ, placeLabel: 'Waterloo', now: p.tClosest + 5 * 86_400_000 }))
+    expect(old).toContain('No scene exists for this pass.')
+    expect(old).not.toContain('almost certainly')
+    const fresh = plain(passSentences({ pass: p, meta: meta(60989), timeZone: TZ, placeLabel: 'Waterloo', now: p.tClosest + 6 * 3_600_000 }))
+    expect(fresh).toContain('archives can lag')
+  })
+  it('polar night: the sun never rose, and radar needs no light', () => {
+    const passes = [pass({ norad: 40697, verdict: 'could' }), pass({ norad: 40697, verdict: 'could' }), pass({ norad: 25544, verdict: 'overhead' })]
+    const h = headline({ captures: [], notes: [], passes }, meta, -4)
+    expect(h.zeroKind).toBe('dark')
+    expect(h.sunNeverRose).toBe(true)
+    expect(plain(radarSentence(h.radar!))).toBe('Radar doesn’t need light. Sentinel-1A passed within range 2 times.')
+    expect(plain(radarSentence({ names: ['Umbra-08', 'Capella-14'], sats: 9, passes: 1204 }))).toBe(
+      'Radar doesn’t need light. Umbra-08, Capella-14 and 7 other radar satellites passed within range 1,204 times.',
+    )
+  })
+  it('water and deserts take an article', () => {
+    expect(placeInProse('Pacific Ocean')).toBe('the Pacific Ocean')
+    expect(placeInProse('Sahara Desert')).toBe('the Sahara Desert')
+    expect(placeInProse('Waterloo')).toBe('Waterloo')
+    expect(placeParts('Pacific Ocean')).toEqual(['the ', 'Pacific Ocean'])
+    const t = plain(passSentences({ pass: pass({ norad: 59625, verdict: 'could', offNadirDeg: 12 }), meta: meta(59625), timeZone: TZ, placeLabel: 'Pacific Ocean' }))
+    expect(t).toContain('it could have photographed the Pacific Ocean.')
+  })
+})
+
+describe('familiar time zones (R22) and spoken labels (R19)', () => {
+  const nov = Date.parse('2026-11-01T12:00:00Z')
+  const jul = Date.parse('2026-07-01T12:00:00Z')
+  it('maps the big zones the en-US locale leaves as GMT offsets', () => {
+    expect(zoneAbbr(nov, 'Asia/Tokyo')).toBe('JST')
+    expect(zoneAbbr(nov, 'Asia/Seoul')).toBe('KST')
+    expect(zoneAbbr(nov, 'Asia/Kolkata')).toBe('IST')
+    expect(zoneAbbr(nov, 'Europe/Paris')).toBe('CET')
+    expect(zoneAbbr(jul, 'Europe/Berlin')).toBe('CEST')
+    expect(zoneAbbr(jul, 'Europe/Athens')).toBe('EEST')
+    expect(zoneAbbr(nov, 'Europe/London')).toBe('GMT')
+    expect(zoneAbbr(jul, 'Europe/London')).toBe('BST')
+    expect(zoneAbbr(nov, 'Australia/Sydney')).toBe('AEDT')
+    expect(zoneAbbr(jul, 'Australia/Sydney')).toBe('AEST')
+    expect(zoneAbbr(nov, 'Australia/Perth')).toBe('AWST')
+    expect(zoneAbbr(nov, 'America/Sao_Paulo')).toBe('UTC−3')
+  })
+  it('nautical zones read as offsets at sea, never "Etc/GMT+9"', () => {
+    expect(zoneAbbr(nov, 'Etc/GMT+9')).toBe('UTC−9')
+    expect(zoneLabel(nov, 'Etc/GMT+9')).toBe('UTC−9 · at sea')
+    expect(zoneLabel(nov, 'America/New_York')).toBe('America/New York')
+    expect(utcLabel(330)).toBe('UTC+5:30')
+  })
+  it('spells dates and ages out for screen readers', () => {
+    const t = Date.parse('2026-11-06T16:21:00Z')
+    expect(fmtSpokenDay(t, TZ)).toBe('Friday 6 November')
+    expect(spokenRelative(t, t + 41 * 3_600_000)).toBe('41 hours ago')
+    expect(fmtDayMonth(t, TZ)).toBe('6 Nov')
   })
 })

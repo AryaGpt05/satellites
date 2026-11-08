@@ -25,29 +25,30 @@
 }
 .tl,
 .tr {
-  top: calc(var(--bezel-inset) + 14px);
+  top: calc(var(--bezel-inset) + 14px + env(safe-area-inset-top, 0px));
 }
 .bl,
 .br {
-  bottom: calc(var(--bezel-inset) + 14px);
+  bottom: calc(var(--bezel-inset) + 14px + env(safe-area-inset-bottom, 0px));
 }
 .tl,
 .bl {
-  left: calc(var(--bezel-inset) + var(--margin));
+  left: calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-left, 0px));
   justify-items: start;
   text-align: left;
 }
 .tr,
 .br {
-  right: calc(var(--bezel-inset) + var(--margin));
+  right: calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-right, 0px));
   justify-items: end;
   text-align: right;
 }
 
+/* phone spacing */
 @media (max-width: 760px) {
   .tl,
   .tr {
-    top: calc(var(--bezel-inset) + 12px);
+    top: calc(var(--bezel-inset) + 12px + env(safe-area-inset-top, 0px));
   }
   .bl,
   .br {

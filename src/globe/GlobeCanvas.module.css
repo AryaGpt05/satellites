@@ -52,6 +52,10 @@
   will-change: transform, opacity;
   transition: opacity var(--d-sm) var(--ease-out);
 }
+/* Exits: ease-in-out (DESIGN.md §5); the element unmounts when the transition has run. */
+.leaving {
+  transition: opacity var(--d-sm) var(--ease-in-out);
+}
 .callout {
   pointer-events: none;
 }
@@ -95,7 +99,7 @@
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 400;
-  font-size: 11px;
+  font-size: var(--fs-label, 10.5px);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--bone);
@@ -105,45 +109,70 @@
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 350;
-  font-size: 10px;
+  font-size: var(--fs-meta, 10px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
-  color: var(--bone-3);
+  /* under 11px: never below bone-2 (DESIGN.md §3) */
+  color: var(--bone-2);
   font-variant-numeric: tabular-nums;
 }
 .calloutMeta b {
   font-weight: 400;
-  color: var(--bone-2);
+  color: var(--bone);
 }
+/* Signal is for "an image exists": the name says it; the box stays a quiet hairline (V07). */
 .calloutSignal .calloutBox {
-  border-color: var(--signal);
+  border-color: var(--bone-4);
 }
 .calloutSignal .calloutName {
   color: var(--signal);
 }
+/* Stacked layouts: one line, name · altitude (NORAD and imaged time are in the sheet). */
+.calloutCompact .calloutBox {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0;
+  max-width: 60vw;
+  padding: 6px 8px 5px;
+}
+.calloutCompact .calloutName {
+  font-size: var(--fs-meta, 10px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calloutCompact .calloutMeta {
+  flex: none;
+  letter-spacing: 0.04em;
+}
 
 /* ── place coordinate label ─────────────────────────────── */
+/* An ink plate, not a text halo: legible over bright cloud (≥ 4.5:1), flat, no shadow (decision 5). */
 .coord {
   position: absolute;
-  left: 36px;
-  top: -8px;
+  left: 30px;
+  top: -10px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--ink-0) 72%, transparent);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 350;
-  font-size: 10.5px;
+  font-size: var(--fs-meta, 10px);
+  line-height: 16px;
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  /* cartographic halo: legibility over bright cloud, not a drop shadow */
-  text-shadow:
-    0 0 2px var(--ink-0),
-    0 0 1px var(--ink-0);
   transition: opacity var(--d-md) var(--ease-out);
 }
 .coordFlip .coord {
   left: auto;
-  right: 36px;
+  right: 30px;
+}
+.coordBelow .coord {
+  left: 0;
+  top: 24px;
+  transform: translateX(-50%);
 }

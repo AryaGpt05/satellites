@@ -3,14 +3,18 @@
  * Request objects and write the PNGs.
  *
  *   npx tsx scripts/backend-render-og.ts                    # all cases → scratch/backend/og-*.png
- *   npx tsx scripts/backend-render-og.ts --default          # also bake public/og-default.png
+ *   npx tsx scripts/backend-render-og.ts --default          # also bake public/og-default.png (no host in the
+ *                                                            footer unless SITE_URL is set), palette-quantised
+ *                                                            with Pillow when available (~240 KB instead of
+ *                                                            ~820 KB: WhatsApp drops previews over ~300 KB)
  *   npx tsx scripts/backend-render-og.ts --id <shareId>     # a stored share (needs .env.local)
  *   SITE_URL=https://example.org npx tsx …                  # print that host in the card footer
  *
  * The cases use real archive item ids and real SGP4 pass geometry for Waterloo, Ontario (from the
  * ui-results sandbox fixture). They are dev fixtures for this script only.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -49,6 +53,12 @@ const CASES: Record<string, Record<string, string>> = {
     sat: 'Aqua', norad: '27424', verdict: 'imaged', t: '1793649253606', alt: '692.7', off: '48.38', dist: '845.15', az: '68.1',
     hdg: '345.3', collection: 'gibs-modis-aqua', item: 'MODIS_Aqua_CorrectedReflectance_TrueColor@2026-11-02',
   },
+  's2b-clouded': {
+    ...WATERLOO,
+    sat: 'Sentinel-2B', norad: '42063', verdict: 'imaged', t: '1793377877966', alt: '794.7', off: '8.94', cloud: '80.8',
+    dist: '125.23', az: '285.6', hdg: '194.7', collection: 'sentinel-2-l2a', item: 'S2B_MSIL2A_20261030T162419_R040_T17TNJ_20261030T200303',
+  },
+  'place': { kind: 'place', place: 'Waterloo', lat: '43.47', lon: '-80.54' },
   'skysat-could': {
     ...WATERLOO,
     sat: 'SkySat-C3', norad: '41774', verdict: 'could', t: '1793625435556', alt: '397.1', off: '16.99', dist: '121.71', az: '283.1', hdg: '192.1',
@@ -56,6 +66,7 @@ const CASES: Record<string, Record<string, string>> = {
   'iss-overhead': {
     ...WATERLOO,
     sat: 'ISS (Zarya)', norad: '25544', verdict: 'overhead', t: '1793527773425', alt: '427.5', off: '0.87', dist: '6.47', az: '33.9', hdg: '122.9',
+    el: '86.2', spd: '7.36',
   },
   'metop-likely': {
     ...WATERLOO,
@@ -97,8 +108,16 @@ async function main() {
         `${(performance.now() - t0).toFixed(0).padStart(6)} ms  cache: ${res.headers.get('cache-control')}  → ${path.relative(ROOT, file)}`,
     )
     if (name === 'default' && args.includes('--default')) {
-      await writeFile(path.join(ROOT, 'public', 'og-default.png'), buf)
-      console.log('  → public/og-default.png')
+      const dest = path.join(ROOT, 'public', 'og-default.png')
+      await writeFile(dest, buf)
+      try {
+        // Median-cut to 256 colours with dithering: visually identical at card size, a third of the bytes.
+        const py = 'import sys; from PIL import Image; im=Image.open(sys.argv[1]).convert("RGB"); im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG).save(sys.argv[1], optimize=True)'
+        execFileSync('python3', ['-c', py, dest], { stdio: 'pipe' })
+      } catch {
+        console.log('  (Pillow unavailable: the default card stays a full-colour PNG)')
+      }
+      console.log(`  → public/og-default.png  ${((await stat(dest)).size / 1024).toFixed(0)} KB`)
     }
   }
 }

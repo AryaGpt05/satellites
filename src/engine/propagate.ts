@@ -11,7 +11,7 @@
 import { eciToGeodetic, sgp4, type SatRec } from 'satellite.js'
 import { gmst, julianDate, RAD } from '@/lib/geo'
 import type { TrackPoint } from '@/types'
-import { satrecFor } from './catalog'
+import { satrecFor } from './sgp4'
 
 export interface SatState {
   lat: number

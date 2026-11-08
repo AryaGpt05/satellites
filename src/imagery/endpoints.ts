@@ -65,6 +65,18 @@ export function pcPointUrl(collection: StacCollection, itemId: string, place: La
   )
 }
 
+/**
+ * The Sentinel-2 Scene Classification Layer over a small box around the place, as a tiny PNG whose first
+ * channel is the raw class value (single uint8 band, no rescale; nearest resampling).
+ */
+export function pcSclAreaUrl(itemId: string, place: LatLon, halfSizeKm: number, px: number): string {
+  const [w, s, e, n] = bboxAround(place.lat, place.lon, halfSizeKm)
+  return (
+    `${PC_DATA}/item/bbox/${coord(w)},${coord(s)},${coord(e)},${coord(n)}/${px}x${px}.png` +
+    `?collection=sentinel-2-l2a&item=${encodeURIComponent(itemId)}&assets=SCL&resampling=nearest`
+  )
+}
+
 /** Human-facing map of one PC item (HTML). */
 export function pcItemMapUrl(collection: StacCollection, itemId: string): string {
   return `${PC_DATA}/item/map?collection=${collection}&item=${encodeURIComponent(itemId)}`

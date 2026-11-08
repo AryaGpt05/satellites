@@ -1,7 +1,11 @@
 /**
  * Worker pool for pass search.
  *
- * - Size: hardwareConcurrency − 1, clamped to [1, 6]. Created lazily, kept warm between reports.
+ * - Size: hardwareConcurrency − 1, clamped to [1, 4] on desktop and [1, 3] on phones (a week's search is
+ *   ~400 satellites and ~0.5 s: more workers only add start-up and memory). Created lazily (the app warms
+ *   them in idle time after the landing's entrance), kept warm between reports.
+ * - Results come back with their ground tracks packed in one transferable buffer per chunk (tracks.ts),
+ *   materialised lazily, so receiving a chunk costs the main thread almost nothing.
  * - Work is split into small chunks of satellites and handed out dynamically (FIFO across jobs), so a
  *   slow chunk never leaves the other workers idle, and progress streams at chunk granularity. A job
  *   submitted first is served first: the report submits its most urgent satellites as their own job.
@@ -14,6 +18,7 @@
 import type { Pass } from '@/types'
 import { findPasses, type PassQuery, type PassTarget } from './passes'
 import type { WorkerRequest, WorkerResponse } from './passes.worker'
+import { unpackTracks } from './tracks'
 
 /** Default satellites per chunk: large enough to amortise messaging, small enough to balance load. */
 const CHUNK_SIZE = 12
@@ -57,9 +62,14 @@ function abortError(): Error {
   return typeof DOMException !== 'undefined' ? new DOMException('Aborted', 'AbortError') : Object.assign(new Error('Aborted'), { name: 'AbortError' })
 }
 
+/** Phone-class device: a coarse primary pointer (no hover). */
+function isMobileTier(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse) and (hover: none)').matches
+}
+
 export function poolSize(): number {
   const hc = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4
-  return Math.min(6, Math.max(1, hc - 1))
+  return Math.min(isMobileTier() ? 3 : 4, Math.max(1, hc - 1))
 }
 
 class PassPool {
@@ -159,7 +169,7 @@ class PassPool {
       return
     }
     slot.chunk = undefined
-    if (msg.type === 'result') this.complete(chunk, msg.passes)
+    if (msg.type === 'result') this.complete(chunk, unpackTracks(msg.passes, msg.tracks))
     else this.runHere(chunk) // the worker threw: retry once on the main thread
     this.pump()
   }

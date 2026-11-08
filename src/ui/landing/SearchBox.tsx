@@ -9,6 +9,11 @@
  *
  * States shown in the field's status slot and the list: searching, results, no match, unavailable.
  * ARIA 1.2 combobox pattern: the input owns a listbox via aria-controls / aria-activedescendant.
+ *
+ * The list is capped to the space above the on-screen keyboard (visualViewport), so every option can
+ * be scrolled into view while typing on a phone. `onBeforeFocus` lets the landing move the field
+ * before a touch focuses it (see Landing.tsx: iOS pans to the focused field, so it must already be
+ * where it will stay).
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { isAbortError, searchPlaces } from '@/imagery'
@@ -29,6 +34,8 @@ export function SearchBox({
   autoFocus,
   idleTrailing,
   statusOverride,
+  metaHidden,
+  onBeforeFocus,
 }: {
   onSubmit: (place: Place) => void
   onFocusChange?: (focused: boolean) => void
@@ -38,6 +45,13 @@ export function SearchBox({
   idleTrailing?: ReactNode
   /** Replaces the search status above the line (e.g. a locating readout) */
   statusOverride?: ReactNode
+  /** Visually hide the label + status row (still read by assistive tech) */
+  metaHidden?: boolean
+  /**
+   * Touch: called on a tap of the unfocused field, before it is focused, so the caller can move it to
+   * where it will sit while typing. The field is then focused programmatically.
+   */
+  onBeforeFocus?: () => void
 }) {
   const mobile = useIsMobile()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -181,28 +195,86 @@ export function SearchBox({
       )
     ) : focused && !query ? (
       'Name, address or lat, lon'
-    ) : !query && !mobile ? (
-      <Kbd>/</Kbd>
     ) : undefined
 
   const showList = open && focused && fresh
   const activeId = showList && active >= 0 ? `${listId}-${active}` : undefined
 
-  // Keep the list inside the bezel: cap it to the space below the field (it scrolls past that).
+  // Keep the list in view: cap it to the space between the field and the bottom of the *visual*
+  // viewport, which on phones ends at the top of the on-screen keyboard (innerHeight does not change
+  // when iOS / Android open it). It scrolls past that.
   const wrapRef = useRef<HTMLDivElement>(null)
   const [maxH, setMaxH] = useState<number>()
+  // The field's bottom edge, read once per focus (the list closes and reopens as you type: reading
+  // layout each time would force it on every keystroke). Viewport changes re-read it.
+  const field = useRef<{ bottom: number; inset: number } | null>(null)
+  const readField = () => {
+    const wrap = wrapRef.current
+    if (!wrap) return null
+    field.current = {
+      bottom: wrap.getBoundingClientRect().bottom,
+      inset: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bezel-inset')) || 16,
+    }
+    return field.current
+  }
+  useEffect(() => {
+    field.current = null
+    if (!focused) return
+    // Read it once the field has settled where it types (after the landing's 320 ms lift), at the
+    // top of a frame, when layout is clean and the read costs nothing.
+    let raf = 0
+    const t = window.setTimeout(() => (raf = requestAnimationFrame(readField)), 360)
+    return () => {
+      window.clearTimeout(t)
+      cancelAnimationFrame(raf)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused])
   useLayoutEffect(() => {
     if (!showList) return
-    const measure = () => {
-      const r = wrapRef.current?.getBoundingClientRect()
-      if (!r) return
-      const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bezel-inset')) || 16
-      setMaxH(Math.max(156, Math.min(360, window.innerHeight - r.bottom - inset - 12)))
+    let raf = 0
+    const measure = (fresh = false) => {
+      raf = 0
+      const f = fresh || !field.current ? readField() : field.current
+      if (!f) return
+      const { bottom: fieldBottom, inset } = f
+      const vv = window.visualViewport
+      const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight
+      // Above the keyboard: just clear of it. Without one: inside the bezel.
+      const clear = vv && vv.height < window.innerHeight - 80 ? 8 : inset + 12
+      setMaxH(Math.max(120, Math.min(360, bottom - fieldBottom - clear)))
+    }
+    const later = () => {
+      if (!raf) raf = requestAnimationFrame(() => measure(true))
     }
     measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    window.addEventListener('resize', later)
+    window.visualViewport?.addEventListener('resize', later)
+    window.visualViewport?.addEventListener('scroll', later)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', later)
+      window.visualViewport?.removeEventListener('resize', later)
+      window.visualViewport?.removeEventListener('scroll', later)
+    }
   }, [showList])
+
+  // Touch tap on the unfocused field: let the caller lift it first, then focus it ourselves. The
+  // press's own focus/click are suppressed (the field is no longer under the finger by then).
+  const tap = useRef<{ id: number; x: number; y: number } | null>(null)
+  const onPointerDown = (e: React.PointerEvent<HTMLInputElement>) => {
+    if (!onBeforeFocus || e.pointerType !== 'touch' || focused || disabled) return
+    e.preventDefault()
+    tap.current = { id: e.pointerId, x: e.clientX, y: e.clientY }
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLInputElement>) => {
+    const t = tap.current
+    tap.current = null
+    if (!t || t.id !== e.pointerId || Math.hypot(e.clientX - t.x, e.clientY - t.y) > 12) return
+    onBeforeFocus?.()
+    inputRef.current?.focus({ preventScroll: true })
+    swallowGhostClick(t.x, t.y)
+  }
   // The primary action only shows when it can do something: never next to "No match" or "unavailable".
   const canSubmit = canSubmitQuery(query, MIN_QUERY, result && { q: result.q, count: result.places.length })
 
@@ -223,11 +295,14 @@ export function SearchBox({
           </>
         }
         status={statusOverride ?? statusText}
+        metaHidden={metaHidden}
         busy={status === 'searching'}
         invalid={status === 'error' && fresh}
         leading={<Glyph name="search" size={16} />}
         trailing={
           <>
+            {/* the "/" shortcut, where a keyboard is likely: gone once you're in the field */}
+            {!query && !focused && !mobile ? <Kbd className={s.kbd}>/</Kbd> : null}
             {query && !disabled ? (
               <button
                 type="button"
@@ -288,6 +363,9 @@ export function SearchBox({
           timer.current = window.setTimeout(() => void run(v), DEBOUNCE_MS)
         }}
         onKeyDown={onKeyDown}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => (tap.current = null)}
         onFocus={() => {
           setFocused(true)
           if (fresh) setOpen(true)
@@ -300,7 +378,7 @@ export function SearchBox({
         }}
       />
 
-      <div className={cx(s.list, showList && s.listOpen)} style={maxH ? { maxHeight: maxH } : undefined}>
+      <div className={cx(s.list, showList && s.listOpen)} style={maxH ? { maxHeight: maxH } : undefined} data-suggestions>
         {/* Messages sit outside the listbox: only options belong in it. The field's status announces them. */}
         {showList && status === 'error' ? (
           <p className={s.empty}>The place search isn’t answering. Coordinates such as 43.47, −80.54 still work.</p>
@@ -338,4 +416,21 @@ export function SearchBox({
       </div>
     </div>
   )
+}
+
+/** Swallow the click a touch tap produces after the layout moved under the finger. */
+function swallowGhostClick(x: number, y: number) {
+  const done = () => {
+    document.removeEventListener('click', onClick, true)
+    window.clearTimeout(timer)
+  }
+  const onClick = (e: MouseEvent) => {
+    if (Math.hypot(e.clientX - x, e.clientY - y) < 32) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    done()
+  }
+  document.addEventListener('click', onClick, true)
+  const timer = window.setTimeout(done, 700)
 }

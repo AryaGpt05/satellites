@@ -69,7 +69,7 @@ export function Tag({ children, signal, className }: { children: ReactNode; sign
 export function LiveDot({ className }: { className?: string }) {
   const ref = useRef<HTMLSpanElement>(null)
   useWallSecondSync(ref, false)
-  return <span ref={ref} className={cx(s.live, className)} aria-hidden />
+  return <span ref={ref} className={cx(s.live, className)} aria-hidden data-blink />
 }
 
 export { cx }

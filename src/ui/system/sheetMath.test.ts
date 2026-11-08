@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FLICK_PX_PER_MS, MIN_SNAP_PX, clampIndex, resolveSnap, rubberband, snapHeightsPx } from './sheetMath'
+import { FLICK_PX_PER_MS, MIN_SNAP_PX, clampIndex, resolveSnap, rubberband, settleMs, snapHeightsPx, topOvershoot } from './sheetMath'
 
 describe('snapHeightsPx', () => {
   it('turns fractions and px into ascending px heights', () => {
@@ -49,5 +49,38 @@ describe('clampIndex', () => {
     expect(clampIndex(-1, 3)).toBe(0)
     expect(clampIndex(7, 3)).toBe(2)
     expect(clampIndex(1.4, 3)).toBe(1)
+  })
+})
+
+describe('settleMs', () => {
+  it('stays within 200–440 ms', () => {
+    expect(settleMs(0, 0)).toBe(200)
+    expect(settleMs(2000, 0)).toBe(440)
+    expect(settleMs(40, 0)).toBe(200)
+  })
+  it('grows with distance for the same release speed', () => {
+    const a = settleMs(130, 0)
+    const b = settleMs(200, 0)
+    const c = settleMs(260, 0)
+    expect(a).toBeLessThan(b)
+    expect(b).toBeLessThan(c)
+  })
+  it('is shorter for a faster flick over the same distance', () => {
+    expect(settleMs(300, 2.5)).toBeLessThan(settleMs(300, 0.5))
+    expect(settleMs(300, -2.5)).toBe(settleMs(300, 2.5))
+  })
+})
+
+describe('topOvershoot', () => {
+  it('rubber-bands past the top snap by at most the limit', () => {
+    expect(topOvershoot(-500, 400, 56, 32)).toBeGreaterThan(-32)
+    expect(topOvershoot(-10, 400, 56, 32)).toBeLessThan(0)
+  })
+  it('never lifts the sheet above the ceiling', () => {
+    expect(topOvershoot(-500, 64, 56, 32)).toBe(-8)
+    expect(topOvershoot(-500, 50, 56, 32)).toBe(-0)
+  })
+  it('leaves offsets at or below the top snap alone', () => {
+    expect(topOvershoot(12, 64, 56)).toBe(12)
   })
 })

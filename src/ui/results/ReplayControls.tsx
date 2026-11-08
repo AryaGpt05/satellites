@@ -3,8 +3,16 @@
  * window. Scrubbing puts the clock in 'scrub' (the globe follows the store exactly); play resumes
  * 'replay' at the chosen rate (the globe advances it). The in-field window (when the place was inside
  * the swath / field of regard) is marked on the track, with a tick at closest approach.
+ *
+ * Every frame (R20): the progress bar, the playhead, the range value and the T± / UTC readouts are
+ * written through refs from the scene clock (src/state/sceneClock.ts) as transforms and text. React
+ * renders this only when the mode or rate changes, never per tick.
+ *
+ * <ReplayStrip>: the same controls compacted to one 44px row for the phone pass header, so the sweep
+ * can be watched and controlled at the low snap (MOB-16).
  */
-import { useId } from 'react'
+import { useId, useRef } from 'react'
+import { sceneClock, useSceneFrame } from '@/state/sceneClock'
 import { useApp } from '@/state/store'
 import type { Pass } from '@/types'
 import { Glyph, Kbd, cx, fmtUtcTime, useIsMobile } from '@/ui/system'
@@ -13,32 +21,124 @@ import { REPLAY_RATES, replayWindow, windowFraction } from './lib/replay'
 import { fmtDuration, fmtTMinus } from './lib/time'
 import s from './ReplayControls.module.css'
 
-export function ReplayControls({ pass }: { pass: Pass }) {
+/** Scene time for UI: the globe's per-frame clock, or the store's while the globe isn't driving it. */
+function sceneTime(): number {
+  const st = useApp.getState()
+  return sceneClock.mode === st.timeMode ? sceneClock.simTime : st.simTime
+}
+
+interface FrameRefs {
+  progress: React.RefObject<HTMLSpanElement | null>
+  head: React.RefObject<HTMLSpanElement | null>
+  range: React.RefObject<HTMLInputElement | null>
+  tminus: React.RefObject<HTMLSpanElement | null>
+  utc: React.RefObject<HTMLSpanElement | null>
+}
+
+/** Writes the replay position into the DOM once per frame (only what changed). */
+function useReplayFrame(pass: Pass, refs: FrameRefs, dragging: React.RefObject<boolean>) {
+  const last = useRef({ f: -1, tm: '', utc: '' })
+  useSceneFrame(() => {
+    const st = useApp.getState()
+    const w = replayWindow(pass)
+    const now = sceneTime()
+    const inWindow = st.timeMode !== 'live' && now >= w[0] - 1000 && now <= w[1] + 1000
+    const t = inWindow ? Math.min(w[1], Math.max(w[0], now)) : w[0]
+    const f = windowFraction(t, w)
+    const L = last.current
+    if (Math.abs(f - L.f) > 1e-5) {
+      L.f = f
+      if (refs.progress.current) refs.progress.current.style.transform = `scaleX(${f.toFixed(5)})`
+      if (refs.head.current) refs.head.current.style.transform = `translateX(${(f * 100).toFixed(4)}%)`
+      const r = refs.range.current
+      if (r && !dragging.current) r.value = String(Math.round(t / 1000) * 1000)
+    }
+    const tm = fmtTMinus(t, pass.tClosest)
+    if (tm !== L.tm) {
+      L.tm = tm
+      if (refs.tminus.current) refs.tminus.current.textContent = tm
+      const utc = `${fmtUtcTime(t)} UTC`
+      if (refs.utc.current) refs.utc.current.textContent = utc
+      refs.range.current?.setAttribute('aria-valuetext', `${tm}, ${utc}`)
+    }
+  })
+}
+
+function Scrubber({ pass, refs, dragging, compact = false }: { pass: Pass; refs: FrameRefs; dragging: React.RefObject<boolean>; compact?: boolean }) {
   const id = useId()
-  const timeMode = useApp((st) => st.timeMode)
-  const simTime = useApp((st) => st.simTime)
-  const rate = useApp((st) => st.replayRate)
   const w = replayWindow(pass)
-  const playing = timeMode === 'replay'
-  const inWindow = timeMode !== 'live' && simTime >= w[0] - 1000 && simTime <= w[1] + 1000
-  const t = inWindow ? Math.min(w[1], Math.max(w[0], simTime)) : w[0]
   const pct = (x: number) => `${(windowFraction(x, w) * 100).toFixed(3)}%`
+  const inField = pass.tEnd > pass.tStart
+  return (
+    <div className={cx(s.scrub, compact && s.scrubCompact)}>
+      <div className={s.track} aria-hidden>
+        {inField ? <span className={s.field} style={{ left: pct(pass.tStart), width: `calc(${pct(pass.tEnd)} - ${pct(pass.tStart)})` }} /> : null}
+        <span className={s.closest} style={{ left: pct(pass.tClosest) }} />
+        <span ref={refs.progress} className={s.progress} />
+        <span ref={refs.head} className={s.headRail}>
+          <span className={s.head} />
+        </span>
+      </div>
+      <label htmlFor={id} className="sr-only">
+        Scene time within the pass
+      </label>
+      <input
+        id={id}
+        ref={refs.range}
+        type="range"
+        className={s.range}
+        min={w[0]}
+        max={w[1]}
+        step={1000}
+        defaultValue={w[0]}
+        onPointerDown={() => (dragging.current = true)}
+        onPointerUp={() => (dragging.current = false)}
+        onPointerCancel={() => (dragging.current = false)}
+        onChange={(e) => seek(Number(e.target.value))}
+      />
+    </div>
+  )
+}
+
+function PlayButton({ pass, className }: { pass: Pass; className?: string }) {
+  const playing = useApp((st) => st.timeMode === 'replay')
+  return (
+    <button
+      type="button"
+      className={cx(s.play, playing && s.playing, className)}
+      onClick={() => togglePlay(pass)}
+      aria-label={playing ? 'Pause replay' : 'Play replay'}
+      aria-keyshortcuts="Space"
+      data-space="play"
+    >
+      <Glyph name={playing ? 'pause' : 'play'} size={12} />
+    </button>
+  )
+}
+
+function useFrameRefs(): FrameRefs {
+  return {
+    progress: useRef<HTMLSpanElement>(null),
+    head: useRef<HTMLSpanElement>(null),
+    range: useRef<HTMLInputElement>(null),
+    tminus: useRef<HTMLSpanElement>(null),
+    utc: useRef<HTMLSpanElement>(null),
+  }
+}
+
+export function ReplayControls({ pass }: { pass: Pass }) {
+  const rate = useApp((st) => st.replayRate)
+  const refs = useFrameRefs()
+  const dragging = useRef(false)
+  useReplayFrame(pass, refs, dragging)
+  const w = replayWindow(pass)
   const inField = pass.tEnd > pass.tStart
   const mobile = useIsMobile()
 
   return (
     <div className={s.root}>
       <div className={s.row}>
-        <button
-          type="button"
-          className={cx(s.play, playing && s.playing)}
-          onClick={() => togglePlay(pass)}
-          aria-label={playing ? 'Pause replay' : 'Play replay'}
-          aria-keyshortcuts="Space"
-          data-space="play"
-        >
-          <Glyph name={playing ? 'pause' : 'play'} size={12} />
-        </button>
+        <PlayButton pass={pass} />
         <div className={s.rates} role="radiogroup" aria-label="Replay speed">
           {REPLAY_RATES.map((r) => (
             <button
@@ -54,33 +154,12 @@ export function ReplayControls({ pass }: { pass: Pass }) {
           ))}
         </div>
         <div className={s.clock} aria-live="off">
-          <span className={s.tminus}>{fmtTMinus(t, pass.tClosest)}</span>
-          <span className={s.utc}>{fmtUtcTime(t)} UTC</span>
+          <span ref={refs.tminus} className={s.tminus} />
+          <span ref={refs.utc} className={s.utc} />
         </div>
       </div>
 
-      <div className={s.scrub}>
-        <div className={s.track} aria-hidden>
-          {inField ? <span className={s.field} style={{ left: pct(pass.tStart), width: `calc(${pct(pass.tEnd)} - ${pct(pass.tStart)})` }} /> : null}
-          <span className={s.closest} style={{ left: pct(pass.tClosest) }} />
-          <span className={s.progress} style={{ width: pct(t) }} />
-          <span className={s.head} style={{ left: pct(t) }} />
-        </div>
-        <label htmlFor={id} className="sr-only">
-          Scene time within the pass
-        </label>
-        <input
-          id={id}
-          type="range"
-          className={s.range}
-          min={w[0]}
-          max={w[1]}
-          step={1000}
-          value={t}
-          onChange={(e) => seek(Number(e.target.value))}
-          aria-valuetext={`${fmtTMinus(t, pass.tClosest)}, ${fmtUtcTime(t)} UTC`}
-        />
-      </div>
+      <Scrubber pass={pass} refs={refs} dragging={dragging} />
       <div className={s.legend}>
         <span>{fmtUtcTime(w[0])}</span>
         <span className={s.legendMid}>
@@ -101,6 +180,21 @@ export function ReplayControls({ pass }: { pass: Pass }) {
           <Kbd>→</Kbd> previous / next pass of this kind
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/** One-row replay for the phone pass header: play/pause, scrubber, T± readout. */
+export function ReplayStrip({ pass }: { pass: Pass }) {
+  const refs = useFrameRefs()
+  const dragging = useRef(false)
+  useReplayFrame(pass, refs, dragging)
+  return (
+    <div className={s.strip}>
+      <PlayButton pass={pass} className={s.stripPlay} />
+      <Scrubber pass={pass} refs={refs} dragging={dragging} compact />
+      <span ref={refs.tminus} className={s.stripClock} />
+      <span ref={refs.utc} hidden />
     </div>
   )
 }

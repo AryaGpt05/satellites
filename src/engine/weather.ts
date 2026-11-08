@@ -9,9 +9,21 @@
  * So verification is issued one mosaic per call (one `weatherCaptures` call per satellite and UTC day,
  * which is exactly one candidate, since daily mosaics are one image per layer per UTC day), results
  * are collected as they land, and the report can `stop()` at its time budget: everything verified by
- * then is kept, the stragglers are aborted and counted so the report can say so.
+ * then is kept, and the stragglers are handled so the headline count doesn't depend on GIBS's speed:
+ *
+ *  - VIIRS (NOAA-20, NOAA-21, Suomi NPP): the CorrectedReflectance product is global and daily with no
+ *    gaps between swaths, so a daylight in-swath pass whose probe is still out at the budget counts as
+ *    imaged BY RULE (`byRule()`), but only with evidence that the instrument was producing data and the
+ *    day is fully processed: the same satellite has a verified mosaic on a LATER UTC day in this report,
+ *    and the pass is over a day old. Measured 2026-11-08 at Waterloo: Suomi NPP's mosaics were empty from
+ *    2 Nov (instrument outage) and today's were not processed yet, so an unconditional rule claimed six
+ *    photographs that do not exist (and named a satellite in the headline that took none). An explicit
+ *    "no data" answer (an empty probe) never counts.
+ *  - MODIS (Terra, Aqua) has equatorial gaps between swaths: a straggler stays 'likely'.
+ *  - Either way the stragglers keep probing in the background (bounded by `lateMs`), and every one that
+ *    comes back with pixels is reported through `onLate`, so the report can be patched upward only.
  */
-import { weatherCaptures } from '@/imagery'
+import { weatherCandidates, weatherCaptures } from '@/imagery'
 import type { Capture, LatLon, Pass } from '@/types'
 import { getSatInfo } from './catalog'
 import { utcDay } from './match'
@@ -19,17 +31,38 @@ import { utcDay } from './match'
 export interface WeatherLeg {
   /** Resolves once every verification has settled, or the leg was stopped. Never rejects. */
   readonly settled: Promise<void>
-  /** Captures verified so far, newest first. */
+  /** Captures verified so far (before `stop()`), newest first. */
   verified(): Capture[]
+  /** VIIRS mosaics whose verification was still out at `stop()`: imaged by rule (see the header). */
+  byRule(): Capture[]
   /** True once every verification has settled. */
   isDone(): boolean
   /** Mosaics being verified (known once the passes exist), settled, and failed (rejected). */
   progress(): { total: number; settled: number; failed: number }
-  /** Stop waiting: abort the verifications still in flight. Returns how many were cut. */
+  /**
+   * Stop waiting. Verifications still in flight carry on in the background for up to `lateMs` (their
+   * data arrives through `onLate`), then are aborted. Returns how many were cut (VIIRS and MODIS).
+   */
   stop(): number
   /** performance.now() of the first request (0 if none was needed) and of the end (0 while running) */
   timing(): { startedAt: number; finishedAt: number }
 }
+
+export interface WeatherLegOptions {
+  signal?: AbortSignal
+  onSettle?: (settled: number, total: number) => void
+  /**
+   * A straggler verified after `stop()`. `byRule` is true for a VIIRS mosaic already counted by rule (its
+   * pass is imaged already; only the footnote about unconfirmed images changes).
+   */
+  onLate?: (c: Capture, byRule: boolean) => void
+  /** How long stragglers may keep probing after `stop()` (default 20 s). */
+  lateMs?: number
+}
+
+const LATE_MS = 20_000
+/** A daily mosaic is complete once its UTC day is this far behind (GIBS near-real-time latency is hours). */
+const PROCESSED_AFTER_MS = 24 * 3_600_000
 
 /** Passes of satellites whose daily mosaics GIBS serves, grouped by (satellite, UTC day). */
 export function mosaicGroups(passes: readonly Pass[]): Pass[][] {
@@ -44,21 +77,26 @@ export function mosaicGroups(passes: readonly Pass[]): Pass[][] {
   return [...groups.values()]
 }
 
+/** VIIRS daily mosaics have no inter-swath gaps (MODIS has equatorial gaps). */
+export function isGapFreeMosaic(norad: number): boolean {
+  return getSatInfo(norad)?.profile?.gibs?.collection.startsWith('gibs-viirs-') ?? false
+}
+
 /**
  * Start verifying the daily mosaics as soon as `passes` (the GIBS satellites' passes) resolve.
- * `onSettle` fires after each mosaic is settled. Aborting `signal` aborts every request.
+ * `onSettle` fires after each mosaic is settled. Aborting `signal` aborts every request, background
+ * ones included.
  */
-export function startWeatherLeg(
-  place: LatLon,
-  passes: Promise<Pass[]>,
-  opts: { signal?: AbortSignal; onSettle?: (settled: number, total: number) => void } = {},
-): WeatherLeg {
+export function startWeatherLeg(place: LatLon, passes: Promise<Pass[]>, opts: WeatherLegOptions = {}): WeatherLeg {
   const ctl = new AbortController()
   const onOuterAbort = () => ctl.abort()
   opts.signal?.addEventListener('abort', onOuterAbort, { once: true })
 
   const found: Capture[] = []
-  const inFlight = new Set<number>()
+  const rule: Capture[] = []
+  /** Groups still being verified, by index, with the candidate each would produce. */
+  const inFlight = new Map<number, Pass[]>()
+  const counted = new Set<string>()
   let total = 0
   let settledCount = 0
   let failed = 0
@@ -66,6 +104,7 @@ export function startWeatherLeg(
   let done = false
   let startedAt = 0
   let finishedAt = 0
+  let lateTimer: ReturnType<typeof setTimeout> | undefined
   let release: () => void = () => undefined
   const stoppedSignal = new Promise<void>((r) => (release = r))
 
@@ -78,11 +117,12 @@ export function startWeatherLeg(
       startedAt = performance.now()
       await Promise.all(
         groups.map((group, i) => {
-          inFlight.add(i)
+          inFlight.set(i, group)
           return weatherCaptures(place, group, ctl.signal)
             .then(
               (caps) => {
                 if (!stopped) found.push(...caps)
+                else for (const c of caps) opts.onLate?.(c, counted.has(c.id))
               },
               () => {
                 // weatherCaptures only rejects on abort; anything else counts as an unanswered mosaic.
@@ -103,20 +143,40 @@ export function startWeatherLeg(
     .finally(() => {
       done = true
       finishedAt ||= performance.now()
+      clearTimeout(lateTimer)
       opts.signal?.removeEventListener('abort', onOuterAbort)
     })
 
   return {
     settled: Promise.race([work, stoppedSignal]),
     verified: () => [...found].sort((a, b) => b.datetime - a.datetime),
+    byRule: () => [...rule].sort((a, b) => b.datetime - a.datetime),
     isDone: () => done,
     progress: () => ({ total, settled: settledCount, failed }),
     stop: () => {
       if (stopped) return 0
       stopped = true
       const cut = done ? 0 : inFlight.size
-      if (!done) finishedAt = performance.now()
-      ctl.abort()
+      if (!done) {
+        finishedAt = performance.now()
+        // VIIRS stragglers count by rule when the evidence allows (see the header); late answers for them
+        // only confirm (onLate's byRule flag).
+        const now = Date.now()
+        for (const group of inFlight.values()) {
+          if (!group.length || !isGapFreeMosaic(group[0].norad)) continue
+          for (const c of weatherCandidates(place, group)) {
+            if (now - c.datetime < PROCESSED_AFTER_MS) continue
+            const day = utcDay(c.datetime)
+            if (!found.some((f) => f.norad === c.norad && utcDay(f.datetime) > day)) continue
+            rule.push(c)
+            counted.add(c.id)
+          }
+        }
+        // Let the stragglers finish in the background, within reason (or not at all: nobody listens).
+        const lateMs = opts.lateMs ?? LATE_MS
+        if (lateMs > 0) lateTimer = setTimeout(() => ctl.abort(), lateMs)
+        else ctl.abort()
+      }
       release()
       return cut
     },

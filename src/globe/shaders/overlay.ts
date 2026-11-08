@@ -3,7 +3,7 @@
  * plus screen-space hairlines (nadir line, view line, orbit trail). Strokes are measured in screen pixels with
  * fwidth(), so they stay 1 CSS px wide at any zoom and any obliquity.
  */
-import { COMMON, glsl, OUTPUT } from './chunks'
+import { CLOUD_COVER, COMMON, glsl, OUTPUT } from './chunks'
 
 // ───────────────────────────── swath ribbon ─────────────────────────────
 
@@ -25,21 +25,33 @@ export const ribbonVertex = glsl`
 `
 
 /**
- * Reveal model: everything the sensor has swept (along ≤ uNow) is filled; the leading edge is a bright
- * 1.5 px line across the full swath with a short trailing glow (DESIGN.md §5's pushbroom language, on the
- * globe). Ahead of the edge only the swath edges remain, faint, as the predicted path; the ground track
- * appears (dashed, quiet) behind the edge.
+ * Reveal model (DESIGN.md §5–6, V11): the swath reads as a SWEEP, not a slab.
+ *  - Ahead of the front only the predicted edges show, as bone-4 hairlines.
+ *  - The front is a 1 px signal line across the swath with a short trailing glow (uGlowPx CSS px, 30% → 0),
+ *    the same mark as the pushbroom reveal in the panel.
+ *  - Behind it the fill is freshest at the front and fades along-track over ~400 km to a faint persistent tint;
+ *    the edges turn signal at 50%, so the swept corridor stays legible without becoming a block.
+ *  - The fill thins over cloud (fill × (1 − 0.6 · cover)) and over unlit ground, so bright cloud never
+ *    saturates to salmon. Every value stays ≤ 1.0, under the bloom threshold: the ribbon never blooms.
  * uKind: 0 = fixed swath (solid edges), 1 = field of regard (dashed edges, faint fill), 2 = track only.
+ * The mesh is clipped to ±700 km along-track around the place (swath.ts clipAlongTrack); vU fades its ends.
  */
 export const ribbonFragment = glsl`
   ${COMMON}
-  uniform float uNow;
+  ${CLOUD_COVER}
+  uniform float uNow;         // sim time − tClosest, s
   uniform float uPx;
   uniform int uKind;
-  uniform vec3 uColor;
+  uniform vec3 uColor;        // the verdict's colour (signal / bone / ice)
+  uniform vec3 uEdgeColor;    // bone: predicted (unswept) edges
   uniform float uFill;
   uniform float uOpacity;
   uniform vec3 uSunDir;
+  uniform sampler2D uClouds;
+  uniform float uHasClouds;
+  uniform float uCloudOffset;
+  uniform float uSpeedKmS;    // ground speed, km/s: turns seconds behind the front into km
+  uniform float uGlowPx;      // trailing glow length, CSS px
   varying float vAlong;
   varying float vSide;
   varying float vU;
@@ -51,10 +63,17 @@ export const ribbonFragment = glsl`
     return 1.0 - smoothstep(widthPx * 0.5 - 0.5, widthPx * 0.5 + 0.5, px);
   }
 
+  /** Straight-alpha "over". */
+  vec4 over(vec4 src, vec4 dst) {
+    float a = src.a + dst.a * (1.0 - src.a);
+    vec3 c = a > 1e-5 ? (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / a : src.rgb;
+    return vec4(c, a);
+  }
+
   void main() {
     float fwA = fwidth(vAlong);
     float fwS = fwidth(vSide);
-    float lead = uNow - vAlong;                  // > 0: swept
+    float lead = uNow - vAlong;                  // > 0: swept (s behind the front)
     float swept = smoothstep(-fwA, fwA, lead);
     float ends = smoothstep(0.0, 0.07, vU) * smoothstep(1.0, 0.93, vU);
 
@@ -67,33 +86,44 @@ export const ribbonFragment = glsl`
     float dashPx = vAlong / max(fwA, 1e-6) / max(uPx, 1.0);
     float dash = step(0.45, fract(dashPx / 11.0));
 
-    float a = 0.0;
-    vec3 col = uColor;
-    float leadPx = lead / max(fwA, 1e-6) / max(uPx, 1.0);   // CSS px behind the leading edge (< 0: ahead)
+    vec4 acc = vec4(uColor, 0.0);
     if (uKind == 2) {
-      a = track * mix(0.3, 0.85, swept);
+      acc = vec4(uColor, track * mix(0.3, 0.85, swept));
     } else {
-      float edgeA = uKind == 1 ? edge * dash * mix(0.3, 0.62, swept) : edge * mix(0.34, 0.9, swept);
-      // The ground track is quieter than the swath edges: the ribbon already implies it.
-      float trackA = track * mix(0.0, 0.42, swept) * (uKind == 1 ? 1.0 : dash);
-      // Fill: densest just behind the leading edge (the freshest lines, ~1 min of track), settling to a
-      // lighter persistent tint so the swept corridor stays legible without becoming a slab.
-      // uFill is tuned for the day side. Blending happens in linear light, where a fixed alpha reads far
-      // stronger over dark ground (night side: ~2× the design's --signal-2), so the tint gives back alpha
-      // where the surface under it is unlit.
+      // ── fill
+      float kmBehind = max(lead, 0.0) * uSpeedKmS;
+      float fresh = 1.0 - smoothstep(0.0, 400.0, kmBehind);
+      // Blending happens in linear light, where a fixed alpha reads far stronger over dark ground: give alpha
+      // back where the surface is unlit, and over cloud.
       float daylight = smoothstep(-0.08, 0.2, dot(normalize(vPos), normalize(uSunDir)));
-      float fillA = uFill * swept * (0.6 + 0.4 * exp(-max(lead, 0.0) / 60.0)) * mix(0.5, 1.0, daylight);
-      // Leading edge: a 1.5 px line across the swath, with a short glow trailing it (~8 px).
-      float leading = line(lead, fwA, 1.5 * w);
-      float glow = swept * exp(-max(leadPx, 0.0) / 8.0) * 0.32;
-      a = max(max(edgeA, trackA), fillA + glow);
-      a = max(a, leading);
-      // The edge and its glow sit just above 1.0, so the bloom gives them a faint halo.
-      col *= 1.0 + 0.8 * max(leading, glow * 2.0);
+      float cover = 0.0;
+      if (uHasClouds > 0.5) {
+        vec3 n = normalize(vPos);
+        vec2 uv = vec2(0.5 + atan(-n.z, n.x) / TWO_PI + uCloudOffset, 0.5 + asin(clamp(n.y, -1.0, 1.0)) / PI);
+        // A fixed, blurred LOD: no derivative seam at the antimeridian, and modulation wants soft cloud anyway.
+        cover = cloudCover(textureLod(uClouds, uv, 3.0).r);
+      }
+      float fillA = uFill * swept * mix(0.22, 1.0, fresh) * mix(0.5, 1.0, daylight) * (1.0 - 0.6 * cover);
+      // Trailing glow behind the front: uGlowPx CSS px, 30% → 0 (linear), on top of the fill.
+      float leadPx = lead / max(fwA, 1e-6) / max(uPx, 1.0);
+      float glow = swept * clamp(1.0 - leadPx / max(uGlowPx, 1.0), 0.0, 1.0) * 0.3;
+      acc = vec4(uColor, min(1.0, fillA + glow));
+
+      // ── edges: bone-4 ahead of the front, the verdict colour at 50% behind it (dashed for a field of regard)
+      float edgeOn = uKind == 1 ? edge * dash : edge;
+      vec3 edgeCol = mix(uEdgeColor, uColor, swept);
+      acc = over(vec4(edgeCol, edgeOn * mix(0.18, 0.5, swept)), acc);
+      // The ground track is quieter than the edges: the ribbon already implies it.
+      float trackA = track * 0.36 * swept * (uKind == 1 ? 1.0 : dash);
+      acc = over(vec4(uColor, trackA), acc);
+
+      // ── the front: a 1 px line across the swath
+      float leading = line(lead, fwA, w);
+      acc = over(vec4(uColor, leading), acc);
     }
-    a *= ends * uOpacity;
+    float a = acc.a * ends * uOpacity;
     if (a < 0.003) discard;
-    gl_FragColor = vec4(col, a);
+    gl_FragColor = vec4(min(acc.rgb, vec3(1.0)), a);
     ${OUTPUT}
   }
 `

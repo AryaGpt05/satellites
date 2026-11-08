@@ -8,10 +8,10 @@ import {
   InstancedBufferGeometry,
   Float32BufferAttribute,
   ShaderMaterial,
-  Vector2,
+  type Vector2,
   type Vector3,
 } from 'three'
-import { hairlineFragment, hairlineVertex } from './shaders/overlay'
+import { createHairlineMaterial } from './materials'
 
 export class Hairline {
   readonly geometry = new InstancedBufferGeometry()
@@ -20,6 +20,7 @@ export class Hairline {
   private end: InstancedBufferAttribute
   private alpha: InstancedBufferAttribute
   private capacity: number
+  private baseOpacity: number
 
   constructor(opts: { capacity: number; color: Color; width?: number; opacity?: number; uPx: { value: number }; depthTest?: boolean }) {
     this.capacity = Math.max(1, opts.capacity)
@@ -33,20 +34,8 @@ export class Hairline {
     this.geometry.setAttribute('aEnd', this.end)
     this.geometry.setAttribute('aAlpha', this.alpha)
     this.geometry.instanceCount = 0
-    this.material = new ShaderMaterial({
-      vertexShader: hairlineVertex,
-      fragmentShader: hairlineFragment,
-      transparent: true,
-      depthWrite: false,
-      depthTest: opts.depthTest ?? true,
-      uniforms: {
-        uResolution: { value: new Vector2(1, 1) },
-        uWidth: { value: opts.width ?? 1 },
-        uPx: opts.uPx,
-        uColor: { value: opts.color },
-        uOpacity: { value: opts.opacity ?? 1 },
-      },
-    })
+    this.baseOpacity = opts.opacity ?? 1
+    this.material = createHairlineMaterial(opts)
   }
 
   /** Set the polyline. `alphas` (per point) defaults to 1. Points beyond capacity are dropped. */
@@ -73,6 +62,11 @@ export class Hairline {
     this.start.needsUpdate = true
     this.end.needsUpdate = true
     this.alpha.needsUpdate = true
+  }
+
+  /** Multiply the line's opacity (0..1), for fades. */
+  setFade(f: number) {
+    this.material.uniforms.uOpacity.value = this.baseOpacity * f
   }
 
   setResolution(w: number, h: number) {

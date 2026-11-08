@@ -1,6 +1,6 @@
 /**
- * <GlobeCanvas/>: the full-bleed 3D scene. Reads the store; writes only `globeReady`, `hoveredNorad` and the
- * throttled `simTime` of the clock it owns (see Clock.tsx).
+ * <GlobeCanvas/>: the full-bleed 3D scene. Reads the store; writes only `globeReady`, `hoveredNorad`, the
+ * throttled `simTime` of the clock it owns (see Clock.tsx) and `cameraFlight` (CameraDirector, on transitions).
  * See docs/ARCHITECTURE.md ("globe") and docs/DESIGN.md §6.
  *
  * Failure modes are handled here so the app never hangs on the globe:
@@ -20,6 +20,12 @@ import { GlobeScene } from './Scene'
 import s from './GlobeCanvas.module.css'
 
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ')
+
+/** Starting DPR: phones 1.5 (they earn 2.0 by holding 58 fps), desktops min(2, device). */
+function initialDpr(mobile: boolean): number {
+  const device = Math.min(2, Math.max(1, typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1))
+  return mobile ? Math.min(1.5, device) : device
+}
 
 function webgl2Available(): boolean {
   try {
@@ -61,19 +67,23 @@ export function GlobeCanvas({ className }: { className?: string }) {
       ) : (
         <SceneBoundary onError={() => setFailed(true)}>
           <Canvas
-            // DPR is managed by the scene (adaptive, capped [1, 2]).
-            dpr={[1, 2]}
+            // DPR is managed by the scene (Scene.tsx AdaptiveDpr): phones start at 1.5, desktops at min(2, device).
+            dpr={initialDpr(runtime.tier.mobile)}
             gl={{
               antialias: false, // MSAA happens in the post-processing target
               alpha: false,
               stencil: false,
-              depth: true,
+              depth: false, // everything renders through the composer, which owns its depth buffer
               powerPreference: 'high-performance',
             }}
             camera={{ fov: 30, near: 0.01, far: 400, position: [0, 0, 6] }}
             // Tone mapping happens in the post chain (Post.tsx); the renderer itself stays linear.
             flat
-            onCreated={({ gl }) => gl.setClearColor(new Color(palette.ink0), 1)}
+            onCreated={({ gl }) => {
+              gl.setClearColor(new Color(palette.ink0), 1)
+              // Program info-log round trips on every link are a development aid, not a production cost.
+              gl.debug.checkShaderErrors = import.meta.env.DEV
+            }}
             aria-hidden
           >
             <GlobeScene runtime={runtime} />

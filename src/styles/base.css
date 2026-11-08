@@ -16,6 +16,10 @@ html {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   -webkit-text-size-adjust: 100%;
+  /* Touch: no grey iOS flash on square controls (pressed states are drawn by the components), and no
+     double-tap-zoom delay. Pinch zoom stays available. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 body {
   font-family: var(--font-sans);

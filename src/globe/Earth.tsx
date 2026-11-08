@@ -2,10 +2,12 @@
  * The Earth mesh (fixed in the Earth-fixed frame; the sun moves, the planet doesn't) and its cloud shell.
  * Textures arrive progressively; materials re-bind on every upgrade. If textures fail entirely, an ink
  * sphere with a hairline graticule keeps the scene honest and usable.
+ * Phones compile the Earth and cloud shaders with LITE (fewer texture fetches, PERF-08). The cloud shell reuses
+ * the Earth's sphere (scaled), and the soft atmosphere shell is low-poly (PERF-17).
  */
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
-import { BackSide, AdditiveBlending, Color, ShaderMaterial, SphereGeometry, Vector2 } from 'three'
+import { BackSide, AdditiveBlending, Color, ShaderMaterial, SphereGeometry, Vector2, type BufferGeometry } from 'three'
 import { palette } from '@/ui/system/palette'
 import { atmosphereFragment, atmosphereVertex } from './shaders/atmosphere'
 import { cloudsFragment, cloudsVertex } from './shaders/clouds'
@@ -13,8 +15,9 @@ import { earthFallbackFragment, earthFragment, earthVertex } from './shaders/ear
 import { FRAME, useRuntime } from './runtime'
 import type { EarthTextures } from './textures'
 
-/** Linear-space colour from a palette hex (three converts sRGB hex → linear working space). */
-export const lin = (hex: string) => new Color(hex)
+import { lin } from './materials'
+
+export { lin }
 
 export const CLOUD_RADIUS = 1.006
 export const ATMOSPHERE_RADIUS = 1.025
@@ -31,18 +34,21 @@ function useReveal(material: ShaderMaterial | null, durationS: number) {
   }, FRAME.scene)
 }
 
-function useSphere(segments: number) {
+export function useSphere(segments: number) {
   const geo = useMemo(() => new SphereGeometry(1, segments, Math.round(segments / 2)), [segments])
   useEffect(() => () => geo.dispose(), [geo])
   return geo
 }
 
-export function Earth({ textures }: { textures: EarthTextures }) {
+/** Shader defines for the device tier. */
+const tierDefines = (mobile: boolean): Record<string, string> => (mobile ? { LITE: '' } : {})
+
+export function Earth({ textures, geometry }: { textures: EarthTextures; geometry: BufferGeometry }) {
   const rt = useRuntime()
-  const geometry = useSphere(rt.tier.sphereSegments)
   const material = useMemo(
     () =>
       new ShaderMaterial({
+        defines: tierDefines(rt.tier.mobile),
         vertexShader: earthVertex,
         fragmentShader: earthFragment,
         uniforms: {
@@ -106,12 +112,12 @@ export function EarthFallback() {
   return <mesh geometry={geometry} material={material} />
 }
 
-export function Clouds({ textures }: { textures: EarthTextures }) {
+export function Clouds({ textures, geometry }: { textures: EarthTextures; geometry: BufferGeometry }) {
   const rt = useRuntime()
-  const geometry = useSphere(Math.round(rt.tier.sphereSegments * 0.75))
   const material = useMemo(
     () =>
       new ShaderMaterial({
+        defines: tierDefines(rt.tier.mobile),
         vertexShader: cloudsVertex,
         fragmentShader: cloudsFragment,
         transparent: true,
@@ -138,6 +144,8 @@ export function Clouds({ textures }: { textures: EarthTextures }) {
       const img = textures.clouds.image as { width?: number; height?: number } | undefined
       if (img?.width && img.height) material.uniforms.uTexel.value.set(1 / img.width, 1 / img.height)
     }
+    // Overlays (the swath ribbon) read cloud cover from the same map.
+    rt.uniforms.uCloudMap.value = textures.clouds
     const u = material.uniforms.uOpacity
     if (u.value < 1) u.value = Math.min(1, u.value + dt / (rt.reducedMotion ? 0.2 : 1.6))
   }, FRAME.scene)
@@ -147,7 +155,8 @@ export function Clouds({ textures }: { textures: EarthTextures }) {
 
 export function Atmosphere() {
   const rt = useRuntime()
-  const geometry = useSphere(128)
+  // A soft back-face shell: 64×32 is plenty and builds in a fraction of the time.
+  const geometry = useSphere(64)
   const material = useMemo(
     () =>
       new ShaderMaterial({

@@ -3,8 +3,8 @@
  * Pass-search worker. Stateless: each message carries a chunk of targets (catalog rows + field rules)
  * and the query; the worker builds its own SGP4 records and returns the passes.
  */
-import type { Pass } from '@/types'
 import { findPasses, type PassQuery, type PassTarget } from './passes'
+import { packTracks, type BarePass, type PackedTracks } from './tracks'
 
 export interface WorkerRequest {
   type: 'run'
@@ -15,7 +15,8 @@ export interface WorkerRequest {
 
 export type WorkerResponse =
   | { type: 'progress'; chunkId: number; done: number }
-  | { type: 'result'; chunkId: number; passes: Pass[]; ms: number }
+  /** Passes without their tracks, plus all the chunk's tracks in one transferable buffer (see tracks.ts) */
+  | { type: 'result'; chunkId: number; passes: BarePass[]; tracks: PackedTracks; ms: number }
   | { type: 'error'; chunkId: number; message: string }
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
@@ -33,7 +34,11 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
         last = done
       }
     })
-    ctx.postMessage({ type: 'result', chunkId: msg.chunkId, passes, ms: performance.now() - start } satisfies WorkerResponse)
+    const packed = packTracks(passes)
+    ctx.postMessage(
+      { type: 'result', chunkId: msg.chunkId, passes: packed.passes, tracks: packed.tracks, ms: performance.now() - start } satisfies WorkerResponse,
+      [packed.tracks.points.buffer as ArrayBuffer, packed.tracks.spans.buffer as ArrayBuffer],
+    )
   } catch (err) {
     ctx.postMessage({
       type: 'error',

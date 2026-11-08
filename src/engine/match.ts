@@ -72,29 +72,37 @@ export function utcDay(ms: number): string {
 }
 
 /**
+ * The pass a GIBS daily mosaic illustrates (pure: nothing is changed): exact time match first (the imagery
+ * module stamps the pass time), else the same UTC day's daytime pass closest to nadir. Passes already
+ * imaged are skipped.
+ */
+export function dailyCaptureTarget(passes: readonly Pass[], c: Capture): Pass | undefined {
+  const norad = captureNorad(c)
+  if (norad === undefined) return undefined
+  const day = utcDay(c.datetime)
+  let best: Pass | undefined
+  for (const p of passes) {
+    if (p.norad !== norad || p.verdict === 'imaged') continue
+    if (Math.abs(p.tClosest - c.datetime) < MATCH_BEFORE_MS) return p
+    if (utcDay(p.tClosest) !== day || p.sunElevationDeg <= 0) continue
+    if (!best || p.groundDistanceKm < best.groundDistanceKm) best = p
+  }
+  return best
+}
+
+/**
  * GIBS daily mosaics: the image for (satellite, UTC day) shows the place as seen on that day's daytime
- * pass. Exact time match first (the imagery module stamps the pass time), else the same UTC day's
- * daytime pass closest to nadir. One pass per capture. Returns the captures that matched.
+ * pass (see dailyCaptureTarget). One pass per capture. Mutates the matched passes; returns the captures
+ * that matched.
  */
 export function attachDailyCaptures(passes: Pass[], captures: readonly Capture[]): Capture[] {
   const matched: Capture[] = []
   const seen = new Set<string>()
   for (const c of captures) {
-    const norad = captureNorad(c)
     // A capture id is one image: it may illustrate one pass only, even if a source repeats it.
-    if (norad === undefined || seen.has(c.id)) continue
+    if (seen.has(c.id)) continue
     seen.add(c.id)
-    const day = utcDay(c.datetime)
-    let best: Pass | undefined
-    for (const p of passes) {
-      if (p.norad !== norad || p.verdict === 'imaged') continue
-      if (Math.abs(p.tClosest - c.datetime) < MATCH_BEFORE_MS) {
-        best = p
-        break
-      }
-      if (utcDay(p.tClosest) !== day || p.sunElevationDeg <= 0) continue
-      if (!best || p.groundDistanceKm < best.groundDistanceKm) best = p
-    }
+    const best = dailyCaptureTarget(passes, c)
     if (!best) continue
     best.verdict = 'imaged'
     best.captureId = c.id

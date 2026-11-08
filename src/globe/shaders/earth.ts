@@ -68,7 +68,11 @@ export const earthFragment = glsl`
     float ocean = smoothstep(0.35, 0.65, data.g);
     float land = 1.0 - ocean;
 
-    // ── relief: central differences over 1.5 texels, converted to slope per radian on the sphere
+    // ── relief: central differences over 1.5 texels, converted to slope per radian on the sphere.
+    // LITE (phones): no relief fetches; at phone sizes the 1k elevation map reads as noise anyway.
+  #ifdef LITE
+    vec3 Nb = N;
+  #else
     vec2 du = vec2(uDataTexel.x * 1.5, 0.0);
     vec2 dv = vec2(0.0, uDataTexel.y * 1.5);
     float hE = texture2D(uData, vUv + du).r;
@@ -79,14 +83,20 @@ export const earthFragment = glsl`
     // The elevation source is soft at coastlines: keep relief off the sea and fade it out at the poles' pinch.
     float reliefMask = land * smoothstep(0.02, 0.12, cosLat);
     vec3 Nb = normalize(N - uBump * reliefMask * (slope.x * E + slope.y * Nn));
+  #endif
 
     // ── clouds (for shadows and to dim lights / glint)
     vec2 cloudUv = vUv + vec2(uCloudOffset, 0.0);
     float cloudHere = cloudCover(texture2D(uClouds, cloudUv).r);
+  #ifdef LITE
+    // One fetch: the shadow sits under its cloud (the sun-ward offset is a few pixels at phone scale).
+    float cloudShadow = cloudHere;
+  #else
     // The cloud above a surface point P that shades it sits toward the sun, displaced by h / N·L.
     vec2 sunT = vec2(dot(L, E), dot(L, Nn));
     vec2 shift = sunT * (uCloudHeight / max(NdL, 0.12)) * vec2(1.0 / (TWO_PI * cosLat), 1.0 / PI);
     float cloudShadow = cloudCover(texture2D(uClouds, cloudUv + shift).r);
+  #endif
 
     // ── day
     vec3 dayTex = texture2D(uDay, vUv).rgb;
@@ -121,8 +131,11 @@ export const earthFragment = glsl`
     // ── night
     vec3 nightTex = texture2D(uNight, vUv).rgb;
     float nl = luma(nightTex);
-    // Night ground: just above ink, land a shade lighter than sea so coastlines read without light.
-    vec3 nightBase = uNightTint * mix(0.0052, 0.0031, ocean) + vec3(nl) * uNightTint * 0.25;
+    // Night ground: never a void (PRD-09). A cool-neutral floor clearly above space (#07080A): night ocean
+    // ≈ #0E1114 (linear 0.0046, 0.0057, 0.0070), land a shade lighter, plus faint earthshine from the day albedo
+    // so coastlines and ice read. City lights sit far above this, so their contrast is kept.
+    float earthshine = luma(dayTex) * 0.012;
+    vec3 nightBase = vec3(0.0046, 0.0057, 0.0070) * mix(1.3, 1.0, ocean) + uNightTint * earthshine + vec3(nl) * uNightTint * 0.25;
     // Lights: isolate from the map's base, sodium amber with warmer-white cores; only the brightest cores
     // exceed 1.0, so the bloom stays a whisper.
     float lights = smoothstep(0.014, 0.55, nl);

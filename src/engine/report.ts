@@ -21,17 +21,58 @@
  * report then adds the GIBS 'imaged' upgrades.
  *
  * Imagery is never allowed to fail the report: timeouts and outages degrade to geometry-only passes,
- * with a plain-language note in `notes`. Only an abort rejects (AbortError).
+ * with a plain-language note in `notes` (and `archiveFailed` when no Sentinel-2/Landsat archive answered,
+ * which is different from "answered with nothing"). Only an abort rejects (AbortError).
+ *
+ * Before the partial report, the engine also reads the cloud class AT THE PLACE (`capture.spot`) for the
+ * four clearest Sentinel-2/Landsat scenes (1.5 s cap, in parallel with the pass search), so the best-look
+ * hero can be ranked without another round trip; and, when the week has no Sentinel-2 scene at all, it
+ * asks whether Sentinel-2 images this spot at all (open ocean: no), so geometry never claims "likely".
+ *
+ * After the final report, GIBS stragglers keep probing in the background; each one that comes back with
+ * pixels patches the report through `onUpdate` (counts only ever go up). VIIRS stragglers count as imaged
+ * by rule at the budget (see weather.ts), so the headline doesn't depend on how fast GIBS answered.
  */
 import { MS_PER_DAY } from '@/lib/geo'
-import { searchCapturesDetailed } from '@/imagery'
+import { ensureTz, searchCapturesDetailed, sentinel2PlanCovers, spotCloud } from '@/imagery'
 import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } from '@/types'
-import { getRow, getSatInfo, loadCatalog, satrecFor, type LoadedCatalog } from './catalog'
+import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
+import { satrecFor } from './sgp4'
 import { geoWatchers } from './geostationary'
-import { attachCaptures, attachDailyCaptures, captureNorad, MATCH_AFTER_MS, MATCH_BEFORE_MS } from './match'
+import { attachCaptures, attachDailyCaptures, captureNorad, dailyCaptureTarget, MATCH_AFTER_MS, MATCH_BEFORE_MS } from './match'
 import { passNear, passTargetFor, type PassTarget } from './passes'
 import { passWorkerCount, runPassSearch, warmPassWorkers } from './pool'
+import { clonePass } from './tracks'
 import { startWeatherLeg } from './weather'
+
+const isDetailedCapture = (c: Capture) => c.collection === 'sentinel-2-l2a' || c.collection === 'landsat-c2-l2'
+
+/**
+ * Read the cloud class at the place for the clearest detailed scenes (lowest scene cloud first), in
+ * parallel, and write it to `capture.spot`. Resolves within `budgetMs`; an unanswered check leaves
+ * `spot` undefined. Never rejects.
+ */
+function checkSpots(captures: Capture[], place: LatLon, budgetMs: number, signal?: AbortSignal): Promise<void> {
+  const picks = captures
+    .filter(isDetailedCapture)
+    .sort((a, b) => (a.cloudCoverPct ?? 101) - (b.cloudCoverPct ?? 101) || b.datetime - a.datetime)
+    .slice(0, SPOT_CANDIDATES)
+  if (!picks.length) return Promise.resolve()
+  const all = Promise.all(
+    picks.map((c) =>
+      Promise.resolve()
+        .then(() => spotCloud(c, place, signal))
+        .then(
+          (spot) => {
+            // 'unknown' says nothing: leave the field for "not checked / no answer".
+            if (spot && spot !== 'unknown') c.spot = spot
+          },
+          () => undefined,
+        ),
+    ),
+  )
+  return waitAtMost(all, budgetMs, signal).catch(() => undefined)
+}
 
 export interface ReportOptions {
   days?: number
@@ -42,6 +83,16 @@ export interface ReportOptions {
    * weather-mosaic matches (those passes are still 'likely'). Not called if nothing is pending by then.
    */
   onPartial?: (r: EngineReport) => void
+  /**
+   * Called after the final report, each time a background GIBS verification upgrades a pass (a new,
+   * complete report; counts only ever go up). Without it, stragglers are dropped at the budget.
+   */
+  onUpdate?: (r: EngineReport) => void
+  /**
+   * Called once, as soon as the Sentinel-2/Landsat search answers (long before the partial report), with
+   * its scenes: lets the UI start downloading the picture it will most likely lead with.
+   */
+  onArchive?: (captures: Capture[]) => void
   signal?: AbortSignal
   /**
    * Time budget in ms from the call, after which NASA GIBS verifications still in flight are dropped
@@ -78,8 +129,14 @@ export const REPORT_BUDGET_MS = 3_500
 const MIN_WEATHER_MS = 1_200
 const ARCHIVE_TIMEOUT_MS = 20_000
 const STALE_CATALOG_MS = 3 * MS_PER_DAY
+/** Spot-cloud checks for the best-look candidates: how many, and how long the partial report waits for them. */
+const SPOT_CANDIDATES = 4
+const SPOT_BUDGET_MS = 1_500
+/** How long the partial report waits for the acquisition-plan check (open ocean). */
+const PLAN_BUDGET_MS = 2_000
+export const OCEAN_NOTE = "This spot is outside Sentinel-2's acquisition plan (open ocean)."
 
-const nf = new Intl.NumberFormat('en-US')
+const nf = /* @__PURE__ */ new Intl.NumberFormat('en-US')
 const plural = (n: number, one: string, many = `${one}S`) => `${nf.format(n)} ${n === 1 ? one : many}`
 const noop = () => undefined
 
@@ -140,10 +197,10 @@ function safely<A>(fn: ((a: A) => void) | undefined, arg: A) {
   }
 }
 
-/** All satellites we predict passes for. */
+/** All satellites we predict passes for (only profiled ones qualify, so only the featured rows are read). */
 export function passTargets(cat: LoadedCatalog): PassTarget[] {
   const out: PassTarget[] = []
-  for (const s of cat.sats) {
+  for (const s of featuredSats(cat)) {
     const row = getRow(s.norad)
     const t = row && passTargetFor(s, row)
     if (t) out.push(t)
@@ -204,6 +261,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   const archiveStart = performance.now()
   let archiveMs = 0
   let archiveDone = false
+  let archiveFailed = false
   const archive = withTimeout((s) => searchCapturesDetailed(latLon, windowStart, windowEnd, s), ARCHIVE_TIMEOUT_MS, signal)
     .then((r) => {
       notes.push(...r.degraded)
@@ -211,6 +269,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     })
     .catch((err): Capture[] => {
       if (isAbort(err) && signal?.aborted) throw err
+      archiveFailed = true
       notes.push(
         err instanceof Error && err.name === 'TimeoutError'
           ? 'The Sentinel-2 and Landsat archives were too slow to answer; passes are shown from orbital geometry only.'
@@ -224,6 +283,25 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     })
   // It only rejects on abort, possibly while we await something else: never leave that unhandled.
   archive.catch(noop)
+  if (opts.onArchive)
+    archive.then((caps) => {
+      if (caps.length && !signal?.aborted) safely(opts.onArchive, [...caps])
+    }, noop)
+  // The cloud class at the place for the best-look candidates starts as soon as the scenes are known.
+  const spots = archive.then((caps) => checkSpots(caps, latLon, SPOT_BUDGET_MS, signal), noop)
+  // No Sentinel-2 scene this week (and the archive answered): does Sentinel-2 image this spot at all?
+  // (Registered before anything awaits `archive`, so it has run by the time the scenes are matched.)
+  let planCheck: Promise<boolean | undefined> | undefined
+  archive.then((caps) => {
+    if (archiveFailed || caps.some((c) => c.collection === 'sentinel-2-l2a')) return
+    planCheck = Promise.resolve()
+      .then(() => sentinel2PlanCovers(latLon, windowEnd, signal))
+      .catch(() => undefined)
+  }, noop)
+  // Time zones for the report's local times (a lazy chunk; usually loaded long before).
+  const tz = Promise.resolve()
+    .then(() => ensureTz())
+    .catch(noop)
   // Spawn the pass workers now (no-op when warm) so their start-up overlaps the catalog download.
   warmPassWorkers()
 
@@ -233,7 +311,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   throwIfAborted(signal)
   const catalogMs = performance.now() - tStart
   const targets = passTargets(cat)
-  emit('catalog', `CATALOG · ${plural(cat.sats.length, 'OBJECT')}`, 0.06)
+  emit('catalog', `CATALOG · ${plural(cat.count, 'OBJECT')}`, 0.06)
   // SGP4 error grows by roughly 1–3 km per day away from the element epoch, in either direction.
   const ageMs = windowEnd - Date.parse(cat.fetchedAt)
   if (ageMs > STALE_CATALOG_MS) {
@@ -265,11 +343,15 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
 
   // ── GIBS daily mosaics: start as soon as the GIBS satellites' passes exist ──
   let verifying = false // progress for the GIBS leg is only shown once it is what we wait for
+  let onLate: ((c: Capture, byRule: boolean) => void) | undefined
   const weather = startWeatherLeg(latLon, gibsPasses, {
     signal,
     onSettle: (n, total) => {
       if (verifying) emit('match', `VERIFYING NASA WEATHER MOSAICS · ${nf.format(n)} / ${nf.format(total)}`, 0.86 + 0.13 * (n / total))
     },
+    onLate: (c, byRule) => onLate?.(c, byRule),
+    // Stragglers only keep probing when someone listens for the patches.
+    lateMs: opts.onUpdate ? undefined : 0,
   })
 
   let passes: Pass[]
@@ -283,7 +365,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   throwIfAborted(signal)
 
   const geo = geoWatchers(cat, latLon, windowStart, windowEnd)
-  const satellitesConsidered = targets.length + cat.sats.filter((s) => s.category === 'weather-geo' && s.profile?.operational).length
+  const satellitesConsidered = targets.length + featuredSats(cat).filter((s) => s.category === 'weather-geo' && s.profile?.operational).length
+  /** Weather-leg sentences, recomputed for every build (background patches change them). */
+  let weatherNotes: string[] = []
 
   const build = (list: Pass[], captures: Capture[], partial: boolean, firstResultMs: number): EngineReport => {
     const sorted = [...list].sort((a, b) => a.tClosest - b.tClosest)
@@ -300,8 +384,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       captures,
       geo: geo.map((g): GeoWatcher => ({ ...g })),
       counts,
-      notes: [...notes],
+      notes: [...notes, ...weatherNotes],
       partial,
+      archiveFailed,
       timings: {
         catalogMs,
         passesMs,
@@ -328,11 +413,27 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   const orphans = attachCaptures(passes, stac)
   passes.push(...passesForOrphanScenes(cat, latLon, orphans, passes))
 
+  // Spot classes for the best look, the open-ocean check and the time-zone table: all were started long
+  // ago; whatever isn't in by its budget doesn't hold the report.
+  await Promise.all([spots, tz])
+  throwIfAborted(signal)
+  const planAnswer = planCheck ? await waitForValue(planCheck, PLAN_BUDGET_MS, signal) : undefined
+  throwIfAborted(signal)
+  if (planAnswer === false) {
+    let recast = 0
+    for (const p of passes) {
+      if (p.verdict !== 'likely' || getSatInfo(p.norad)?.category !== 'open-optical') continue
+      p.verdict = 'overhead'
+      recast++
+    }
+    if (recast) notes.push(OCEAN_NOTE)
+  }
+
   let firstResultMs = 0
   if (!weather.isDone() && opts.onPartial) {
     firstResultMs = performance.now() - tStart
     // Snapshot: the final report mutates verdicts on these passes, so hand out copies.
-    safely(opts.onPartial, build(passes.map((p) => ({ ...p })), [...stac], true, firstResultMs))
+    safely(opts.onPartial, build(passes.map(clonePass), [...stac], true, firstResultMs))
   }
 
   // ── GIBS mosaics, within the time budget ─────────────────────────────────
@@ -350,22 +451,78 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     }
   }
   const cut = weather.stop()
+  const rule = weather.byRule()
   const { total: mosaics, failed } = weather.progress()
-  const missing = cut + failed
-  if (missing > 0) {
-    const all = missing >= mosaics
-    notes.push(
-      cut > 0
-        ? all
-          ? 'NASA GIBS did not answer in time, so weather-satellite images are not shown.'
-          : `NASA GIBS did not return ${nf.format(missing)} of ${nf.format(mosaics)} weather-satellite images in time; those passes are shown as likely.`
-        : all
-          ? 'NASA GIBS could not be reached, so weather-satellite images are not shown.'
-          : `NASA GIBS failed to return ${nf.format(missing)} of ${nf.format(mosaics)} weather-satellite images; those passes are shown as likely.`,
-    )
+  // Stragglers that stay 'likely' (MODIS; VIIRS ones count by rule), until a late answer patches them.
+  let missing = cut - rule.length + failed
+  /** VIIRS images counted by rule and not confirmed yet (late confirmations shrink the footnote). */
+  let unconfirmed = rule.length
+  const gibsNotes = () => {
+    const out: string[] = []
+    if (unconfirmed > 0)
+      out.push(
+        `NASA GIBS was slow to confirm ${unconfirmed === 1 ? 'one VIIRS image' : `${nf.format(unconfirmed)} VIIRS images`}; VIIRS images the whole globe every day, so ${unconfirmed === 1 ? 'that pass counts' : 'those passes count'} as photographed.`,
+      )
+    if (missing > 0) {
+      const all = missing >= mosaics
+      out.push(
+        cut > 0
+          ? all
+            ? 'NASA GIBS did not answer in time, so weather-satellite images are not shown.'
+            : `NASA GIBS did not return ${nf.format(missing)} of ${nf.format(mosaics)} weather-satellite images in time; those passes are shown as likely.`
+          : all
+            ? 'NASA GIBS could not be reached, so weather-satellite images are not shown.'
+            : `NASA GIBS failed to return ${nf.format(missing)} of ${nf.format(mosaics)} weather-satellite images; those passes are shown as likely.`,
+      )
+    }
+    return out
   }
-  const weatherMatched = attachDailyCaptures(passes, weather.verified())
-  const report = build(passes, [...stac, ...weatherMatched], false, firstResultMs || performance.now() - tStart)
-  emit('done', `${plural(report.counts.passes, 'PASS', 'PASSES')} · ${plural(report.counts.imaged, 'IMAGE')}`, 1)
-  return report
+  weatherNotes = gibsNotes()
+  const weatherMatched = attachDailyCaptures(passes, [...weather.verified(), ...rule])
+  const firstMs = firstResultMs || performance.now() - tStart
+  let latest = build(passes, [...stac, ...weatherMatched], false, firstMs)
+  emit('done', `${plural(latest.counts.passes, 'PASS', 'PASSES')} · ${plural(latest.counts.imaged, 'IMAGE')}`, 1)
+
+  // Background: a straggler that comes back with pixels upgrades its pass in a NEW report (the delivered
+  // one is never mutated), and the counts only ever go up.
+  if (opts.onUpdate) {
+    let current = passes
+    const weatherCaps = [...weatherMatched]
+    onLate = (c, byRule) => {
+      if (signal?.aborted) return
+      if (byRule) {
+        // Already counted: the image is confirmed now, so the footnote shrinks (the counts don't move).
+        unconfirmed = Math.max(0, unconfirmed - 1)
+        weatherNotes = gibsNotes()
+        latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+        safely(opts.onUpdate, latest)
+        return
+      }
+      // Only the upgraded pass is a new object; the others are shared with the delivered report (never
+      // mutated after delivery), so a patch costs one copy, not ~2,000.
+      const target = dailyCaptureTarget(current, c)
+      if (!target) return
+      const upgraded = Object.assign(clonePass(target), { verdict: 'imaged' as const, captureId: c.id })
+      current = current.map((p) => (p === target ? upgraded : p))
+      weatherCaps.push(c)
+      missing = Math.max(0, missing - 1)
+      weatherNotes = gibsNotes()
+      latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+      safely(opts.onUpdate, latest)
+    }
+  }
+  return latest
+}
+
+/** `p`'s value, or undefined after `ms` (rejects only on abort). */
+async function waitForValue<T>(p: Promise<T>, ms: number, signal?: AbortSignal): Promise<T | undefined> {
+  let value: T | undefined
+  await waitAtMost(
+    p.then((v) => {
+      value = v
+    }),
+    ms,
+    signal,
+  )
+  return value
 }

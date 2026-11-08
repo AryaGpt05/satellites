@@ -1,6 +1,10 @@
 /*
- * Results panel (DESIGN §4, §8): right dock on desktop above a full-width timeline, bottom sheet on
- * phones. Flat ink, hairlines, no radius, no shadow. Numbers mono + tabular.
+ * The results panel (DESIGN §4, §8): right dock on desktop above a full-width timeline, bottom sheet on
+ * stacked layouts. Flat ink, hairlines, no radius, no shadow. Numbers mono + tabular.
+ *
+ * Breakpoints copy src/lib/layout.ts by hand:
+ *   STACKED = (max-width: 760px), (orientation: portrait) and (max-width: 1100px)
+ *   WIDE    = (min-width: 761px) and (orientation: landscape), (min-width: 1101px)
  */
 
 /*
@@ -12,17 +16,64 @@
   --timeline-gap: 16px;
   --timeline-bottom: 56px;
   --timeline-clear: calc(var(--timeline-bottom) + var(--timeline-h) + var(--timeline-gap));
+  /* Full dock height at results: from under the top readouts to above the timeline strip. */
+  --dock-h: calc(100dvh - 2 * var(--bezel-inset) - var(--sheet-clear, 56px) - var(--timeline-clear));
 }
 @media (max-height: 720px) {
   .vars {
     --timeline-h: 112px;
   }
 }
-/* Desktop: raise the dock so the timeline fits beneath it (doubled selector beats Sheet's .dock). */
-@media (min-width: 761px) {
-  .panel.panel {
-    bottom: calc(var(--bezel-inset) + var(--timeline-clear));
+
+/*
+ * Desktop dock: one panel from computing to results. While computing it is as tall as its readout
+ * (--computing-h, measured); when results land it grows to the full dock (480 ms ease-in-out).
+ */
+.panel.desk {
+  bottom: auto;
+  transition: height var(--d-md) var(--ease-in-out);
+}
+.panel.isComputing {
+  height: var(--computing-h, auto);
+}
+.panel.isResults {
+  height: var(--dock-h);
+}
+/* Remounted mid-flow (computing → results): no second entrance. */
+.panel.noEnter {
+  animation: none;
+}
+
+/*
+ * Short desktops (≤ 860 px tall: 1280×800, iPad landscape): the panel takes the full height and the
+ * timeline runs beside it, so the summary and the pass image fit (MOB-17).
+ */
+@media (min-width: 761px) and (orientation: landscape) and (max-height: 860px), (min-width: 1101px) and (max-height: 860px) {
+  .vars {
+    --dock-h: calc(100dvh - 2 * var(--bezel-inset) - 2 * var(--sheet-clear, 56px));
   }
+  /* doubled class: must beat the base .timelineDock rule below */
+  .vars.timelineDock {
+    right: calc(var(--bezel-inset) + var(--margin) + var(--panel-w) + var(--gutter));
+  }
+}
+/* …and on narrow ones a slightly narrower panel keeps ≥ 60 px per day in the strip. */
+@media (min-width: 761px) and (max-width: 1100px) and (orientation: landscape) and (max-height: 860px) {
+  .vars {
+    --panel-w: 400px;
+  }
+}
+
+/* Short landscape phones (≤ 540 px tall): a compact full-height dock, timeline inside it (MOB-14). */
+.vars.shortLandscape {
+  --dock-h: calc(100dvh - 2 * (var(--bezel-inset) + 8px));
+}
+.panel.shortLandscape {
+  top: calc(var(--bezel-inset) + 8px);
+  width: min(380px, 46vw);
+}
+.panel.shortLandscape :global(section) {
+  scroll-margin-top: 0;
 }
 
 .timelineDock {
@@ -32,28 +83,106 @@
   right: calc(var(--bezel-inset) + var(--margin));
   bottom: calc(var(--bezel-inset) + var(--timeline-bottom));
   height: var(--timeline-h);
-  /* backwards, not both: a retained clip-path would clip the hover tooltip above the strip */
-  animation: rise var(--d-md) var(--ease-out) backwards;
-  animation-delay: 120ms;
 }
-@keyframes rise {
+/* The strip wipes in left → right once results land (backwards only: a retained clip would cut the tooltip). */
+.dockEnter {
+  animation: wipe-x 600ms var(--ease-out) 240ms backwards;
+}
+@keyframes wipe-x {
   from {
-    opacity: 0;
-    clip-path: inset(100% 0 0 0);
+    clip-path: inset(0 100% 0 0);
   }
   to {
-    opacity: 1;
     clip-path: inset(0 0 0 0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .timelineDock {
-    animation: fade var(--d-md) linear backwards;
+  .dockEnter {
+    animation: fade 200ms linear backwards;
   }
 }
 @keyframes fade {
   from {
     opacity: 0;
+  }
+}
+
+/* ── body ─────────────────────────────────────────────────────── */
+.body {
+  overflow-x: hidden;
+}
+/* A long body ends on a 24 px fade, never on a clipped baseline. */
+.body[data-more='true'] {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 24px), transparent);
+}
+.stage {
+  position: relative;
+}
+
+/* Two-beat content swap: out 160 ms ease-in-out, in 240 ms ease-out (--dir: 1 deeper, -1 back). */
+.swapOut {
+  animation: swap-out 160ms var(--ease-in-out) forwards;
+  pointer-events: none;
+}
+@keyframes swap-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(-12px * var(--dir, 1)));
+  }
+}
+.swapIn {
+  animation: swap-in var(--d-sm) var(--ease-out) backwards;
+}
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(12px * var(--dir, 1)));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swapOut {
+    animation: fade-out 160ms linear forwards;
+  }
+  .swapIn {
+    animation: fade 160ms linear backwards;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Results handoff: summary blocks rise in at 0 / 60 / 120 / 180 ms (--i). */
+.enter {
+  animation: rise var(--d-md) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+/* The headline: a line wipe (DESIGN §5). */
+.enterWipe {
+  animation: wipe-y var(--d-md) var(--ease-out) backwards;
+}
+@keyframes wipe-y {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(0.25em);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .enterWipe {
+    animation: fade 200ms linear backwards;
   }
 }
 
@@ -64,6 +193,55 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 24px;
+}
+.headLeft {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.headLeft > * {
+  grid-area: 1 / 1;
+}
+.headLeft:has(.clock) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Window text and the live "verifying" line cross-fade in one slot (240 ms). */
+.headSwap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity var(--d-sm) var(--ease-in-out);
+}
+.headSwapOff {
+  opacity: 0;
+  pointer-events: none;
+}
+.live {
+  color: var(--bone-2);
+}
+.liveDot {
+  flex: none;
+}
+.computingWord {
+  color: var(--bone-2);
+}
+.clock {
+  color: var(--bone);
+}
+.sep {
+  color: var(--bone-3);
 }
 .crumb {
   display: inline-flex;
@@ -79,27 +257,169 @@
   color: var(--bone-2);
   white-space: nowrap;
   transition: color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
 }
-.crumb:hover {
-  color: var(--signal);
+@media (hover: hover) and (pointer: fine) {
+  .crumb:hover,
+  .stepBtn:hover:not(:disabled) {
+    color: var(--signal);
+  }
+  .verdict:hover .verdictLabel {
+    color: var(--bone);
+  }
+  .chip:hover {
+    border-color: var(--bone-3);
+    color: var(--bone);
+  }
 }
-.crumb kbd {
+.crumb:active,
+.verdict:active:not(:disabled),
+.stepBtn:active:not(:disabled) {
+  background: var(--ink-2);
+  transition-duration: 0ms;
+}
+@media (pointer: coarse) {
+  .crumb {
+    padding: 12px 4px;
+    margin: -12px -4px -12px -6px;
+  }
+}
+.kbdHover {
+  display: inline-flex;
   margin-left: 2px;
 }
-.headId {
+@media (hover: none) {
+  .kbdHover {
+    display: none;
+  }
+}
+
+/* Row 2: the place, the same node from computing into results. */
+.placeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin-top: 8px;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-size: var(--fs-label);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
-  color: var(--bone-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.5;
+  color: var(--bone-2);
 }
-.placeName {
-  margin: 10px 0 0;
+.placeRow b {
+  font-weight: 400;
+  color: var(--bone);
+}
+.coordsText {
+  color: var(--bone-2);
+}
+.tzText {
+  color: var(--bone-3);
+}
+.mHead {
+  margin-top: 6px;
+}
+
+/* R16: inline search in the header */
+.inlineSearch {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: rise var(--d-sm) var(--ease-out) backwards;
+}
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.recentLabel {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  transition:
+    border-color var(--d-hover) var(--ease-out),
+    color var(--d-hover) var(--ease-out);
+}
+.chip:active {
+  background: var(--ink-2);
+}
+@media (pointer: coarse) {
+  .chip {
+    height: 40px;
+  }
+}
+
+/* Pass header */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+}
+.position {
+  margin-right: 6px;
+  white-space: nowrap;
+}
+.stepBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  color: var(--bone-2);
+  transition:
+    color var(--d-hover) var(--ease-out),
+    border-color var(--d-hover) var(--ease-out);
+}
+.stepBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+@media (pointer: coarse) {
+  .stepBtn {
+    width: 44px;
+    height: 44px;
+  }
+  .detailHead .headTop {
+    margin: -6px 0;
+  }
+}
+.passTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.passName {
+  margin: 0;
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 560;
@@ -108,6 +428,24 @@
   letter-spacing: var(--track-display);
   color: var(--bone);
   overflow-wrap: anywhere;
+}
+.passTitleCompact {
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.passTitleCompact svg {
+  align-self: center;
+}
+.passWhen {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
 }
 .placeSub {
   margin-top: 8px;
@@ -127,15 +465,6 @@
   font-weight: 400;
   color: var(--bone-2);
 }
-.passTitle {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-.passTitle .placeName {
-  margin: 0;
-}
 
 /* ── sections ─────────────────────────────────────────────────── */
 .section {
@@ -149,6 +478,43 @@
 .rule {
   margin-bottom: 2px;
 }
+.headBlock {
+  display: flex;
+  flex-direction: column;
+}
+
+/* R15: invite bar for people who arrived on a shared link */
+.invite {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 10px 0 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-left: 1px solid var(--signal);
+}
+.inviteText {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.35;
+  color: var(--bone);
+}
+.inviteClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--bone-3);
+}
+@media (pointer: coarse) {
+  .inviteClose {
+    width: 44px;
+    height: 44px;
+  }
+}
 
 /* ── headline ─────────────────────────────────────────────────── */
 .headline {
@@ -156,34 +522,66 @@
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 540;
-  font-size: 34px;
+  font-size: var(--fs-panel-h, 34px);
   line-height: 0.98;
   letter-spacing: var(--track-display);
   color: var(--bone-2);
   text-wrap: balance;
 }
-.headline strong {
+.headline strong,
+.mHeadline strong {
   font-weight: 560;
   color: var(--bone);
 }
-.headline .serif {
+.headline .serif,
+.mHeadline .serif {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
   font-stretch: 100%;
   letter-spacing: -0.01em;
-  font-size: 1.08em;
+  font-size: 1.16em;
   color: var(--bone);
+}
+/* Numbers inside display sentences: the display face, tabular (V19), so "7 days, 7 satellites" match. */
+.numDisplay {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: inherit;
 }
 .headlineMore {
   margin: 10px 0 0;
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 500;
-  font-size: 22px;
+  font-size: var(--fs-panel-sub, 22px);
   line-height: 1.05;
   letter-spacing: -0.01em;
   color: var(--bone-3);
+  text-wrap: balance;
+}
+.moreProse {
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--bone-2);
+}
+.moreProse .num {
+  font-family: inherit;
+  font-size: 1em;
+  letter-spacing: inherit;
+  font-weight: inherit;
+}
+.outageHead {
+  color: var(--bone);
+}
+.outage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+.retry {
+  margin-top: 2px;
 }
 .num {
   font-family: var(--font-mono);
@@ -194,11 +592,10 @@
   font-size: 0.86em;
 }
 
-/* ── verdict readouts ─────────────────────────────────────────── */
+/* ── verdict readouts: 2 × 2, number + unit over the verdict's name ── */
 .verdicts {
   display: grid;
-  /* auto: the 4-digit "could" count takes the room it needs */
-  grid-template-columns: repeat(4, auto);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -206,52 +603,71 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 12px 10px 12px 0;
+  gap: 6px;
+  padding: 11px 10px 11px 0;
   text-align: left;
   min-width: 0;
   color: var(--bone);
-  transition: color var(--d-hover) var(--ease-out);
+  transition:
+    color var(--d-hover) var(--ease-out),
+    background-color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
 }
-.verdict + .verdict {
-  padding-left: 10px;
+.verdict:nth-child(2n) {
+  padding-left: 12px;
   border-left: 1px solid var(--line);
 }
-.verdict:hover .verdictLabel {
-  color: var(--bone);
+.verdict:nth-child(-n + 2) {
+  border-bottom: 1px solid var(--line);
 }
 .verdict:disabled {
   cursor: default;
 }
 .verdictTop {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
+  white-space: nowrap;
+}
+.verdictTop svg {
+  align-self: center;
 }
 .verdictValue {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-weight: 300;
-  font-size: 21px;
+  font-size: 20px;
   line-height: 1;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
-.verdictLabel {
+.verdictUnit {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9.5px;
+  font-size: var(--fs-label);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone-3);
+}
+.verdictLabel {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
   line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
   transition: color var(--d-hover) var(--ease-out);
 }
 .signal {
   color: var(--signal);
 }
-.ice {
-  color: var(--ice);
+.signal .verdictUnit {
+  color: color-mix(in srgb, var(--signal) 70%, transparent);
 }
 .zero {
   color: var(--bone-3);
@@ -282,11 +698,6 @@
 .notes li {
   display: grid;
   grid-template-columns: 16px 1fr;
-}
-.pending {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 /* ── body copy ────────────────────────────────────────────────── */
@@ -339,15 +750,10 @@
 .cell > div > span:last-child {
   white-space: normal;
 }
-.sub {
-  margin-left: 0.5em;
-  color: var(--bone-3);
-  font-size: 0.86em;
-}
 
-/* ── mobile header ────────────────────────────────────────────── */
+/* ── phone header + body ──────────────────────────────────────── */
 .mHeadline {
-  margin: 8px 0 0;
+  margin: 0;
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 540;
@@ -357,21 +763,22 @@
   color: var(--bone-2);
   text-wrap: balance;
 }
-.mHeadline strong {
-  font-weight: 560;
-  color: var(--bone);
+.mMore {
+  margin: 5px 0 0;
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.1;
+  letter-spacing: -0.005em;
+  color: var(--bone-3);
 }
-.mHeadline .serif {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
-  font-stretch: 100%;
-  font-size: 1.08em;
-  color: var(--bone);
+.mMore.moreProse {
+  font-size: 15px;
+  line-height: 1.25;
 }
 .mTimeline {
-  margin-top: 12px;
-  height: 52px;
+  height: 72px;
 }
 
 /* ── footer actions ───────────────────────────────────────────── */
@@ -379,14 +786,41 @@
   display: flex;
   gap: 8px;
 }
-.actions > :first-child {
+.actions .primary {
   flex: 1;
+  min-width: 0;
+}
+@media (max-width: 400px) {
+  .ctaLead {
+    display: none;
+  }
+}
+.iconBtn {
+  flex: none;
+  width: 44px;
+  padding: 0;
 }
 
 .empty {
   padding: 32px 0;
 }
 
-.coordsText {
-  color: var(--bone-2);
+/* ── stacked layouts ──────────────────────────────────────────── */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  .body.body {
+    padding-top: 16px;
+  }
+  /* phones: the name may take two lines rather than be cut */
+  .verdictLabel {
+    white-space: normal;
+  }
+  .passName {
+    font-size: 24px;
+  }
+  .passTitle {
+    margin-top: 6px;
+  }
+  .placeSub {
+    margin-top: 6px;
+  }
 }

@@ -5,12 +5,20 @@ import type { Capture, LatLon, Pass, Place } from '@/types'
 const imagery = vi.hoisted(() => ({
   searchCapturesDetailed: vi.fn(),
   weatherCaptures: vi.fn(),
+  spotCloud: vi.fn(),
+  ensureTz: vi.fn(),
+  sentinel2PlanCovers: vi.fn(),
 }))
-vi.mock('@/imagery', () => imagery)
+vi.mock('@/imagery', async () => {
+  // Pure helpers are the real ones.
+  const gibs = await vi.importActual<typeof import('@/imagery/gibs')>('@/imagery/gibs')
+  return { ...imagery, weatherCandidates: gibs.weatherCandidates }
+})
 
-import { getRow, getSatInfo, satrecFor } from './catalog'
+import { getRow, getSatInfo } from './catalog'
+import { satrecFor } from './sgp4'
 import { findPassesForSat, passTargetFor } from './passes'
-import { computeReport } from './report'
+import { computeReport, OCEAN_NOTE } from './report'
 import { loadTestCatalog, TOKYO, WATERLOO } from './testing'
 
 let now: number
@@ -39,6 +47,9 @@ beforeAll(() => {
 beforeEach(() => {
   imagery.searchCapturesDetailed.mockReset()
   imagery.weatherCaptures.mockReset()
+  imagery.spotCloud.mockReset().mockResolvedValue('unknown')
+  imagery.ensureTz.mockReset().mockResolvedValue(undefined)
+  imagery.sentinel2PlanCovers.mockReset().mockResolvedValue(true)
 })
 
 describe('computeReport', () => {
@@ -150,14 +161,14 @@ describe('computeReport', () => {
     expect(report.notes).toEqual([])
   })
 
-  it('keeps what GIBS verified within the budget and drops the stragglers', async () => {
+  it('keeps what GIBS verified within the budget and leaves MODIS stragglers likely', async () => {
     imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
     const aborted: number[] = []
     imagery.weatherCaptures.mockImplementation((_place: LatLon, passes: Pass[], signal?: AbortSignal) => {
       const p = passes.find((x) => x.inSwath && x.sunElevationDeg > 5)
       if (!p) return Promise.resolve([])
-      // NOAA-20's probes hang until aborted; everyone else answers at once.
-      if (p.norad === 43013) {
+      // Terra's (MODIS) probes hang until aborted; everyone else answers at once.
+      if (p.norad === 25994) {
         return new Promise((_, reject) =>
           signal?.addEventListener('abort', () => {
             aborted.push(p.norad)
@@ -171,14 +182,130 @@ describe('computeReport', () => {
     const report = await computeReport(waterloo, { now, budgetMs: 200 })
     const elapsed = performance.now() - t0
     const imagedSats = new Set(report.passes.filter((p) => p.verdict === 'imaged').map((p) => p.norad))
-    expect(imagedSats.has(43013)).toBe(false)
+    expect(imagedSats.has(25994)).toBe(false)
     expect(imagedSats.size).toBe(4)
+    // Nobody listens for late patches (no onUpdate): the stragglers are aborted at the budget.
     expect(aborted.length).toBeGreaterThan(0)
     expect(report.notes).toHaveLength(1)
     expect(report.notes[0]).toMatch(new RegExp(`did not return ${aborted.length} of \\d+ weather-satellite images in time`))
     // Never sooner than 1.2 s after the first probe, and not much later.
     expect(elapsed).toBeLessThan(report.timings.passesMs + 2500)
     expect(report.counts.imaged).toBe(report.passes.filter((p) => p.verdict === 'imaged').length)
+  })
+
+  it('counts VIIRS stragglers by rule only with evidence, never an explicit no-data answer', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    const day = (t: number) => new Date(t).toISOString().slice(0, 10)
+    const noaa20Days = [...new Set(passesOf(43013, WATERLOO).filter((x) => x.inSwath && x.sunElevationDeg >= 5).map((x) => day(x.tClosest)))].sort()
+    const latest = noaa20Days[noaa20Days.length - 1]
+    const hang = (signal?: AbortSignal) => new Promise<never>((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))
+    imagery.weatherCaptures.mockImplementation((_place: LatLon, passes: Pass[], signal?: AbortSignal) => {
+      const p = passes.find((x) => x.inSwath && x.sunElevationDeg >= 5)
+      if (!p) return Promise.resolve([])
+      // NOAA-20 (VIIRS): its latest day verifies, every earlier day hangs. Suomi NPP (VIIRS) and Terra
+      // (MODIS) hang throughout. NOAA-21 answers "no data here".
+      if (p.norad === 43013 && day(p.tClosest) === latest)
+        return Promise.resolve([capture({ id: `VIIRS@${latest}`, provider: 'gibs', platform: 'noaa-20', collection: 'gibs-viirs-noaa20', norad: 43013, datetime: p.tClosest, gsdM: 375 })])
+      if (p.norad === 43013 || p.norad === 37849 || p.norad === 25994) return hang(signal)
+      return Promise.resolve([])
+    })
+    const report = await computeReport(waterloo, { now, budgetMs: 200 })
+    const imaged = report.passes.filter((p) => p.verdict === 'imaged')
+    // Suomi NPP never verified a day (an outage looks exactly like this): nothing by rule. NOAA-21's
+    // explicit no-data answers stay likely. NOAA-20 days before its verified day count; the last
+    // 24 hours never do (not processed yet).
+    expect(new Set(imaged.map((p) => p.norad))).toEqual(new Set([43013]))
+    const ruleDays = imaged.map((p) => day(p.tClosest)).filter((d) => d !== latest)
+    expect(ruleDays.length).toBeGreaterThan(0)
+    for (const p of imaged) expect(Date.now() - p.tClosest > 86_400_000 || day(p.tClosest) === latest).toBe(true)
+    expect(report.notes.some((n) => /slow to confirm .*VIIRS/.test(n))).toBe(true)
+    expect(report.notes.some((n) => /shown as likely/.test(n))).toBe(true) // Terra, Suomi NPP
+  })
+
+  it('patches the report upward when a straggler answers after the budget', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    imagery.weatherCaptures.mockImplementation(async (_place: LatLon, passes: Pass[]) => {
+      const p = passes.find((x) => x.inSwath && x.sunElevationDeg > 5)
+      if (!p) return []
+      if (p.norad === 25994) await gate // Terra answers late
+      return [capture({ id: `G@${p.id}`, provider: 'gibs', platform: 'terra', collection: 'gibs-modis-terra', norad: p.norad, datetime: p.tClosest, gsdM: 250 })]
+    })
+    const ctl = new AbortController()
+    const updates: { imaged: number; notes: string[] }[] = []
+    const report = await computeReport(waterloo, {
+      now,
+      budgetMs: 200,
+      signal: ctl.signal,
+      onUpdate: (r) => updates.push({ imaged: r.counts.imaged, notes: r.notes }),
+    })
+    const before = report.counts.imaged
+    const terraBefore = report.passes.filter((p) => p.norad === 25994 && p.verdict === 'imaged').length
+    expect(terraBefore).toBe(0)
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(updates.length).toBeGreaterThan(0)
+    // Upward only, one step at a time, and the delivered report is never mutated.
+    updates.forEach((u, i) => expect(u.imaged).toBe(before + i + 1))
+    expect(report.counts.imaged).toBe(before)
+    expect(report.passes.filter((p) => p.norad === 25994 && p.verdict === 'imaged')).toHaveLength(0)
+    expect(updates[updates.length - 1].notes.some((n) => /shown as likely/.test(n))).toBe(false)
+    ctl.abort()
+  })
+
+  it('reads the spot class for the clearest scenes before the partial report', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const t = s2c[s2c.length - 1].tClosest
+    const scenes = [5, 40, 12, 80, 95].map((cc, i) =>
+      capture({ id: `S2_${cc}`, platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: t - 7 * 60_000 - i * 86_400_000 * 5, cloudCoverPct: cc }),
+    )
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: scenes, degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.spotCloud.mockImplementation(async (c: Capture) => (c.id === 'S2_5' ? 'cirrus' : c.id === 'S2_12' ? 'clear' : 'unknown'))
+    let partialSpot: (string | undefined)[] = []
+    const report = await computeReport(waterloo, {
+      now,
+      onPartial: (r) => (partialSpot = r.captures.map((c) => c.spot)),
+    })
+    // The four lowest-cloud scenes are checked; 'unknown' leaves the field empty.
+    expect(imagery.spotCloud.mock.calls.map(([c]) => (c as Capture).id).sort()).toEqual(['S2_12', 'S2_40', 'S2_5', 'S2_80'])
+    const byId = new Map(report.captures.map((c) => [c.id, c.spot]))
+    expect(byId.get('S2_5')).toBe('cirrus')
+    expect(byId.get('S2_12')).toBe('clear')
+    expect(byId.get('S2_40')).toBeUndefined()
+    if (partialSpot.length) expect(partialSpot).toContain('cirrus')
+  })
+
+  it('does not wait for a slow spot check longer than its budget', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const scene = capture({ id: 'S2_SLOW', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: s2c[0].tClosest - 7 * 60_000, cloudCoverPct: 3 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [scene], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.spotCloud.mockImplementation(() => new Promise(() => undefined))
+    const t0 = performance.now()
+    const report = await computeReport(waterloo, { now })
+    expect(performance.now() - t0).toBeLessThan(5000)
+    expect(report.captures[0].spot).toBeUndefined()
+  })
+
+  it('recasts open-optical passes over the open ocean, where Sentinel-2 never images', async () => {
+    const ocean: Place = { label: 'Pacific Ocean', lat: 0, lon: -140, source: 'demo' }
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.sentinel2PlanCovers.mockResolvedValue(false)
+    const report = await computeReport(ocean, { now })
+    const optical = report.passes.filter((p) => getSatInfo(p.norad)?.category === 'open-optical')
+    expect(optical.length).toBeGreaterThan(0)
+    expect(optical.filter((p) => p.verdict === 'likely')).toEqual([])
+    expect(report.notes).toContain(OCEAN_NOTE)
+
+    // On land (the plan covers the place) nothing changes, and the question is only asked without S2 scenes.
+    imagery.sentinel2PlanCovers.mockResolvedValue(true)
+    const land = await computeReport(waterloo, { now })
+    expect(land.passes.some((p) => p.verdict === 'likely' && getSatInfo(p.norad)?.category === 'open-optical')).toBe(true)
+    expect(land.notes).not.toContain(OCEAN_NOTE)
+    expect(land.archiveFailed).toBe(false)
   })
 
   for (const stage of ['propagate', 'archive'] as const) it(`aborts cleanly during the ${stage} stage (no unhandled rejections)`, async () => {
@@ -268,6 +395,9 @@ describe('computeReport', () => {
     expect(report.captures).toEqual([])
     expect(report.notes.length).toBe(2)
     expect(report.notes[1]).toMatch(/^NASA GIBS could not be reached/)
+    expect(report.archiveFailed).toBe(true)
+    // An outage is not "the open ocean": the plan question is never asked then.
+    expect(imagery.sentinel2PlanCovers).not.toHaveBeenCalled()
   })
 
   it('lists geostationary watchers with their real longitudes', async () => {

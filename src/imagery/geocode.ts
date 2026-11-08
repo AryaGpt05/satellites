@@ -5,7 +5,6 @@
  * Labels are built for a two-line display: `label` is the thing itself ("Waterloo"),
  * `sublabel` is where it is ("Ontario, Canada"), with no part repeated.
  */
-import tzlookup from '@photostructure/tz-lookup'
 import { haversineKm } from '@/lib/geo'
 import type { LatLon, Place } from '@/types'
 import { fmtLat, fmtLon } from '@/ui/system/format'
@@ -249,7 +248,7 @@ export function parseCoordinates(q: string): LatLon | null {
 // ── Network ────────────────────────────────────────────────────────────────────────────────
 
 const PHOTON_TIMEOUT_MS = 8_000
-const searchCache = new Lru<string, Place[]>(48)
+const searchCache = /* @__PURE__ */ new Lru<string, Place[]>(48)
 
 /** Results returned, and asked of Photon (extra, so merged duplicates and junk don't thin the list). */
 const MAX_RESULTS = 6
@@ -382,12 +381,55 @@ export function locateMe(): Promise<LatLon> {
 }
 
 // ── Time zone ──────────────────────────────────────────────────────────────────────────────
+//
+// The offline table (@photostructure/tz-lookup, ~70 kB) is not needed for the first screen, so it is a
+// separate chunk: `ensureTz()` loads it (the controller starts it at landing idle and at boot for deep
+// links; computeReport awaits it before producing a report), and `timeZoneAt` stays synchronous. Until
+// the table is in, `timeZoneAt` answers with the nautical zone for the longitude (Etc/GMT±N), which is
+// never more than an hour or two off and is only ever seen in the computing readout.
 
-/** IANA time zone at a position ("America/Toronto"). Offline; open sea gets "Etc/GMT±N". */
+type TzLookup = (lat: number, lon: number) => string
+let tzlookup: TzLookup | undefined
+let tzLoad: Promise<void> | undefined
+
+/** Load the time-zone table (idempotent; a failed load is retried by the next call). Never rejects. */
+export function ensureTz(): Promise<void> {
+  if (tzlookup) return Promise.resolve()
+  tzLoad ??= import('@photostructure/tz-lookup').then(
+    (m) => {
+      const fn = ((m as { default?: unknown }).default ?? m) as TzLookup
+      if (typeof fn === 'function') tzlookup = fn
+    },
+    (err: unknown) => {
+      console.warn('Time-zone table failed to load; using nautical zones.', err)
+      tzLoad = undefined
+    },
+  )
+  return tzLoad
+}
+
+/** True once `ensureTz()` has loaded the table. */
+export const tzReady = () => !!tzlookup
+
+/** Nautical time zone for a longitude: the IANA "Etc/GMT±N" id (signs inverted by POSIX convention). */
+export function nauticalZone(lon: number): string {
+  const n = Math.max(-12, Math.min(12, Math.round(lon / 15)))
+  if (n === 0) return 'UTC'
+  return n > 0 ? `Etc/GMT-${n}` : `Etc/GMT+${-n}`
+}
+
+/**
+ * IANA time zone at a position ("America/Toronto"). Offline; open sea gets "Etc/GMT±N".
+ * Before `ensureTz()` has resolved, the nautical zone for the longitude.
+ */
 export function timeZoneAt(lat: number, lon: number): string {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 'UTC'
   const la = Math.max(-90, Math.min(90, lat))
   const lo = ((((lon + 180) % 360) + 360) % 360) - 180
+  if (!tzlookup) {
+    void ensureTz()
+    return nauticalZone(lo)
+  }
   try {
     return tzlookup(la, lo)
   } catch {

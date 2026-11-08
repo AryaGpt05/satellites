@@ -6,7 +6,8 @@
  *    LRU keyed by URL, and concurrent callers share one load.
  *  - `probeImage(url)` decodes a (tiny) image and measures how much of it is no-data
  *    (transparent or pure black). GIBS answers "no data yet" with a black JPEG instead of an
- *    error, so this is the only reliable way to tell an empty frame from a real one.
+ *    error, so this is the only reliable way to tell an empty frame from a real one. The fetch
+ *    and decode run in a worker (pixelsClient.ts) when the browser allows.
  *
  * All images are requested with `crossOrigin="anonymous"`: every archive we use sends
  * `Access-Control-Allow-Origin: *`, and CORS-clean pixels can be read back (probe, canvas
@@ -16,9 +17,13 @@
 import { GIBS_WMS } from './endpoints'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
+import { readbackContext } from './pixels'
+import { fetchPixels } from './pixelsClient'
+
+export { decodeImagePixels } from './pixels'
 
 const IMAGE_TIMEOUT_MS = 45_000 // PC renders crops on demand: 1–3 s typical, much longer on a cold cache
-const imageCache = new Lru<string, Promise<HTMLImageElement>>(96)
+const imageCache = /* @__PURE__ */ new Lru<string, Promise<HTMLImageElement>>(96)
 
 /**
  * NASA GIBS answered with an all-black image: "no data" in GIBS's dialect (not processed yet, a
@@ -41,21 +46,24 @@ const CHECK_PX = 32
 
 const isGibsUrl = (url: string) => url.startsWith(GIBS_WMS)
 
-/** No-data share of a decoded image, or undefined if its pixels can't be read (never blocks a load). */
-function noDataOf(img: HTMLImageElement): number | undefined {
+/**
+ * No-data share of a decoded image, or undefined if its pixels can't be read (never blocks a load).
+ * The image is scaled to 32² by createImageBitmap (decoder-side, no full-size draw on the main thread);
+ * only the tiny bitmap is drawn for read-back.
+ */
+async function noDataOf(img: HTMLImageElement): Promise<number | undefined> {
   try {
-    let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null
-    if (typeof OffscreenCanvas !== 'undefined') ctx = new OffscreenCanvas(CHECK_PX, CHECK_PX).getContext('2d', { willReadFrequently: true })
-    else {
-      const c = document.createElement('canvas')
-      c.width = c.height = CHECK_PX
-      ctx = c.getContext('2d', { willReadFrequently: true })
+    const bmp = await createImageBitmap(img, { resizeWidth: CHECK_PX, resizeHeight: CHECK_PX, resizeQuality: 'low' })
+    try {
+      const ctx = readbackContext(CHECK_PX, CHECK_PX)
+      if (!ctx) return undefined
+      ctx.drawImage(bmp, 0, 0)
+      return measureNoData(ctx.getImageData(0, 0, CHECK_PX, CHECK_PX).data).noDataFraction
+    } finally {
+      bmp.close()
     }
-    if (!ctx) return undefined
-    ctx.drawImage(img, 0, 0, CHECK_PX, CHECK_PX)
-    return measureNoData(ctx.getImageData(0, 0, CHECK_PX, CHECK_PX).data).noDataFraction
   } catch {
-    return undefined // tainted canvas or no 2D context: trust the load
+    return undefined // tainted, no bitmap support or no 2D context: trust the load
   }
 }
 
@@ -100,7 +108,7 @@ export function preloadImage(url: string, opts: { signal?: AbortSignal; timeoutM
   const timeoutMs = opts.timeoutMs ?? IMAGE_TIMEOUT_MS
   const load = async () => {
     const img = await loadOnce(url, timeoutMs)
-    if (isGibsUrl(url) && (noDataOf(img) ?? 0) >= EMPTY_NO_DATA) throw new EmptyImageError(url)
+    if (isGibsUrl(url) && ((await noDataOf(img)) ?? 0) >= EMPTY_NO_DATA) throw new EmptyImageError(url)
     return img
   }
   const p = memoAsync(imageCache, url, async () => {
@@ -156,31 +164,9 @@ export function measureNoData(rgba: Uint8ClampedArray | Uint8Array): { noDataFra
  * day, and a young geostationary frame can be empty on one GIBS backend and complete on the next.
  * Probes that found data are kept (archived pixels don't disappear).
  */
-const emptyProbeAt = new Map<string, number>()
+const emptyProbeAt = /* @__PURE__ */ new Map<string, number>()
 const EMPTY_PROBE_TTL_MS = 5 * 60_000
-const probeCache = new Lru<string, Promise<ImageProbe>>(256, (url) => emptyProbeAt.delete(url))
-
-/** Decode an image blob to RGBA. Worker-safe: OffscreenCanvas when available, DOM canvas otherwise. */
-async function decodePixels(blob: Blob): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
-  const bmp = await createImageBitmap(blob)
-  try {
-    const { width, height } = bmp
-    let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null
-    if (typeof OffscreenCanvas !== 'undefined') {
-      ctx = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })
-    } else {
-      const c = document.createElement('canvas')
-      c.width = width
-      c.height = height
-      ctx = c.getContext('2d', { willReadFrequently: true })
-    }
-    if (!ctx) throw new Error('2D canvas unavailable')
-    ctx.drawImage(bmp, 0, 0)
-    return { data: ctx.getImageData(0, 0, width, height).data, width, height }
-  } finally {
-    bmp.close()
-  }
-}
+const probeCache = /* @__PURE__ */ new Lru<string, Promise<ImageProbe>>(256, (url) => emptyProbeAt.delete(url))
 
 /**
  * Fetch an image (keep it small: a 16–32 px render is plenty) and measure its no-data share.
@@ -196,10 +182,11 @@ export function probeImage(url: string, signal?: AbortSignal): Promise<ImageProb
   const p = memoAsync(probeCache, url, async () => {
     const probe = await withRetry(
       async (s): Promise<ImageProbe> => {
-        const res = await fetch(url, { signal: s })
-        if (!res.ok) throw new HttpError(res.status, url)
-        if (!(res.headers.get('content-type') ?? '').startsWith('image/')) return { noDataFraction: 1, meanLuma: 0, width: 0, height: 0 }
-        const { data, width, height } = await decodePixels(await res.blob())
+        // Fetched and decoded in the pixels worker (K8); only the tiny RGBA buffer comes back.
+        const r = await fetchPixels(url, s)
+        if (r.status < 200 || r.status >= 300) throw new HttpError(r.status, url)
+        if (!r.pixels) return { noDataFraction: 1, meanLuma: 0, width: 0, height: 0 }
+        const { data, width, height } = r.pixels
         return { ...measureNoData(data), width, height }
       },
       { timeoutMs: 15_000, retries: 1, label: url },

@@ -12,7 +12,8 @@
  *
  * It sits just below the HUD (the bezel and corner readouts stay on top) and above the scene.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
+import { DUR, EASE } from '@/lib/ease'
 import { subsolarPoint } from '@/lib/geo'
 import { useApp } from '@/state/store'
 import { Rule, cx, fmtInt, useExitClone, useWallSecondSync } from '@/ui/system'
@@ -88,12 +89,13 @@ export function BootScreen() {
   const fonts = useFontsLoaded(t0)
   const globeTook = useTookWhen(globeReady, t0)
   const catalogTook = useTookWhen(catalogReady, t0)
-  const elapsed = useElapsed(t0, !(globeReady && catalogReady && fonts.done))
+  const elapsedRef = useRef<HTMLSpanElement>(null)
+  const slow = useElapsed(t0, !(globeReady && catalogReady && fonts.done), elapsedRef)
   const rootRef = useRef<HTMLDivElement>(null)
   // WAIT flags blink in step with the HUD's live dot and clock.
   useWallSecondSync(rootRef)
 
-  const pendingDetail = (base: string) => (elapsed > SLOW_MS ? 'Slow connection, still loading' : base)
+  const pendingDetail = (base: string) => (slow ? 'Slow connection, still loading' : base)
 
   const steps: Step[] = [
     { key: 'sun', name: 'Solar ephemeris', detail: fmtSun(sun.p), flag: 'ok', took: sun.took },
@@ -129,17 +131,18 @@ export function BootScreen() {
   // The controller may flip to 'idle' in the same batch that completes the last step, so the final
   // React frame can still say WAIT. Fix the clone up from live state before it wipes away.
   // Exit: the log clears right-to-left (180 ms), then the ink curtain lifts top → bottom over the
-  // globe while the landing (in the app layer above) runs its own entrance.
+  // globe (640 ms after 120 ms) while the landing (in the app layer above) runs its own entrance,
+  // timed by the app to start as the curtain uncovers it.
   useExitClone(rootRef, {
     keyframes: [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: 'inset(100% 0 0 0)' }],
-    duration: 720,
-    delay: 160,
-    easing: 'cubic-bezier(.6, 0, .2, 1)',
+    duration: DUR.curtain,
+    delay: 120,
+    easing: EASE.inOut,
     onStart: (clone, reduced) => {
       if (reduced) return
       clone.querySelector<HTMLElement>('[data-block]')?.animate([{ clipPath: 'inset(0 0 0 0)' }, { clipPath: 'inset(0 0 0 100%)' }], {
         duration: 180,
-        easing: 'cubic-bezier(.6, 0, .2, 1)',
+        easing: EASE.inOut,
         fill: 'forwards',
       })
     },
@@ -165,7 +168,9 @@ export function BootScreen() {
       <div className={s.block} data-block>
         <div className={s.head}>
           <Rule index="00">Start-up</Rule>
-          <span className={s.elapsed}>T+{(elapsed / 1000).toFixed(2).padStart(5, '0')} S</span>
+          <span ref={elapsedRef} className={s.elapsed}>
+            {fmtElapsed(0)}
+          </span>
         </div>
         <ol className={s.steps}>
           {steps.map((st, i) => (
@@ -174,7 +179,7 @@ export function BootScreen() {
               <span className={s.name}>{st.name}</span>
               <span className={cx(s.detail, st.flag === 'fail' && s.warn)}>{st.detail}</span>
               <span className={s.took}>{st.took !== undefined ? `${(st.took / 1000).toFixed(2)} S` : ''}</span>
-              <span className={s.flag} data-flag={st.flag}>
+              <span className={s.flag} data-flag={st.flag} data-blink={st.flag === 'wait' ? '' : undefined}>
                 {FLAG_TEXT[st.flag]}
               </span>
             </li>
@@ -198,16 +203,24 @@ export function BootScreen() {
 
 const FLAG_TEXT: Record<Flag, string> = { wait: 'Wait', ok: 'OK', fail: 'Fail', late: 'Later' }
 
-/** Milliseconds since t0, updated at ~10 Hz while `running`. */
-function useElapsed(t0: number, running: boolean): number {
-  const [ms, setMs] = useState(0)
+const fmtElapsed = (ms: number) => `T+${(ms / 1000).toFixed(2).padStart(5, '0')} S`
+
+/**
+ * The T+ counter: written into `ref` at ~10 Hz while `running` (no React render per tick). Returns
+ * whether the wait has passed SLOW_MS (one render, when it does).
+ */
+function useElapsed(t0: number, running: boolean, ref: RefObject<HTMLSpanElement | null>): boolean {
+  const [slow, setSlow] = useState(false)
   useEffect(() => {
-    if (!running) {
-      setMs(performance.now() - t0)
-      return
+    const write = () => {
+      const ms = performance.now() - t0
+      if (ref.current) ref.current.textContent = fmtElapsed(ms)
+      if (ms > SLOW_MS) setSlow(true)
     }
-    const id = window.setInterval(() => setMs(performance.now() - t0), 100)
+    write()
+    if (!running) return
+    const id = window.setInterval(write, 100)
     return () => window.clearInterval(id)
-  }, [t0, running])
-  return ms
+  }, [t0, running, ref])
+  return slow
 }

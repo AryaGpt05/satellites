@@ -7,9 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleSharePage } from '../s.js'
 import { niceLength } from './card.js'
+import { buildCardSpec } from './cardSpec.js'
 import { esc, jsonForScript, sharePageHtml } from './html.js'
 import { bboxAround, cropPlan } from './imagery.js'
-import { description, headline, shareFromParams, shareFromRpc, text } from './share.js'
+import { cardInputFromShare, description, headline, shareFromParams, shareFromRpc, text } from './share.js'
 
 const ROW = {
   id: 'ab3d5f7h',
@@ -49,6 +50,16 @@ describe('share parsing', () => {
     expect(s).toMatchObject({ id: 'ab3d5f7h', placeLabel: 'Waterloo', verdict: 'imaged', norad: 60989 })
     expect(s?.capture?.collection).toBe('sentinel-2-l2a')
   })
+  it('reads the spot cloud class, and calls a picture clouded when cloud sits on the spot', () => {
+    const spotCloud = shareFromRpc({ ...ROW, capture: { ...ROW.capture, spot: 'cloud' } })!
+    expect(spotCloud.capture?.spot).toBe('cloud')
+    const spec = buildCardSpec(cardInputFromShare(spotCloud, 'overflight.app'))
+    expect(spec.sub).toBe('Clouded over. It saw only cloud.')
+    expect(spec.plate.kind === 'image' && spec.plate.clouded?.segs[0].text).toBe('Cloud over your spot')
+    expect(description(spotCloud)).toContain('Cloud covered the spot.')
+    expect(shareFromRpc({ ...ROW, capture: { ...ROW.capture, spot: '<b>' } })?.capture?.spot).toBeUndefined()
+    expect(buildCardSpec(cardInputFromShare(shareFromRpc(ROW)!, 'overflight.app')).sub).toBeUndefined()
+  })
   it('rejects unusable rows and unsafe capture ids', () => {
     expect(shareFromRpc(null)).toBeNull()
     expect(shareFromRpc({ ...ROW, verdict: 'owned', pass: { ...ROW.pass, verdict: 'owned' } })).toBeNull()
@@ -79,13 +90,30 @@ describe('copy', () => {
     const s = shareFromRpc(ROW)!
     expect(headline(s)).toBe('Sentinel-2C photographed Waterloo.')
     expect(description(s)).toBe(
-      'Sentinel-2C crossed 795 km above Waterloo at 16:21 UTC on 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. See every satellite that passed over any place this week.',
+      'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What photographed you this week?',
     )
     expect(headline({ ...s, verdict: 'could', satName: 'SkySat-C3' })).toBe('SkySat-C3 passed within view of Waterloo.')
     expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 photographed Waterloo.')
     expect(description({ ...s, verdict: 'could', satName: 'SkySat-C3', pass: { ...s.pass, headingDeg: 192 } })).toContain(
-      "SkySat-C3 passed within view of Waterloo at 16:21 UTC on 1 Nov 2026, moving south. It could have pointed here. We can't know whether it did.",
+      "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What photographed you this week?",
     )
+  })
+})
+
+describe('card spec', () => {
+  it('prints local time, the credit, the invitation and the clouded line', () => {
+    const s = shareFromRpc(ROW)!
+    const spec = buildCardSpec(cardInputFromShare(s, 'overflight.app'))
+    expect(spec.stamp).toBe('Sun 1 Nov 2026 · 11:21 EST')
+    expect(spec.verdictLabel).toBe('Photographed')
+    expect(spec.footLeft).toBe('See what photographed you')
+    expect(spec.plate.kind === 'image' && spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
+    expect(spec.readouts.map((r) => `${r.label} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)).toEqual(['Altitude 795 km', 'Off-nadir 5.3°', 'Pixel 10 m'])
+    const cloudy = buildCardSpec(cardInputFromShare({ ...s, capture: { ...s.capture!, cloudCoverPct: 86 } }, ''))
+    expect(cloudy.sub).toBe('Clouded over. It saw only cloud.')
+    expect(cloudy.plate.kind === 'image' && cloudy.plate.clouded?.segs[0].text).toBe('Clouded over · 86%')
+    const landsat = buildCardSpec(cardInputFromShare({ ...s, capture: { collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_018030_20261031_02_T1' } }, ''))
+    expect(landsat.plate.kind === 'image' && landsat.plate.credit.segs[0].text).toBe('Landsat: USGS / NASA')
   })
 })
 
@@ -137,7 +165,7 @@ describe('share page', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/html')
     expect(body).toContain('<meta property="og:title" content="Sentinel-2C photographed Waterloo.">')
-    expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=1">')
+    expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=2">')
     expect(body).toContain('<meta name="twitter:card" content="summary_large_image">')
     expect(body).toContain('<link rel="canonical" href="https://overflight.app/s/ab3d5f7h">')
     expect(body).toContain('<meta http-equiv="refresh" content="0; url=/?s=ab3d5f7h">')
@@ -171,6 +199,22 @@ describe('share page', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toContain('s-maxage=60')
     expect(await res.text()).toContain('/?s=ab3d5f7h')
+  })
+
+  it('unfurls an address-bar link as the place, coarsened to 0.01°', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const res = await handleSharePage(new Request('https://overflight.app/api/s?q=43.4723,-80.5449&n=Waterloo'))
+    const body = await res.text()
+    expect(res.status).toBe(200)
+    expect(body).toContain('<meta property="og:title" content="What photographed Waterloo this week">')
+    expect(body).toContain('kind=place&#38;place=Waterloo&#38;lat=43.47&#38;lon=-80.54')
+    expect(body).toContain(String.raw`location.replace("/?q=43.47%2C-80.54\u0026n=Waterloo")`)
+    expect(body).not.toContain('43.4723')
+    expect(fetch).not.toHaveBeenCalled()
+    // A street address is never printed: the coordinates stand in.
+    const addr = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.4723,-80.5449&n=123%20King%20St'))).text()
+    expect(addr).toContain('What photographed 43.47°N 80.54°W this week')
   })
 
   it('renders the page template with every required tag', () => {
@@ -207,5 +251,77 @@ describe('og card', () => {
     const remote = fetch.mock.calls.map((c) => String(c[0] instanceof Request ? c[0].url : c[0])).filter((u) => /^https?:/.test(u))
     expect(remote).toEqual([])
     fetch.mockRestore()
+  })
+})
+
+/**
+ * vercel.json `routes` (share SH7), simulated: `vercel dev` can't evaluate `has`, so this walks the
+ * route list the way the edge does (src anchored, `has` conditions as anchored regexes, `continue`
+ * routes collect headers, the first other match wins, `handle: filesystem` marks where static files
+ * and functions are served) for the requests that matter.
+ */
+describe('vercel.json routes', () => {
+  interface Route {
+    src?: string
+    dest?: string
+    headers?: Record<string, string>
+    continue?: boolean
+    handle?: string
+    has?: { type: string; key: string; value?: string }[]
+  }
+  const routes = async (): Promise<Route[]> => {
+    const { readFile } = await import('node:fs/promises')
+    return (JSON.parse(await readFile(new URL('../../vercel.json', import.meta.url), 'utf8')) as { routes: Route[] }).routes
+  }
+  const anchored = (re: string) => new RegExp(`^${re.replace(/^\^/, '').replace(/\$$/, '')}$`)
+  /** Where a request lands before the filesystem phase ('filesystem' if no route claims it), and the headers it collected. */
+  async function resolve(url: string, ua: string, phase: 'before' | 'after' = 'before') {
+    const u = new URL(url, 'https://overflight.app')
+    const list = await routes()
+    const fsAt = list.findIndex((r) => r.handle === 'filesystem')
+    const scope = phase === 'before' ? list.slice(0, fsAt) : list.slice(fsAt + 1)
+    const headers: Record<string, string> = {}
+    for (const r of scope) {
+      const m = r.src ? anchored(r.src).exec(u.pathname) : null
+      if (!m) continue
+      const ok = (r.has ?? []).every((c) => {
+        const v = c.type === 'query' ? u.searchParams.get(c.key) : c.type === 'header' && c.key === 'user-agent' ? ua : null
+        return v !== null && (c.value === undefined || anchored(c.value).test(v))
+      })
+      if (!ok) continue
+      Object.assign(headers, r.headers)
+      if (r.continue) continue
+      // Named and numbered groups substitute into dest ($id, $1), as on the edge.
+      const dest = r.dest?.replace(/\$(\w+)/g, (_, k: string) => (/^\d+$/.test(k) ? m[Number(k)] : m.groups?.[k]) ?? '') ?? null
+      return { dest, headers }
+    }
+    return { dest: 'filesystem', headers }
+  }
+  const BOT = 'Mozilla/5.0 (compatible; Twitterbot/1.0)'
+  const IMESSAGE = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_1) AppleWebKit/601.2.4 (KHTML, like Gecko) Version/9.0.1 Safari/601.2.4 facebookexternalhit/1.1 Facebot Twitterbot/1.0'
+  const PERSON = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+
+  it('sends link unfurlers of an address-bar link to the place page, and people to the app', async () => {
+    expect((await resolve('/?q=43.472,-80.545&n=Waterloo', BOT)).dest).toBe('/api/s')
+    expect((await resolve('/?q=43.472,-80.545&n=Waterloo', IMESSAGE)).dest).toBe('/api/s')
+    expect((await resolve('/?q=43.472,-80.545&n=Waterloo', PERSON)).dest).toBe('filesystem')
+    expect((await resolve('/', BOT)).dest).toBe('filesystem') // the root card: static index.html + og-default.png
+    expect((await resolve('/s/ab3d5f7h', PERSON)).dest).toBe('/api/s?id=ab3d5f7h')
+  })
+
+  it('falls back to the SPA for app paths only, after the filesystem', async () => {
+    expect((await resolve('/about', PERSON, 'after')).dest).toBe('/index.html')
+    expect((await resolve('/api/og', PERSON, 'after')).dest).toBe('filesystem')
+    expect((await resolve('/missing.png', PERSON, 'after')).dest).toBe('filesystem')
+  })
+
+  it('keeps the security headers and never marks unhashed textures immutable', async () => {
+    const page = await resolve('/', PERSON)
+    expect(page.headers['X-Content-Type-Options']).toBe('nosniff')
+    expect(page.headers['Referrer-Policy']).toBeTruthy()
+    expect((await resolve('/assets/index-abc123.js', PERSON)).headers['Cache-Control']).toContain('immutable')
+    const tex = (await resolve('/textures/earth-day-4k.webp', PERSON)).headers['Cache-Control']
+    expect(tex).toContain('max-age=86400')
+    expect(tex).not.toContain('immutable')
   })
 })

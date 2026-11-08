@@ -30,7 +30,7 @@ import type { CatalogFile, CatalogRow, LatLon, Pass } from '@/types'
 import { getRow, getSatInfo } from './catalog'
 import { findPassesForSat, passTargetFor } from './passes'
 import { catalogFile, loadTestCatalog, WATERLOO } from './testing'
-import { satrecFor } from './catalog'
+import { satrecFor } from './sgp4'
 
 const DAY = 86_400_000
 const R_SPHERE = 6371

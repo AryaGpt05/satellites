@@ -71,11 +71,6 @@
   background: color-mix(in srgb, var(--bone) 9%, transparent);
   border: 1px solid var(--line);
 }
-@media (max-width: 1180px) {
-  .legend > span:nth-child(n + 2):not(.dayKey) {
-    display: none;
-  }
-}
 
 /* ── body ─────────────────────────────────────────────────────── */
 .body {
@@ -103,14 +98,35 @@
   gap: 7px;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9.5px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone-3);
   white-space: nowrap;
 }
+/* Photographs lead the strip (decision #7). */
+.laneLead {
+  color: var(--bone);
+}
 .laneEmpty {
   opacity: 0.5;
+}
+/* Narrow strips (the timeline beside the panel at ≤ 1180 px): glyph + count, so days keep ≥ 60 px. */
+@media (max-width: 1180px) {
+  .lanes {
+    width: 64px;
+  }
+  .laneLabel {
+    left: 10px;
+    right: 6px;
+    gap: 6px;
+  }
+  .laneLabel .laneWord {
+    display: none;
+  }
+  .laneCount {
+    margin-left: auto;
+  }
 }
 .laneWord {
   flex: 1;
@@ -124,7 +140,7 @@
   align-items: center;
   gap: 7px;
   margin-top: -2px;
-  font-size: 9px;
+  font-size: var(--fs-micro, 9.5px);
   color: var(--bone-3);
 }
 .signal {
@@ -138,6 +154,14 @@
   display: flex;
   flex-direction: column;
   margin-left: 12px;
+}
+@media (max-width: 1180px) {
+  .plotWrap {
+    margin-left: 8px;
+  }
+  .body {
+    padding-right: 10px;
+  }
 }
 .compact .plotWrap {
   margin-left: 0;
@@ -165,14 +189,21 @@
 .hoverLine,
 .playhead {
   position: absolute;
+  left: 0;
   top: 0;
   bottom: -1px;
   width: 1px;
   margin-left: -0.5px;
   pointer-events: none;
+  will-change: transform;
 }
 .selLine {
   background: var(--signal);
+  /* Stepping between passes glides; seeking and reduced motion cut. */
+  transition: transform var(--d-sm) var(--ease-out);
+}
+.noAnim {
+  transition: none;
 }
 .hoverLine {
   background: var(--bone-3);
@@ -193,6 +224,9 @@
   background: var(--signal);
   opacity: 0.9;
 }
+.playhead[data-on='false'] {
+  opacity: 0;
+}
 .playheadCap {
   position: absolute;
   top: -5px;
@@ -210,7 +244,7 @@
   height: 22px;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 9.5px;
+  font-size: var(--fs-micro, 9.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
@@ -218,13 +252,13 @@
   white-space: nowrap;
 }
 .compact .axis {
-  height: 16px;
-  font-size: 9px;
+  height: 18px;
+  font-size: var(--fs-micro, 10.5px);
 }
 .day {
   position: absolute;
   top: 6px;
-  padding-left: 5px;
+  padding-left: 6px;
   border-left: 1px solid var(--bone-4);
   line-height: 1;
 }
@@ -233,7 +267,7 @@
   padding-left: 0;
 }
 .compact .day {
-  top: 4px;
+  top: 5px;
   padding-left: 3px;
   border-left: 0;
 }
@@ -245,7 +279,7 @@
   color: var(--bone-2);
 }
 .compact .end {
-  top: 4px;
+  top: 5px;
 }
 
 /* ── tooltip ──────────────────────────────────────────────────── */
@@ -261,7 +295,7 @@
   border: 1px solid var(--line-strong);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;

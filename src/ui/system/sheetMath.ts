@@ -57,3 +57,28 @@ export function rubberband(overshoot: number, limit = 120): number {
 
 /** Clamp an index into [0, n-1]. */
 export const clampIndex = (i: number, n: number) => Math.max(0, Math.min(n - 1, Math.round(i)))
+
+/** Settle timing bounds (ms) and the assumed speed (px/ms) of a release with no flick. */
+export const SETTLE_MIN_MS = 200
+export const SETTLE_MAX_MS = 440
+export const SETTLE_MIN_V = 0.8
+
+/**
+ * How long a released sheet takes to settle (MOB-15): proportional to the distance left and inversely
+ * to the release speed, so a flick carries on at roughly its own speed and a small nudge is quick.
+ * `dist` px, `velocity` px/ms (sign ignored).
+ */
+export function settleMs(dist: number, velocity = 0): number {
+  const v = Math.max(Math.abs(velocity), SETTLE_MIN_V)
+  return Math.round(Math.min(SETTLE_MAX_MS, Math.max(SETTLE_MIN_MS, (Math.abs(dist) / v) * 1.6)))
+}
+
+/**
+ * Lowest translateY (px, negative = above the top snap) a drag may reach: rubber-banded overshoot of
+ * at most `limit`, and never higher than `ceilingPx` from the top of the viewport.
+ */
+export function topOvershoot(offset: number, sheetTopAtMax: number, ceilingPx: number, limit = 32): number {
+  if (offset >= 0) return offset
+  const room = Math.max(0, sheetTopAtMax - ceilingPx)
+  return -Math.min(rubberband(-offset, limit), room)
+}

@@ -1,5 +1,9 @@
-/* Flat ink scrim (no blur, DESIGN §1) and a hairline dialog. Phones: a full-width sheet from the bottom. */
-.backdrop {
+/*
+ * The share dialog. Flat ink scrim (no blur, DESIGN §1) and a hairline dialog on wide layouts; on stacked
+ * layouts the shell's bottom Sheet (see ShareSheet.tsx StackedShare). Exits are animated on a frozen
+ * clone (useExitClone), so this file only defines entrances and resting states.
+ */
+.root {
   position: fixed;
   inset: 0;
   z-index: var(--z-overlay);
@@ -7,6 +11,11 @@
   align-items: center;
   justify-content: center;
   padding: 32px;
+  outline: none;
+}
+.scrim {
+  position: absolute;
+  inset: 0;
   background: color-mix(in srgb, var(--ink-0) 80%, transparent);
   animation: fade var(--d-sm) linear both;
 }
@@ -15,18 +24,27 @@
     opacity: 0;
   }
 }
+
+/* ── wide: a centred dialog ───────────────────────────────────── */
 .dialog {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
   width: min(880px, 100%);
+  /*
+   * Short screens (1280 × 800 and below): the card (1200 : 630) narrows so the whole dialog fits with
+   * no clipped last line. ≈ 372px is everything around the card at its tallest (head, actions, the
+   * link row, a two-line post, the privacy note); 64px is the root's padding. Below ~560px it scrolls.
+   */
+  width: min(880px, 100%, max(560px, calc((100dvh - 64px - 372px) * 1.905 + 50px)));
   max-height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px 24px 22px;
   background: var(--ink-1);
   border: 1px solid var(--line-strong);
   color: var(--bone);
-  outline: none;
   animation: rise var(--d-md) var(--ease-out) both;
   scrollbar-width: thin;
   scrollbar-color: var(--bone-4) transparent;
@@ -37,12 +55,6 @@
     transform: translateY(12px);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .dialog {
-    animation: fade var(--d-md) linear both;
-  }
-}
-
 .head {
   display: flex;
   align-items: center;
@@ -65,9 +77,75 @@
     color var(--d-hover) var(--ease-out),
     border-color var(--d-hover) var(--ease-out);
 }
-.close:hover {
+@media (hover: hover) and (pointer: fine) {
+  .close:hover {
+    color: var(--bone);
+    border-color: var(--line-strong);
+  }
+}
+.close:active {
   color: var(--bone);
   border-color: var(--line-strong);
+  background: var(--ink-3, #1c2027);
+  transition-duration: 0ms;
+}
+@media (pointer: coarse) {
+  .close {
+    width: 44px;
+    height: 44px;
+    margin: -6px -14px -6px 0;
+  }
+}
+
+/* ── stacked: the shell Sheet, above the scrim ───────────────────── */
+.stacked {
+  /* Full-viewport box: the exit's translate moves this, and the fixed Sheet inside moves with it. */
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.sheet.sheet {
+  z-index: 1;
+  pointer-events: auto;
+  /* calc(100dvh - 48px) at most; the Sheet itself also keeps the HUD band clear above it */
+  max-height: calc(100dvh - 48px);
+}
+
+/* ── content (shared) ─────────────────────────────────────────── */
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Wide: three equal-weight actions, the primary a little wider (Post to X · Copy link · Copy image). */
+.actions {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 8px;
+}
+.actions > * {
+  min-width: 0;
+}
+/* Touch: one full-width "Share image", then three equal secondaries. */
+.actionsTouch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.native {
+  width: 100%;
+  height: 48px;
+  font-size: var(--fs-label, 10.5px);
+}
+.secondary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.secondary > * {
+  min-width: 0;
+  padding-inline: 6px;
 }
 
 .linkRow {
@@ -75,12 +153,19 @@
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--line-strong);
+  animation: row-in var(--d-sm) var(--ease-out) both;
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 .linkLabel {
   flex: none;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: var(--fs-label);
+  font-size: var(--fs-label, 10.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone-3);
@@ -94,7 +179,7 @@
   background: transparent;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: 12px;
+  font-size: var(--fs-readout, 12px);
   letter-spacing: 0.01em;
   color: var(--bone);
   outline: none;
@@ -107,15 +192,6 @@
   border-bottom-color: var(--signal);
 }
 
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.actions > * {
-  flex: 1 1 auto;
-}
-
 .text {
   margin: 0;
   display: grid;
@@ -125,39 +201,98 @@
   line-height: 1.5;
   color: var(--bone-2);
 }
+.textBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  white-space: pre-line;
+}
 .textLabel {
   padding-top: 2px;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: var(--fs-label);
+  font-size: var(--fs-label, 10.5px);
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone-3);
 }
-.privacy {
-  margin: 0;
+.foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+.privacy {
+  flex: 1;
+  margin: 0;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
-  font-size: var(--fs-label);
+  font-size: var(--fs-label, 10.5px);
   letter-spacing: 0.02em;
   line-height: 1.6;
   color: var(--bone-3);
 }
+.textAction {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin-top: -5px;
+  padding: 0 2px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label, 10.5px);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  border-bottom: 1px solid transparent;
+  transition:
+    color var(--d-hover) var(--ease-out),
+    border-color var(--d-hover) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .textAction:hover {
+    color: var(--bone);
+    border-bottom-color: var(--bone-3);
+  }
+}
+.textAction:active {
+  color: var(--signal);
+  transition-duration: 0ms;
+}
 
-@media (max-width: 760px) {
-  .backdrop {
-    align-items: flex-end;
+@media (prefers-reduced-motion: reduce) {
+  .dialog {
+    animation: fade var(--d-md) linear both;
+  }
+  .linkRow {
+    animation-name: fade;
+  }
+}
+
+/* Stacked-layout spacing (the dialog itself is the Sheet there; these rules only tune the content). */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  .root {
     padding: 0;
   }
+  .content {
+    gap: 14px;
+  }
+  .text {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .foot {
+    flex-direction: column;
+    gap: 8px;
+  }
+  /* A centred dialog never shows here, but if it did (no JS media match), it rises as a sheet. */
   .dialog {
     width: 100%;
-    max-height: 92vh;
-    padding: 16px 16px calc(18px + env(safe-area-inset-bottom, 0px));
-    border-left: 0;
-    border-right: 0;
-    border-bottom: 0;
+    max-height: calc(100dvh - 48px);
+    align-self: flex-end;
     animation-name: sheet;
   }
   @keyframes sheet {
@@ -165,11 +300,9 @@
       transform: translateY(100%);
     }
   }
-  .actions > * {
-    flex: 1 1 calc(50% - 4px);
-  }
-  .text {
-    grid-template-columns: 1fr;
-    gap: 4px;
+}
+@media (prefers-reduced-motion: reduce) and (max-width: 760px) {
+  .dialog {
+    animation-name: fade;
   }
 }

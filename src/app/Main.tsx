@@ -1,22 +1,136 @@
-/** The production app (lazy-loaded so ?sandbox= pages never import unfinished modules). */
-import { useEffect, useState } from 'react'
-import { useApp } from '@/state/store'
-import { GlobeCanvas } from '@/globe'
+/**
+ * The production app: composition of the shell, the globe and the results panel.
+ *
+ * Loading (K3): this module and the shell (HUD, boot log, landing) are in the first bundle; the heavy parts
+ * are separate chunks:
+ *   globe     three.js + R3F + post: requested as soon as this module evaluates (and modulepreloaded by
+ *             index.html in production), so it downloads while the boot log runs
+ *   results   the results panel, pass detail and share sheet: prefetched at landing idle, on the first focus
+ *             of the search field, and at once for deep links / share links
+ *   about     prefetched at landing idle
+ */
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { useApp, type Phase } from '@/state/store'
+import { isStacked } from '@/lib/layout'
 import { Hud } from '@/ui/hud'
 import { BootScreen, Landing } from '@/ui/landing'
-import { AboutPage } from '@/ui/pages'
-import { ComputingReadout, ResultsView } from '@/ui/results'
-import { boot, resetToLanding, runReport, writeUrl } from './controller'
+import { prefersReducedMotion } from '@/ui/system'
+import { afterLandingEntrance, boot, loadEngine, resetToLanding, retryReport, runReport, writeUrl } from './controller'
 import { ErrorNotice } from './ErrorNotice'
 import s from './App.module.css'
+
+// ── code-split chunks ──────────────────────────────────────────────────────────────────────────
+/**
+ * A chunk loader that remembers its module once loaded, so a component from it renders synchronously in the
+ * very commit that needs it. (React.lazy would suspend for a tick even when the chunk is already in, and the
+ * Suspense retry runs at a low priority that a stream of store updates — progress, the clock — can starve
+ * for seconds: measured 1.8 s of empty screen between boot and the computing panel.)
+ */
+interface Chunk<T> {
+  (): Promise<T>
+  loaded?: T
+}
+const chunk = <T,>(load: () => Promise<T>): Chunk<T> => {
+  let p: Promise<T> | undefined
+  const get: Chunk<T> = () => {
+    p ??= load().then((m) => (get.loaded = m))
+    // A failed chunk load (flaky network) must not stick: the next call retries.
+    p.catch(() => (p = undefined))
+    return p
+  }
+  return get
+}
+const loadGlobe = chunk(() => import('@/globe'))
+const loadResults = chunk(() => import('@/ui/results'))
+const loadAbout = chunk(() => import('@/ui/pages'))
+
+/** The module of `c` once loaded (requests it when `wanted`); undefined until then. */
+function useChunk<T>(c: Chunk<T>, wanted: boolean): T | undefined {
+  const [, setTick] = useState(0)
+  const loaded = c.loaded
+  useEffect(() => {
+    if (!wanted || loaded) return
+    let alive = true
+    c().then(
+      () => alive && setTick((n) => n + 1),
+      () => undefined,
+    )
+    return () => {
+      alive = false
+    }
+  }, [c, wanted, loaded])
+  return loaded
+}
+
+// Dev sandboxes import this module too (App.tsx imports it statically for production): no side effects there.
+const isApp = typeof location !== 'undefined' && !(import.meta.env.DEV && /[?&]sandbox=/.test(location.search))
+// The globe is on the critical path to first light: start it now, in parallel with the shell's first render.
+if (isApp) void loadGlobe()
+// A deep link or share link goes from boot straight to computing: its panel must be ready by then.
+if (isApp && /[?&](q|s)=/.test(location.search)) void loadResults()
+
+// Instrumentation for timing scripts: only in a `vite build --mode inspect` bundle (and dev), never in production.
+if (isApp && (import.meta.env.DEV || import.meta.env.MODE === 'inspect')) Object.assign(window, { __app: useApp })
+
+
+/** Warm the panels the user is about to need (idle time after the landing's entrance). */
+function prefetchChunks() {
+  void loadEngine().catch(() => undefined)
+  void loadResults()
+  void loadAbout()
+}
+
+/** Landing entrance delay after `prev` (K5): it starts after the boot curtain, quickly after a results exit. */
+function enterDelayAfter(prev: Phase): number {
+  if (prefersReducedMotion()) return 0
+  if (prev === 'boot') return isStacked(window.innerWidth, window.innerHeight) ? 560 : 380
+  return 160
+}
+
+/**
+ * index.html paints a static copy of the boot screen's first frame at HTML arrival (K3). React's boot screen
+ * replaces it pixel-for-pixel in this commit; only the wordmark copy stays a moment longer, until the HUD's
+ * own wordmark has wiped in underneath it (480 ms), so nothing blinks.
+ */
+function retireStaticBoot() {
+  const el = document.getElementById('boot-static')
+  if (!el) return
+  el.setAttribute('data-live', '')
+  setTimeout(() => el.remove(), 640)
+}
 
 export default function Main() {
   const phase = useApp((st) => st.phase)
   const error = useApp((st) => st.error)
-  const [about, setAbout] = useState(false)
+  const about = useApp((st) => st.aboutOpen)
+
+  useLayoutEffect(retireStaticBoot, [])
 
   useEffect(() => {
     void boot()
+  }, [])
+
+  // Landing entrance delay: decided when the landing (re)appears, from the phase it follows.
+  const prevPhase = useRef<Phase>(phase)
+  const enterDelay = useRef(0)
+  if (phase !== prevPhase.current) {
+    const landing = (p: Phase) => p === 'idle' || p === 'locating'
+    if (landing(phase) && !landing(prevPhase.current)) enterDelay.current = enterDelayAfter(prevPhase.current)
+    prevPhase.current = phase
+  }
+
+  // Warm the results and About chunks once the landing has finished its entrance, and on the first focus
+  // of a text field (someone about to search).
+  useEffect(() => {
+    if (phase !== 'idle') return
+    afterLandingEntrance(prefetchChunks)
+  }, [phase])
+  useEffect(() => {
+    const onFocus = (e: FocusEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.('input')) prefetchChunks()
+    }
+    document.addEventListener('focusin', onFocus)
+    return () => document.removeEventListener('focusin', onFocus)
   }, [])
 
   // Keep ?p=<passId> in sync with the selection so links are always shareable.
@@ -32,7 +146,7 @@ export default function Main() {
   useEffect(() => {
     // Overlays (About, ShareSheet, search suggestions) handle their own keys first and stop/prevent them.
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || about) return
+      if (e.defaultPrevented || useApp.getState().aboutOpen) return
       const typing = (e.target as HTMLElement)?.closest?.('input, textarea, [contenteditable="true"]')
       if (e.key === 'Escape') {
         if (typing) return
@@ -40,25 +154,35 @@ export default function Main() {
         if (st.selectedPassId) return st.selectPass(undefined)
         if (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error') resetToLanding()
       } else if (!typing && e.key === '?') {
-        setAbout(true)
+        useApp.getState().setAboutOpen(true)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [about])
+  }, [])
+
+  const openAbout = () => {
+    void loadAbout()
+    useApp.getState().setAboutOpen(true)
+  }
+  const closeAbout = () => useApp.getState().setAboutOpen(false)
+  const panel = phase === 'computing' || phase === 'results'
+  const GlobeCanvas: ComponentType<{ className?: string }> | undefined = useChunk(loadGlobe, true)?.GlobeCanvas
+  const ResultsView = useChunk(loadResults, panel)?.ResultsView
+  const AboutPage = useChunk(loadAbout, about)?.AboutPage
 
   return (
     <div className={s.root}>
-      <GlobeCanvas className={s.scene} />
+      {GlobeCanvas ? <GlobeCanvas className={s.scene} /> : null}
       <div className={s.layer}>
-        {(phase === 'idle' || phase === 'locating') && <Landing onSubmit={(place) => void runReport(place)} />}
-        {phase === 'computing' && <ComputingReadout onCancel={resetToLanding} />}
-        {phase === 'results' && <ResultsView onBack={resetToLanding} />}
-        {phase === 'error' && <ErrorNotice message={error} onBack={resetToLanding} />}
+        {(phase === 'idle' || phase === 'locating') && <Landing onSubmit={(place) => void runReport(place)} enterDelay={enterDelay.current} />}
+        {/* One persistent panel from computing through results (decision #10): the same instance survives the phase change. */}
+        {panel && ResultsView ? <ResultsView key="results" onBack={resetToLanding} onRetry={retryReport} onSearch={(p) => void runReport(p)} /> : null}
+        {phase === 'error' && <ErrorNotice message={error} onRetry={retryReport} onBack={resetToLanding} />}
       </div>
-      <Hud onAbout={() => setAbout(true)} />
+      <Hud onAbout={openAbout} />
       {phase === 'boot' && <BootScreen />}
-      {about && <AboutPage onClose={() => setAbout(false)} />}
+      {about && AboutPage ? <AboutPage onClose={closeAbout} /> : null}
     </div>
   )
 }

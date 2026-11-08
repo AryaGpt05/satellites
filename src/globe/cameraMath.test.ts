@@ -149,3 +149,70 @@ describe('easing', () => {
     expect(easeInOut(0.8)).toBeGreaterThan(0.9)
   })
 })
+
+describe('retarget carries speed (M06)', () => {
+  it('easeCarry starts at the given speed, ends at rest and never overshoots', async () => {
+    const { easeCarry } = await import('./cameraMath')
+    for (const v of [0, 0.8, 1.6, 2.5]) {
+      const f = easeCarry(v)
+      const h = 1e-5
+      expect(f(h) / h).toBeCloseTo(v, 3)
+      expect((1 - f(1 - h)) / h).toBeCloseTo(0, 3)
+      let prev = 0
+      for (let t = 0; t <= 1.0001; t += 0.01) {
+        const y = f(Math.min(1, t))
+        expect(y).toBeGreaterThanOrEqual(prev - 1e-12)
+        expect(y).toBeLessThanOrEqual(1 + 1e-12)
+        prev = y
+      }
+    }
+  })
+
+  it('a pass tapped mid-flight keeps ≥ 30% of the camera speed through the handoff', async () => {
+    const { carrySpeed, copyPose, easeCarry, interpolatePose: interp, makePose: mk, planFlight: plan } = await import('./cameraMath')
+    const tanHalf = Math.tan((30 * DEG) / 2)
+    const a = mk({ lat: 22, lon: -10, range: 4.1 })
+    const b = mk({ lat: 43.47, lon: -80.54, range: 1.4, tilt: 8 * DEG })
+    const c = mk({ lat: 43.6, lon: -80.3, range: 1.2, tilt: 35 * DEG })
+    const p1 = plan(a, b)
+    const dt = 1 / 60
+    const pose = createPose()
+    const prev = createPose()
+    // Visual speed of the camera between two poses (half-screens per second).
+    const speed = (p: typeof pose, q: typeof pose) => Math.hypot(p.d.angleTo(q.d) / (q.range * tanHalf), Math.log(q.range / p.range)) / dt
+    for (const tr of [0.3, 0.5, 0.7]) {
+      // Fly a → b, estimating velocity the way the director does (EMA over ~40 ms).
+      let velPan = 0
+      let velZoom = 0
+      const velDir = new Vector3()
+      let pre = 0
+      copyPose(a, prev)
+      const steps = Math.round((tr * p1.duration) / dt)
+      for (let i = 1; i <= steps; i++) {
+        interp(a, b, easeInOut((i * dt) / p1.duration), p1.bump, pose)
+        const w = Math.min(1, dt / 0.04)
+        const ang = prev.d.angleTo(pose.d)
+        velPan += (ang / dt - velPan) * w
+        const tdir = pose.d.clone().sub(prev.d)
+        tdir.addScaledVector(pose.d, -tdir.dot(pose.d)).normalize()
+        velDir.lerp(tdir, w).normalize()
+        velZoom += (Math.log(pose.range / prev.range) / dt - velZoom) * w
+        pre = speed(prev, pose)
+        copyPose(pose, prev)
+      }
+      // Retarget to c from where we are.
+      const from = createPose()
+      copyPose(pose, from)
+      const p2 = plan(from, c)
+      const dur = Math.max(1.8, p2.duration * 0.8)
+      const ease = easeCarry(carrySpeed(from, c, { pan: velPan, dir: velDir, zoom: velZoom }, tanHalf, dur))
+      let min = Infinity
+      for (let i = 1; i <= Math.round((0.4 * dur) / dt); i++) {
+        interp(from, c, ease((i * dt) / dur), p2.bump, pose)
+        min = Math.min(min, speed(prev, pose))
+        copyPose(pose, prev)
+      }
+      expect(min).toBeGreaterThanOrEqual(0.3 * pre)
+    }
+  })
+})

@@ -5,6 +5,53 @@
   pointer-events: none;
 }
 
+/*
+ * Functional scrims (decision 5): over a scene (results, a pass) the readouts sit on a flat ink fade
+ * so they stay legible over bright cloud and the limb. No blur. Above the canvas, below the bezel and
+ * the readouts (the HUD's own stacking context), never on the landing (opacity 0 there).
+ * The plateau covers the two readout lines (bezel + 14 px + 2 lines ≈ bezel + 47 px); then it fades.
+ */
+.hud::before,
+.hud::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--d-md) var(--ease-out);
+}
+.hud::before {
+  top: 0;
+  height: calc(var(--bezel-inset) + 96px + env(safe-area-inset-top, 0px));
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ink-0) 88%, transparent),
+    color-mix(in srgb, var(--ink-0) 80%, transparent) calc(var(--bezel-inset) + 50px + env(safe-area-inset-top, 0px)),
+    color-mix(in srgb, var(--ink-0) 36%, transparent) calc(var(--bezel-inset) + 74px + env(safe-area-inset-top, 0px)),
+    transparent
+  );
+}
+.hud::after {
+  bottom: 0;
+  height: calc(var(--bezel-inset) + 96px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--ink-0) 88%, transparent),
+    color-mix(in srgb, var(--ink-0) 80%, transparent) calc(var(--bezel-inset) + 50px + env(safe-area-inset-bottom, 0px)),
+    color-mix(in srgb, var(--ink-0) 36%, transparent) calc(var(--bezel-inset) + 74px + env(safe-area-inset-bottom, 0px)),
+    transparent
+  );
+}
+.hud[data-scene]::before,
+.hud[data-scene]::after {
+  opacity: 1;
+}
+/* Over a scene the quiet lines step up to bone-2: legible at 4.5:1 on the scrim even over white cloud. */
+.hud[data-scene] :is(.dim, .version, .about, .pending, .mob) {
+  color: var(--bone-2);
+}
+
 .line {
   display: inline-flex;
   align-items: center;
@@ -34,7 +81,7 @@
   height: 1em;
   margin-left: 0.5em;
   vertical-align: -0.12em;
-  background: var(--bone-3);
+  background: var(--bone-3-mark, rgb(236 232 224 / 0.4));
   animation: hard-blink 1s steps(1, end) infinite;
 }
 
@@ -49,6 +96,7 @@
   color: var(--bone-3);
   letter-spacing: var(--track-label);
   text-transform: none;
+  transition: color var(--d-md) var(--ease-out);
 }
 .about {
   display: inline-flex;
@@ -63,8 +111,21 @@
   color: var(--bone-3);
   transition: color var(--d-hover) var(--ease-out);
 }
-.about:hover {
+@media (hover: hover) and (pointer: fine) {
+  .about:hover {
+    color: var(--bone);
+  }
+}
+.about:active {
   color: var(--bone);
+  transition-duration: 0ms;
+}
+@media (pointer: coarse) {
+  /* a ≥ 40 px tall hit box (it may overlap the wordmark line above: that one isn't interactive) */
+  .about {
+    padding: 13px 0;
+    margin: -13px 0;
+  }
 }
 /* A box ring would collide with the wordmark line 3px above; a signal underline marks focus instead
    (on the words only: the key cap beside them keeps its own frame). */
@@ -99,6 +160,10 @@
   }
 }
 
+/* Responsive pieces:
+     .desk / .mobInline   the full and compact date forms (phones: ≤ 760px)
+     .wideOnly            the bottom corners (gone where a bottom panel lives: stacked, short landscape)
+     .mob                 the sun line that joins the TR block when the bottom corners are gone */
 .mob,
 .mobInline {
   display: none !important;
@@ -108,12 +173,32 @@
   .desk {
     display: none !important;
   }
+  .mobInline {
+    display: inline !important;
+  }
+}
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (max-height: 540px) {
+  .wideOnly {
+    display: none !important;
+  }
   .mob {
     display: inline-flex !important;
     color: var(--bone-3);
   }
-  .mobInline {
-    display: inline !important;
+  /* no bottom readouts, no bottom scrim */
+  .hud::after {
+    display: none;
+  }
+}
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
+  .hud::before {
+    height: calc(var(--bezel-inset) + 72px + env(safe-area-inset-top, 0px));
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--ink-0) 88%, transparent),
+      color-mix(in srgb, var(--ink-0) 80%, transparent) calc(var(--bezel-inset) + 48px + env(safe-area-inset-top, 0px)),
+      transparent
+    );
   }
 }
 
@@ -121,5 +206,9 @@
   .dot,
   .pending::after {
     animation: none;
+  }
+  .hud::before,
+  .hud::after {
+    transition-duration: 160ms;
   }
 }

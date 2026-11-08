@@ -48,3 +48,15 @@ export function useSecondClock(): number {
     () => now,
   )
 }
+
+/**
+ * A value derived from the wall clock, re-rendering only when it changes (a date label, a readout
+ * that moves every few seconds). `select` must return a primitive (compared with Object.is).
+ */
+export function useSecondDerived<T extends string | number | boolean>(select: (now: number) => T): T {
+  return useSyncExternalStore(
+    subscribe,
+    () => select(now),
+    () => select(now),
+  )
+}

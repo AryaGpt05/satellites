@@ -130,11 +130,12 @@ export function buildRibbon(
   track: TrackPoint[],
   tRef: number,
   halfWidthKm: (altKm: number) => number,
-  opts: { lift?: number; minHalfWidthKm?: number; maxStepDeg?: number; crossStepKm?: number } = {},
+  opts: { lift?: number; minHalfWidthKm?: number; maxStepDeg?: number; crossStepKm?: number; clipKm?: number } = {},
 ): Ribbon {
   const lift = opts.lift ?? 1.0006
   const minHalf = opts.minHalfWidthKm ?? 25
-  const pts = densifyTrack(track, opts.maxStepDeg ?? 0.5)
+  let pts = densifyTrack(track, opts.maxStepDeg ?? 0.5)
+  if (opts.clipKm !== undefined) pts = clipAlongTrack(pts, tRef, opts.clipKm)
   const rows = pts.length
   const halfAt = (alt: number) => Math.max(minHalf, halfWidthKm(alt))
   const maxHalf = pts.reduce((m, p) => Math.max(m, halfAt(p.altKm)), 0)
@@ -197,6 +198,50 @@ export function buildRibbon(
   }
   const mid = pts.reduce((best, p) => (Math.abs(p.t - tRef) < Math.abs(best.t - tRef) ? p : best), pts[0])
   return { positions, along, side, u, index, rows, cols, halfWidthKm: mid ? halfWidthKm(mid.altKm) : 0 }
+}
+
+/**
+ * The part of a (densified) track within ±clipKm of ground distance, measured along the track, from the point
+ * at tRef (closest approach: abeam of the place). Ends are interpolated, so the cut is exact.
+ */
+export function clipAlongTrack(pts: TrackPoint[], tRef: number, clipKm: number): TrackPoint[] {
+  if (pts.length < 2) return pts.slice()
+  const P = pts.map((p) => latLonToWorld(p.lat, p.lon, 1))
+  const cum = new Float64Array(pts.length)
+  for (let i = 1; i < pts.length; i++) cum[i] = cum[i - 1] + P[i - 1].angleTo(P[i]) * R
+  // Along-track distance of tRef (interpolated between the samples around it).
+  let d0 = cum[0]
+  if (tRef <= pts[0].t) d0 = cum[0]
+  else if (tRef >= pts[pts.length - 1].t) d0 = cum[pts.length - 1]
+  else {
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (pts[i + 1].t >= tRef) {
+        const f = (tRef - pts[i].t) / Math.max(1e-9, pts[i + 1].t - pts[i].t)
+        d0 = cum[i] + (cum[i + 1] - cum[i]) * f
+        break
+      }
+    }
+  }
+  const lo = d0 - clipKm
+  const hi = d0 + clipKm
+  const at = (d: number): TrackPoint => {
+    let i = 0
+    while (i < pts.length - 2 && cum[i + 1] < d) i++
+    const seg = Math.max(1e-9, cum[i + 1] - cum[i])
+    const f = Math.min(1, Math.max(0, (d - cum[i]) / seg))
+    const m = slerpUnit(P[i], P[i + 1], P[i].angleTo(P[i + 1]), f, new Vector3())
+    return {
+      t: pts[i].t + (pts[i + 1].t - pts[i].t) * f,
+      lat: Math.asin(Math.max(-1, Math.min(1, m.y))) / DEG,
+      lon: Math.atan2(-m.z, m.x) / DEG,
+      altKm: pts[i].altKm + (pts[i + 1].altKm - pts[i].altKm) * f,
+    }
+  }
+  const out: TrackPoint[] = []
+  if (lo > cum[0]) out.push(at(lo))
+  for (let i = 0; i < pts.length; i++) if (cum[i] > lo && cum[i] < hi) out.push(pts[i])
+  if (hi < cum[pts.length - 1]) out.push(at(hi))
+  return out.length >= 2 ? out : pts.slice()
 }
 
 /**

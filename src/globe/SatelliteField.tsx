@@ -6,6 +6,10 @@
  * Hover: featured objects (~400 imagers, weather and crewed) are picked on the CPU from positions computed with
  * the engine's TS reference of the shader (refreshed at ~10 Hz), so the callout lands exactly on the point the
  * GPU drew. Mouse hover and touch tap both work; the globe writes store.hoveredNorad only for hovers it started.
+ *
+ * Time jumps (a pass selected / deselected moves sim time by days, M04): the cloud would teleport. Instead it
+ * keeps its pre-jump time while it dims to 15% over 200 ms, takes the new time while dim, stays dim for the
+ * camera flight, and returns over 480 ms after arrival.
  */
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -14,20 +18,24 @@ import {
   BufferGeometry,
   InterleavedBuffer,
   InterleavedBufferAttribute,
-  ShaderMaterial,
+  Sphere,
   Vector2,
   Vector3,
   type PerspectiveCamera,
 } from 'three'
-import { DEG } from '@/lib/geo'
+import { DEG, gmst } from '@/lib/geo'
+import { easeInOut, easeOut } from '@/lib/ease'
 import { useApp } from '@/state/store'
-import { palette } from '@/ui/system/palette'
 import { ELEMENT_STRIDE, FLAG_FEATURED, getSatInfo, keplerJ2World, propagate, type CatalogBuffers } from './data'
-import { lin } from './Earth'
+import { createSatellitesMaterial } from './materials'
 import { nearestWithin, projectPoints } from './picking'
 import { FRAME, useRuntime } from './runtime'
 import { SatGlyph, useSatAnchor, type MarkTone, type SatTrackFn } from './SatMarker'
-import { satellitesFragment, satellitesVertex } from './shaders/points'
+
+/** Jump dip: dim level, how fast it dims, and how it returns after the camera arrives. */
+const DIP_LEVEL = 0.15
+const DIP_DOWN_MS = 200
+const DIP_UP_MS = 480
 
 const PICK_RADIUS_MOUSE = 12
 const PICK_RADIUS_TOUCH = 22
@@ -48,33 +56,13 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
     g.setAttribute('aEl2', new InterleavedBufferAttribute(buf, 4, 8))
     const m = new BufferAttribute(new Float32Array(elements.count), 1)
     g.setAttribute('aMark', m)
+    // The `position` attribute holds orbital elements, not positions: give three a fixed bound (everything up
+    // to well past GEO) instead of letting it scan 17k "points" on the first frame.
+    g.boundingSphere = new Sphere(new Vector3(), 50)
     return { geometry: g, mark: m }
   }, [elements])
 
-  const material = useMemo(
-    () =>
-      new ShaderMaterial({
-        vertexShader: satellitesVertex,
-        fragmentShader: satellitesFragment,
-        transparent: true,
-        depthWrite: false,
-        uniforms: {
-          uTime: { value: 0 },
-          uGmst: { value: new Vector2(1, 0) },
-          uPx: rt.uniforms.uPx,
-          uHideA: { value: -1 },
-          uHideB: { value: -1 },
-          uShowAmbient: { value: 1 },
-          uReveal: { value: 0 },
-          uCamDist: { value: 5 },
-          uEarthPx: { value: 320 },
-          uBone: { value: lin(palette.bone) },
-          uSignal: { value: lin(palette.signal) },
-          uIce: { value: lin(palette.ice) },
-        },
-      }),
-    [rt],
-  )
+  const material = useMemo(() => createSatellitesMaterial(rt.uniforms.uPx), [rt])
   useEffect(
     () => () => {
       geometry.dispose()
@@ -161,12 +149,63 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
   }, [gl])
 
   const tmp = useMemo(() => new Vector3(), [])
+  /** Entrance reveal (0 → 1 once) and the jump dip, multiplied into uReveal. */
+  const fx = useRef({
+    reveal: 0,
+    jumpSeen: rt.timeJump.id,
+    dip: 1,
+    phase: 'none' as 'none' | 'down' | 'hold' | 'up',
+    from: 1,
+    at: 0,
+    /** Sim time the field keeps drawing while it dims (wall-clock advanced), or NaN */
+    heldTime: NaN,
+    heldAt: 0,
+  })
 
   useFrame((state, dt) => {
     const u = material.uniforms
     const st = useApp.getState()
-    u.uTime.value = (rt.simTime - elements.refEpochMs) / 1000
-    ;(u.uGmst.value as Vector2).set(Math.cos(rt.gmst), Math.sin(rt.gmst))
+    const now = performance.now()
+    const f = fx.current
+    f.reveal = Math.min(1, f.reveal + dt / (rt.reducedMotion ? 0.2 : 1.4))
+    // ── jump dip (only when a camera flight carries the jump: a scrub or seek keeps the points live)
+    if (rt.timeJump.id !== f.jumpSeen) {
+      f.jumpSeen = rt.timeJump.id
+      if (!rt.reducedMotion && rt.camera.flying) {
+        f.phase = 'down'
+        f.from = f.dip
+        f.at = now
+        if (Number.isNaN(f.heldTime)) {
+          f.heldTime = rt.timeJump.fromSimTime
+          f.heldAt = now
+        }
+      }
+    }
+    if (f.phase === 'down') {
+      const k = Math.min(1, (now - f.at) / DIP_DOWN_MS)
+      f.dip = f.from + (DIP_LEVEL - f.from) * easeInOut(k)
+      if (k >= 1) {
+        f.phase = 'hold'
+        f.heldTime = NaN // take the new time while dim
+      }
+    } else if (f.phase === 'hold') {
+      f.dip = DIP_LEVEL
+      if (!rt.camera.flying && now >= rt.camera.arrivedAt) {
+        f.phase = 'up'
+        f.at = Math.max(now, rt.camera.arrivedAt)
+      }
+    } else if (f.phase === 'up') {
+      if (rt.camera.flying) f.phase = 'hold'
+      const k = Math.min(1, (now - f.at) / DIP_UP_MS)
+      f.dip = DIP_LEVEL + (1 - DIP_LEVEL) * easeOut(k)
+      if (k >= 1) f.phase = 'none'
+    } else f.dip = 1
+    u.uReveal.value = f.reveal * f.dip
+    // While dimming, keep drawing the pre-jump instant (advancing at live rate) so nothing teleports at full alpha.
+    const drawTime = Number.isNaN(f.heldTime) ? rt.simTime : f.heldTime + (now - f.heldAt)
+    u.uTime.value = (drawTime - elements.refEpochMs) / 1000
+    const gm = Number.isNaN(f.heldTime) ? rt.gmst : gmst(drawTime)
+    ;(u.uGmst.value as Vector2).set(Math.cos(gm), Math.sin(gm))
     const camDist = state.camera.position.length()
     u.uCamDist.value = camDist
     // Apparent angular radius ρ of the unit sphere (sin ρ = 1/D), in CSS px of the vertical field of view.
@@ -176,10 +215,8 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
     u.uShowAmbient.value = st.showAmbient ? 1 : 0
     u.uHideA.value = rt.overlayNorad >= 0 ? (indexOf.get(rt.overlayNorad) ?? -1) : -1
     u.uHideB.value = st.hoveredNorad !== undefined ? (indexOf.get(st.hoveredNorad) ?? -1) : -1
-    if (u.uReveal.value < 1) u.uReveal.value = Math.min(1, u.uReveal.value + dt / (rt.reducedMotion ? 0.2 : 1.4))
 
     // CPU positions of featured objects, ~10 Hz (and immediately after a big time jump).
-    const now = performance.now()
     const jumped = Math.abs(rt.simTime - rt.prevSimTime) > 60_000
     if (now - featured.computedAt > CPU_REFRESH_MS || jumped) {
       featured.computedAt = now

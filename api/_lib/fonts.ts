@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 export const FONT = {
   display: 'Overflight Display', // Instrument Sans, wdth 75 / wght 560
   sans: 'Overflight Sans', //       Instrument Sans, wdth 100 / wght 400
-  mono: 'Overflight Mono', //       Martian Mono, wdth 87.5 / wght 350
+  mono: 'Overflight Mono', //       Martian Mono, wdth 87.5 / wght 350 (and 500 for the wordmark lockup)
   serif: 'Overflight Serif', //     Instrument Serif italic
 } as const
 
@@ -32,6 +32,13 @@ const FILES: { stem: string; name: string; weight: Weight; style: 'normal' | 'it
   { stem: 'serif-italic', name: FONT.serif, weight: 400, style: 'italic' },
 ]
 const SUBSETS = ['latin', 'latin-ext'] as const
+/**
+ * Extra single-subset instances: Martian Mono at wght 500 for the OVERFLIGHT lockup (as the HUD
+ * wordmark). ASCII only, so latin is enough (built by scratch/polish/fix-share/build-lockup-font.py).
+ */
+const EXTRA: { file: string; name: string; weight: Weight; style: 'normal' | 'italic' }[] = [
+  { file: 'mono-medium-latin.ttf', name: FONT.mono, weight: 500, style: 'normal' },
+]
 
 async function readFont(file: string): Promise<ArrayBuffer> {
   let buf: Buffer
@@ -48,11 +55,12 @@ let cached: Promise<SatoriFont[]> | null = null
 
 /** All card fonts, read once per warm instance. Latin first so it wins over latin-ext. */
 export function loadFonts(): Promise<SatoriFont[]> {
-  cached ??= Promise.all(
-    SUBSETS.flatMap((subset) =>
+  cached ??= Promise.all([
+    ...SUBSETS.flatMap((subset) =>
       FILES.map(async (f) => ({ name: f.name, weight: f.weight, style: f.style, data: await readFont(`${f.stem}-${subset}.ttf`) })),
     ),
-  ).catch((err) => {
+    ...EXTRA.map(async (f) => ({ name: f.name, weight: f.weight, style: f.style, data: await readFont(f.file) })),
+  ]).catch((err) => {
     cached = null // don't pin a transient failure for the life of the instance
     throw err
   })

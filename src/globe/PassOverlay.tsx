@@ -1,36 +1,47 @@
 /**
  * The selected pass (store.report + store.selectedPassId), replay-synced to sim time:
  *  - swath ribbon on the surface (width = profile swath, or the field-of-regard ground range for agile imagers),
- *    built from real great-circle offsets perpendicular to the heading (swath.ts), with the pass's ground track
- *    as its centre line. It REVEALS as replay time advances, led by a bright edge across the swath;
+ *    built from real great-circle offsets perpendicular to the heading (swath.ts) and clipped to ±700 km
+ *    along-track around the place. It reads as a SWEEP: a 1 px front line with a short glow crosses the place as
+ *    replay time advances, the fill fades behind it, the edges are bone ahead and the verdict colour behind;
  *  - the satellite at simTime from main-thread SGP4, placed geodetically (latLonToWorld(lat, lon, 1 + h/R)) so it
  *    sits exactly above its own track, drawn as its category glyph with a callout;
  *  - a nadir line to the ground, a fading orbit trail behind it, and for pointable imagers a view line to the
  *    place while the place is within its field of regard;
- *  - when the leading edge crosses the place on an 'imaged' pass, the reticle flashes.
+ *  - when the front crosses the place on an 'imaged' pass, the reticle flashes.
  * Colour follows meaning: signal only where an image exists or is likely; agile "could have" passes are bone
  * (radar: ice) with a dashed field of regard; crewed passes draw the track alone.
+ *
+ * Entrances and exits are damped (M11): a pass fades in over 500 ms (--ease-out); on deselect, ←/→ or reset the
+ * outgoing pass stays mounted, frozen at its last sim time, and fades out over 300 ms (--ease-in-out).
  */
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
-import { BufferAttribute, BufferGeometry, Color, Mesh, ShaderMaterial, Vector2, Vector3 } from 'three'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { BufferAttribute, BufferGeometry, Mesh, Vector2, Vector3 } from 'three'
 import { EARTH_RADIUS_KM, latLonToWorld } from '@/lib/geo'
+import { easeInOut, easeOut } from '@/lib/ease'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { Pass, SatCategory } from '@/types'
 import { palette } from '@/ui/system/palette'
 import { getSatInfo, groundTrack, propagate } from './data'
-import { lin } from './Earth'
 import { Hairline } from './hairline'
+import { createRibbonMaterial, lin, type RibbonLook } from './materials'
 import { FRAME, useRuntime } from './runtime'
 import { SatGlyph, useSatAnchor, type MarkTone, type SatTrackFn } from './SatMarker'
-import { ribbonFragment, ribbonVertex } from './shaders/overlay'
 import { buildRibbon, fieldModelFor, sweptAcross } from './swath'
 
-/** Trail length behind the satellite, and its sampling. */
-const TRAIL_MS = 11 * 60_000
+/** Trail length behind the satellite (≈ 2,500 km: enough to read the direction, short of the screen edge), and its sampling. */
+const TRAIL_MS = 6 * 60_000
 const TRAIL_STEP_S = 20
 /** A sim-time jump larger than this is a seek, not playback: no flash. */
 const MAX_PLAYBACK_STEP_MS = 5 * 60_000
+/** The ribbon covers this much ground track either side of the place. */
+export const RIBBON_CLIP_KM = 700
+const FADE_IN_MS = 500
+const FADE_OUT_MS = 300
+
+/** Anchor id of a pass's satellite callout (GlobeOverlay reads the same id). */
+export const passAnchorId = (passId: string) => `sel:${passId}`
 
 export function PassOverlay() {
   const pass = useApp(selectSelectedPass)
@@ -42,29 +53,38 @@ export function PassOverlay() {
       rt.overlayNorad = -1
     }
   }, [rt, pass])
-  if (!pass || pass.track.length < 2) return null
-  return <PassScene key={pass.id} pass={pass} place={place} />
+
+  // Mounted scenes: the selected pass plus any that are still fading out. Derived during render, so a newly
+  // selected pass mounts in the same commit; scenes remove themselves once faded.
+  const [list, setList] = useState<Pass[]>([])
+  let next = list
+  if (pass && pass.track.length >= 2) {
+    const i = list.findIndex((p) => p.id === pass.id)
+    if (i < 0) next = [...list, pass]
+    else if (list[i] !== pass) next = list.map((p) => (p.id === pass.id ? pass : p))
+  }
+  if (next !== list) setList(next)
+
+  return (
+    <>
+      {next.map((p) => (
+        <PassScene key={p.id} pass={p} place={place} onGone={() => setList((l) => l.filter((x) => x.id !== p.id))} />
+      ))}
+    </>
+  )
 }
 
-interface Look {
-  tone: MarkTone
-  color: Color
-  /** 0 swath, 1 field of regard, 2 track only */
-  kind: 0 | 1 | 2
-  fill: number
-}
-
-function lookFor(pass: Pass, category: SatCategory, mode: 'swath' | 'regard' | 'none'): Look {
-  const kind: Look['kind'] = mode === 'none' || pass.verdict === 'overhead' ? 2 : mode === 'regard' ? 1 : 0
-  // Fill alphas are linear-light values on the day side, where they read close to --signal-2 (22%) over land;
-  // the ribbon shader halves them over unlit ground. 'likely' and 'could' are quieter: no image exists.
-  if (pass.verdict === 'imaged') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.12 }
-  if (pass.verdict === 'likely') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.07 }
+function lookFor(pass: Pass, category: SatCategory, mode: 'swath' | 'regard' | 'none'): RibbonLook & { tone: MarkTone } {
+  const kind: RibbonLook['kind'] = mode === 'none' || pass.verdict === 'overhead' ? 2 : mode === 'regard' ? 1 : 0
+  // Fill alphas are linear-light values on the day side; the shader halves them over unlit ground and thins
+  // them over cloud. 'likely' and 'could' are quieter: no image exists.
+  if (pass.verdict === 'imaged') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.07 }
+  if (pass.verdict === 'likely') return { tone: 'signal', color: lin(palette.signal), kind, fill: 0.05 }
   const tone: MarkTone = category === 'radar' ? 'ice' : 'bone'
-  return { tone, color: lin(tone === 'ice' ? palette.ice : palette.bone), kind, fill: kind === 1 ? 0.04 : 0.06 }
+  return { tone, color: lin(tone === 'ice' ? palette.ice : palette.bone), kind, fill: kind === 1 ? 0.035 : 0.05 }
 }
 
-function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: number } }) {
+function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number; lon: number }; onGone: () => void }) {
   const rt = useRuntime()
   const info = getSatInfo(pass.norad)
   const category: SatCategory = info?.category ?? 'other'
@@ -74,7 +94,7 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
 
   // ── ribbon
   const ribbon = useMemo(() => {
-    const r = buildRibbon(pass.track, pass.tClosest, field.halfWidthKm, { minHalfWidthKm: 20 })
+    const r = buildRibbon(pass.track, pass.tClosest, field.halfWidthKm, { minHalfWidthKm: 20, clipKm: RIBBON_CLIP_KM, maxStepDeg: 0.25 })
     const g = new BufferGeometry()
     g.setAttribute('position', new BufferAttribute(r.positions, 3))
     g.setAttribute('aAlong', new BufferAttribute(r.along, 1))
@@ -86,25 +106,12 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
   }, [pass, field])
   const ribbonMat = useMemo(
     () =>
-      new ShaderMaterial({
-        vertexShader: ribbonVertex,
-        fragmentShader: ribbonFragment,
-        transparent: true,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-        uniforms: {
-          uNow: { value: -1e9 },
-          uPx: rt.uniforms.uPx,
-          uKind: { value: look.kind },
-          uColor: { value: look.color },
-          uFill: { value: look.fill },
-          uOpacity: { value: 0 },
-          uSunDir: rt.uniforms.uSunDir,
-        },
-      }),
-    [rt, look],
+      createRibbonMaterial(
+        { uPx: rt.uniforms.uPx, uSunDir: rt.uniforms.uSunDir, uCloudMap: rt.uniforms.uCloudMap, uCloudOffset: rt.uniforms.uCloudOffset },
+        look,
+        { speedKmS: pass.groundSpeedKmS > 0 ? pass.groundSpeedKmS : 6.8 },
+      ),
+    [rt, look, pass.groundSpeedKmS],
   )
 
   // ── hairlines
@@ -113,7 +120,7 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
     return {
       nadir: new Hairline({ capacity: 1, color: lin(palette.bone), opacity: 0.55, uPx: rt.uniforms.uPx }),
       view: new Hairline({ capacity: 1, color: look.color, opacity: 0.75, uPx: rt.uniforms.uPx }),
-      trail: new Hairline({ capacity: trailN, color: look.color, opacity: 0.6, uPx: rt.uniforms.uPx }),
+      trail: new Hairline({ capacity: trailN, color: look.color, opacity: 0.5, uPx: rt.uniforms.uPx }),
       trailPts: Array.from({ length: trailN + 1 }, () => new Vector3()),
       trailAlpha: new Float32Array(trailN + 1),
     }
@@ -130,7 +137,12 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
     [ribbon, ribbonMat, lines],
   )
 
-  // Satellite state at simTime, shared by the glyph, callout and lines (computed once per frame).
+  // Fade state. `time` is the sim time this scene draws: the clock while selected, frozen once it leaves (the
+  // clock jumps back to live time on deselect; the outgoing pass must not visibly teleport while it fades).
+  const fade = useRef(0)
+  const anim = useRef({ active: true, from: 0, to: 1, start: performance.now(), dur: FADE_IN_MS, time: rt.simTime, gone: false })
+
+  // Satellite state at the scene's time, shared by the glyph, callout and lines (computed once per frame).
   const sat = useRef({ at: NaN, ok: false, pos: new Vector3(), ground: new Vector3(), altKm: 0 })
   const sample = (ms: number) => {
     const s = sat.current
@@ -146,7 +158,7 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
     return s
   }
   const track: SatTrackFn = (out) => {
-    const s = sample(rt.simTime)
+    const s = sample(anim.current.time)
     out.copy(s.pos)
     return s.ok ? s.altKm : null
   }
@@ -158,19 +170,45 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
   const trailCache = useRef({ t0: NaN, pts: [] as Vector3[] })
   const twoPts = useMemo(() => [new Vector3(), new Vector3()], [])
 
-  useFrame((state, dt) => {
-    const now = rt.simTime
+  useFrame((state) => {
+    const perfNow = performance.now()
+    const a = anim.current
+    // ── selected or leaving (read every frame, so the frame of the deselect already freezes time)
+    const active = useApp.getState().selectedPassId === pass.id
+    if (active !== a.active) {
+      a.active = active
+      a.from = fade.current
+      a.to = active ? 1 : 0
+      a.start = perfNow
+      a.dur = (active ? FADE_IN_MS : FADE_OUT_MS) * (rt.reducedMotion ? 0.4 : 1)
+    }
+    if (active) a.time = rt.simTime
+    const u01 = Math.min(1, (perfNow - a.start) / Math.max(1, a.dur))
+    fade.current = a.from + (a.to - a.from) * (active ? easeOut(u01) : easeInOut(u01))
+    if (!active && u01 >= 1 && !a.gone) {
+      a.gone = true
+      onGone()
+    }
+    const f = fade.current
+
+    const now = a.time
     const u = ribbonMat.uniforms
     u.uNow.value = (now - pass.tClosest) / 1000
-    u.uOpacity.value = Math.min(1, u.uOpacity.value + dt / (rt.reducedMotion ? 0.15 : 0.5))
+    u.uOpacity.value = f
+    u.uHasClouds.value = rt.uniforms.uCloudMap.value ? 1 : 0
     const db = state.gl.getDrawingBufferSize(tmpRes)
-    for (const l of [lines.nadir, lines.view, lines.trail]) l.setResolution(db.x, db.y)
+    lines.nadir.setResolution(db.x, db.y)
+    lines.view.setResolution(db.x, db.y)
+    lines.trail.setResolution(db.x, db.y)
+    lines.nadir.setFade(f)
+    lines.view.setFade(f)
+    lines.trail.setFade(f)
 
     const s = sample(now)
     const inWindow = now >= pass.track[0].t - 60_000 && now <= pass.track[pass.track.length - 1].t + 60_000
 
     // Nadir line.
-    if (nadirMesh.current) nadirMesh.current.visible = s.ok
+    if (nadirMesh.current) nadirMesh.current.visible = s.ok && f > 0.004
     if (s.ok) {
       twoPts[0].copy(s.pos)
       twoPts[1].copy(s.ground)
@@ -178,7 +216,7 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
     }
 
     // View line to the place, for pointable imagers while the place is in their field of regard.
-    const viewOn = pointable && s.ok && !!placePos && now >= pass.tStart && now <= pass.tEnd
+    const viewOn = pointable && s.ok && !!placePos && now >= pass.tStart && now <= pass.tEnd && f > 0.004
     if (viewMesh.current) viewMesh.current.visible = viewOn
     if (viewOn && placePos) {
       twoPts[0].copy(s.pos)
@@ -202,28 +240,28 @@ function PassScene({ pass, place }: { pass: Pass; place?: { lat: number; lon: nu
       for (const p of cache.pts) if (n < pts.length - 1) pts[n++].copy(p)
       pts[n++].copy(s.pos)
       for (let i = 0; i < n; i++) {
-        const f = n > 1 ? i / (n - 1) : 1
-        alpha[i] = f * f * 0.9
+        const k = n > 1 ? i / (n - 1) : 1
+        alpha[i] = k * k * 0.9
       }
       lines.trail.setPoints(pts, alpha, n)
     }
-    if (trailMesh.current) trailMesh.current.visible = s.ok
+    if (trailMesh.current) trailMesh.current.visible = s.ok && f > 0.004
 
-    // Flash the reticle when the leading edge crosses the place on an imaged pass (the scan line is abeam
-    // of the place at closest approach).
-    if (pass.verdict === 'imaged' && inWindow && sweptAcross(rt.prevSimTime, now, pass.tClosest, MAX_PLAYBACK_STEP_MS)) {
-      rt.flashAt = performance.now()
+    // Flash the reticle when the front crosses the place on an imaged pass (the scan line is abeam of the place
+    // at closest approach).
+    if (active && pass.verdict === 'imaged' && inWindow && sweptAcross(rt.prevSimTime, rt.simTime, pass.tClosest, MAX_PLAYBACK_STEP_MS)) {
+      rt.flashAt = perfNow
     }
   }, FRAME.scene)
 
-  useSatAnchor('selected', track)
+  useSatAnchor(passAnchorId(pass.id), track)
   return (
     <>
       <mesh geometry={ribbon} material={ribbonMat} renderOrder={3} />
       <mesh ref={trailMesh} geometry={lines.trail.geometry} material={lines.trail.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={nadirMesh} geometry={lines.nadir.geometry} material={lines.nadir.material} frustumCulled={false} renderOrder={4} />
       <mesh ref={viewMesh} geometry={lines.view.geometry} material={lines.view.material} frustumCulled={false} renderOrder={4} />
-      <SatGlyph category={category} imaged={pass.verdict === 'imaged'} tone={look.tone} track={track} />
+      <SatGlyph category={category} imaged={pass.verdict === 'imaged'} tone={look.tone} track={track} fade={fade} />
     </>
   )
 }

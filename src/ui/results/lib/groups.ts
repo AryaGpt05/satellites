@@ -1,14 +1,18 @@
 /**
  * Pass list model. A real week over a city is ~1,900 passes from ~250 satellites, so the list is:
  *
- *   PHOTOGRAPHED   each detailed image as its own row (they are the point), weather mosaics
- *                  summarised per satellite ("NOAA-20 · 7 images")
+ *   PHOTOGRAPHED   each detailed image as its own row (they are the point), CLEAREST FIRST
+ *                  (decision #2, same rank as the best look); weather mosaics summarised per
+ *                  satellite ("NOAA-20 · 7 images")
  *   LIKELY / COULD / OVERHEAD
- *                  one row per satellite (count, latest, closest), expandable to its passes
+ *                  one row per satellite (count, latest, closest), expandable to its passes. When
+ *                  the image archives failed, the daylight Sentinel-2 / Landsat satellites lead the
+ *                  LIKELY group: they are the ones that would have photographed the place.
  *
  * Each group shows its top rows and a "show all"; the UI pages long groups.
  */
 import type { Pass, Report } from '@/types'
+import { byClarity } from './bestLook'
 import { isDailyMosaic } from './captures'
 import { VERDICTS, type MetaFn, type SatMeta, type Verdict } from './meta'
 
@@ -39,7 +43,7 @@ export interface PassGroup {
   items: ListItem[]
 }
 
-export function groupPasses(report: Pick<Report, 'passes' | 'captures'>, meta: MetaFn): PassGroup[] {
+export function groupPasses(report: Pick<Report, 'passes' | 'captures'>, meta: MetaFn, opts: { archiveFailed?: boolean } = {}): PassGroup[] {
   const captureById = new Map(report.captures.map((c) => [c.id, c]))
   const groups: PassGroup[] = []
   for (const verdict of VERDICTS) {
@@ -65,8 +69,26 @@ export function groupPasses(report: Pick<Report, 'passes' | 'captures'>, meta: M
       latest: ps[0],
       closest: ps.reduce((a, b) => (b.offNadirDeg < a.offNadirDeg ? b : a)),
     }))
+    // Photographs: clearest first, then the most recent (decision #2).
+    if (verdict === 'imaged') {
+      singles.sort((a, b) => {
+        const ca = a.pass.captureId ? captureById.get(a.pass.captureId) : undefined
+        const cb = b.pass.captureId ? captureById.get(b.pass.captureId) : undefined
+        return byClarity({ pass: a.pass, capture: ca }, { pass: b.pass, capture: cb })
+      })
+    }
+    // Archive outage: the open-optical satellites that crossed in daylight are the story of the
+    // LIKELY group, so they lead it.
+    const lead = (x: SatItem) =>
+      opts.archiveFailed && verdict === 'likely' && x.meta.category === 'open-optical' && x.passes.some((p) => p.sunElevationDeg > 0) ? 0 : 1
     // Most passes first (the satellites that watch this place most), then the most recent.
-    sats.sort((a, b) => b.passes.length - a.passes.length || b.latest.tClosest - a.latest.tClosest || a.meta.name.localeCompare(b.meta.name))
+    sats.sort(
+      (a, b) =>
+        lead(a) - lead(b) ||
+        b.passes.length - a.passes.length ||
+        b.latest.tClosest - a.latest.tClosest ||
+        a.meta.name.localeCompare(b.meta.name),
+    )
     groups.push({
       verdict,
       passCount: passes.length,

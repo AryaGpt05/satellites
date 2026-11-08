@@ -84,14 +84,14 @@ export function sensorName(c: Pick<Capture, 'collection' | 'platform'>): string 
   }
 }
 
-/** Product line for captions: "Sentinel-2 L2A · 10 m" / "Daily mosaic, 375 m". */
+/** Product line for captions: "Sentinel-2 L2A · 10 m" / "Daily mosaic · 375 m". */
 export function productLabel(c: Pick<Capture, 'collection' | 'provider' | 'gsdM'>): string {
-  if (isDailyMosaic(c)) return `Daily mosaic, ${Math.round(c.gsdM)} m`
+  if (isDailyMosaic(c)) return `Daily mosaic · ${Math.round(c.gsdM)} m`
   switch (c.collection) {
     case 'sentinel-2-l2a':
-      return `Sentinel-2 L2A, ${Math.round(c.gsdM)} m`
+      return `Sentinel-2 L2A · ${Math.round(c.gsdM)} m`
     case 'landsat-c2-l2':
-      return `Landsat C2 L2, ${Math.round(c.gsdM)} m`
+      return `Landsat C2 L2 · ${Math.round(c.gsdM)} m`
     default:
       return `${Math.round(c.gsdM)} m`
   }

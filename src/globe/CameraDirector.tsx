@@ -1,43 +1,56 @@
 /**
- * Drives the camera from store.camera intents.
+ * Drives the camera from store.camera intents, framed around the UI that is actually on screen.
  *
  *  - New intent → a cinematic flight (2.4–3.6 s, --ease-in-out) from wherever the camera is, interpolating
  *    the look-at point along the great circle, range in log space and the facing by parallel transport (see
  *    cameraMath.ts): target and distance always move together, never a linear lerp, never a pole flip.
+ *    Tilting into an oblique view happens over the flight's second half (no yaw: every pose is north-up).
+ *  - A new intent DURING a flight (a pass tapped on arrival, a share link's preselect, ←/→) is a retarget: the
+ *    new flight starts at the camera's current speed and eases out (easeCarry), so it never brakes mid-air.
  *  - prefers-reduced-motion → cut, with a 300 ms fade from ink.
- *  - overview: slow westward drift of the camera (the planet appears to turn eastward), north-up.
- *  - satellite: the target moves; the flight homes in on it and the camera then rides along.
+ *  - Framing follows store.uiInsets (framing.ts). Lens shift tracks the free rect every frame (τ 0.12 s, so the
+ *    globe glides with a dragged sheet); range changes wait until the insets have been still for 150 ms, then
+ *    move over 600 ms (--ease-in-out). During a flight the target is updated in place, so it lands framed.
+ *  - The near limit follows the loaded day texture (framing.minRangeFor, decision 6), for poses and user zoom.
+ *    When a sharper map lands the floor relaxes and the view comes in with a slower focus move (0.9–1.9 s).
+ *  - overview: slow westward drift of the camera (the planet appears to turn eastward), north-up; as the boot
+ *    curtain lifts, one damped focus dolly (G15).
  *  - In idle / results the user can orbit and zoom (controls.ts); input interrupts a flight cleanly, and auto
  *    rotation resumes a few seconds after the last touch.
- * Lens shift composes the subject off-centre without changing perspective.
+ *  - Publishes flight status to store.cameraFlight on transitions only (start, arrival, cut, interrupt), and
+ *    rt.camera.{flying, progress, arrivedAt} every frame for the scene.
+ * Target specs are recomputed only when their inputs change (intent, report, viewport, insets, texture level).
  */
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
-import { Mesh, PerspectiveCamera, PlaneGeometry, ShaderMaterial, Vector3 } from 'three'
+import { Mesh, PerspectiveCamera, PlaneGeometry, Vector3 } from 'three'
 import { bearingDeg, clamp, DEG, EARTH_RADIUS_KM, subsolarPoint } from '@/lib/geo'
-import { selectSelectedPass, useApp, type AppState, type CameraIntent } from '@/state/store'
-import { palette } from '@/ui/system/palette'
+import { easeInOut, easeOut } from '@/lib/ease'
+import { selectSelectedPass, useApp, type AppState, type CameraIntent, type UiInsets } from '@/state/store'
 import {
+  applyPoseToCamera,
   copyPose,
   createPose,
   damp,
-  easeInOut,
+  dirFromLatLon,
+  carrySpeed,
+  easeCarry,
   eastNorth,
   interpolatePose,
   latLonOfDir,
   makePose,
   orthonormalize,
   planFlight,
-  poseToCamera,
   rotateAbout,
   signedAngle,
+  tiltProgress,
   type PoseSpec,
 } from './cameraMath'
 import { applyControls, attachControls, createControlInput, createControlState } from './controls'
-import { fovFor, isPhone, overviewPose, passPose, placePose, satellitePose, type Viewport } from './framing'
 import { propagate } from './data'
-import { FRAME, useRuntime } from './runtime'
-import { lin } from './Earth'
+import { coarserLevel, fovFor, freeRect, isPhone, minRangeFor, overviewPose, passPose, placePose, satellitePose, type TextureLevel, type Viewport } from './framing'
+import { createFadeMaterial } from './materials'
+import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
 
 /** Overview drift: degrees of longitude per second (one turn every 10 minutes). */
 const DRIFT_DEG_S = 0.6
@@ -46,13 +59,34 @@ const RESUME_AFTER_MS = 5000
 const RAMP_S = 2.5
 /** Reduced-motion cut fade. */
 const CUT_FADE_MS = 300
+/** Lens-shift follow time constant (s): fast enough to track a dragged sheet. */
+const SHIFT_TAU = 0.12
+/** Insets must be still this long before the range re-frames, over RANGE_MOVE_MS. */
+const INSETS_SETTLE_MS = 150
+const RANGE_MOVE_MS = 600
+/**
+ * A sharper texture arriving relaxes the zoom floor, which can bring a place view in by 2× or more (a deep link
+ * frames the place at the 1k floor while the finer maps wait for the upload gate). That unprompted move must
+ * read as a deliberate focus, not a lurch: it runs slower, longer for bigger steps.
+ */
+const RANGE_FOCUS_MS = { min: 900, perLog: 1100, max: 1900 }
+/** Boot focus dolly: start this much further out, settle over BOOT_DOLLY_S with --ease-out. */
+const BOOT_DOLLY_SCALE = 1.12
+const BOOT_DOLLY_S = 2.4
+/** Retargets keep at least this duration (s) and run at 80% of a fresh flight's. */
+const RETARGET_MIN_S = 1.8
 
 const INTERACTIVE: AppState['phase'][] = ['idle', 'locating', 'results', 'error']
 
 interface Flight {
+  id: number
   start: number
+  /** seconds */
   duration: number
   bump: number
+  ease: (t: number) => number
+  /** The boot focus dolly: range is a fixed factor of the LIVE target, so a late re-frame rescales it */
+  dolly?: boolean
 }
 
 function intentKey(intent: CameraIntent, st: AppState, phone: boolean): string {
@@ -71,6 +105,13 @@ function intentKey(intent: CameraIntent, st: AppState, phone: boolean): string {
   }
 }
 
+/**
+ * Quantised insets (24 px steps) packed into one number: a change re-frames the range; it is never mistaken for
+ * a new intent. Allocation-free, as it runs every frame.
+ */
+const insetsKeyOf = (i: UiInsets) =>
+  ((Math.round(i.top / 24) * 512 + Math.round(i.right / 24)) * 512 + Math.round(i.bottom / 24)) * 512 + Math.round(i.left / 24)
+
 /** Satellite sub-point + heading at a time, from main-thread SGP4. */
 function satNow(norad: number, ms: number) {
   const a = propagate(norad, ms)
@@ -82,39 +123,43 @@ function satNow(norad: number, ms: number) {
 
 /**
  * Target pose spec for an intent, or null if it can't be resolved yet (e.g. the pass isn't in the report).
- * `overviewAt` provides the look-at for overview (continuity with wherever the camera is).
+ * `overviewAt` provides the look-at for overview (continuity with wherever the camera is); `floor` is the
+ * texture-resolution near limit.
  */
 function targetFor(
   intent: CameraIntent,
   st: AppState,
   vp: Viewport,
+  insets: UiInsets,
+  floor: number,
   simTime: number,
   overviewAt: { lat: number; lon: number },
 ): PoseSpec | null {
   switch (intent.kind) {
     case 'overview':
-      return overviewPose(vp, overviewAt.lat, overviewAt.lon)
+      return overviewPose(vp, insets, overviewAt.lat, overviewAt.lon)
     case 'place':
-      return placePose(vp, intent.lat, intent.lon)
+      return placePose(vp, insets, intent.lat, intent.lon, floor)
     case 'pass': {
       const pass = st.report?.passes.find((p) => p.id === intent.passId) ?? selectSelectedPass(st)
       const place = st.report?.place ?? st.place
-      if (pass && place) return passPose(vp, pass, place)
-      return place ? placePose(vp, place.lat, place.lon) : null
+      if (pass && place) return passPose(vp, insets, pass, place, floor)
+      return place ? placePose(vp, insets, place.lat, place.lon, floor) : null
     }
     case 'satellite': {
       const s = satNow(intent.norad, simTime)
-      return s ? satellitePose(vp, s, s.heading) : null
+      return s ? satellitePose(vp, insets, s, s.heading) : null
     }
   }
 }
 
-const fadeVertex = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`
-const fadeFragment = /* glsl */ `
-  uniform vec3 uColor; uniform float uAlpha;
-  void main() { gl_FragColor = vec4(uColor, uAlpha);
-  #include <colorspace_fragment>
-  }`
+/** Publish arrival / cut / interrupt (transitions only). */
+function arrive(rt: GlobeRuntime, id: number, now: number, kind: CameraIntent['kind']) {
+  rt.camera.arrivedAt = now
+  rt.camera.arrivedKind = kind
+  rt.camera.progress = 1
+  useApp.getState().setCameraFlight({ id, flying: false, eta: now, arrivedAt: now })
+}
 
 export function CameraDirector() {
   const rt = useRuntime()
@@ -131,9 +176,32 @@ export function CameraDirector() {
     userTouched: false,
     gestureSeen: 0,
     drift: 0, // 0..1 ramp of the overview drift
+    // Inputs of the current target spec (recompute only when one changes).
+    spec: null as PoseSpec | null,
+    intent: null as CameraIntent | null,
+    report: undefined as AppState['report'],
+    vpW: 0,
+    vpH: 0,
+    level: '' as TextureLevel | '',
+    insetsKey: -1,
+    insetsAt: 0,
+    rangeDirty: false,
+    /** Range re-frame in progress (log-space, --ease-in-out) */
+    rangeMove: null as null | { from: number; to: number; start: number; dur: number },
+    /** Lens shift the target follows (smoothed) */
+    shiftX: 0,
+    shiftY: 0,
+    // Velocity estimate (visual), for carrying speed across retargets.
+    prevD: new Vector3(1, 0, 0),
+    prevRange: 1,
+    velPan: 0, // rad/s of the look-at point
+    velDir: new Vector3(), // unit tangent of that motion
+    velZoom: 0, // d(log range)/dt
+    bootDolly: 'pending' as 'pending' | 'armed' | 'done',
   })
   const input = useMemo(createControlInput, [])
   const control = useMemo(createControlState, [])
+  const vp = useMemo<Viewport>(() => ({ width: 1, height: 1 }), [])
 
   // Pointer / wheel controls on the canvas.
   useEffect(() => {
@@ -143,18 +211,7 @@ export function CameraDirector() {
   }, [gl, input])
 
   // Full-screen fade quad for reduced-motion cuts.
-  const fade = useMemo(() => {
-    const geometry = new PlaneGeometry(2, 2)
-    const material = new ShaderMaterial({
-      vertexShader: fadeVertex,
-      fragmentShader: fadeFragment,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-      uniforms: { uColor: { value: lin(palette.ink0) }, uAlpha: { value: 0 } },
-    })
-    return { geometry, material }
-  }, [])
+  const fade = useMemo(() => ({ geometry: new PlaneGeometry(2, 2), material: createFadeMaterial() }), [])
   useEffect(
     () => () => {
       fade.geometry.dispose()
@@ -164,85 +221,229 @@ export function CameraDirector() {
   )
 
   const fadeMesh = useRef<Mesh>(null)
-  const tmp = useMemo(() => ({ pos: new Vector3(), up: new Vector3(), target: new Vector3(), e: new Vector3(), n: new Vector3() }), [])
+  const tmp = useMemo(
+    () => ({
+      e: new Vector3(),
+      n: new Vector3(),
+      axis: new Vector3(),
+      free: { x0: 0, y0: 0, x1: 0, y1: 0 },
+      sub: new Vector3(),
+      cam: { pos: new Vector3(), up: new Vector3(), target: new Vector3() },
+    }),
+    [],
+  )
 
   useFrame((state, dtRaw) => {
     const s = st.current
     const dt = Math.min(dtRaw, 0.1)
     const now = performance.now()
     const store = useApp.getState()
-    const vp: Viewport = { width: state.size.width, height: state.size.height }
+    vp.width = state.size.width
+    vp.height = state.size.height
     const phone = isPhone(vp)
     const fov = fovFor(vp)
+    const tanHalf = Math.tan((fov * DEG) / 2)
     const intent = store.camera
+    const insets = store.uiInsets
+    // Near limit: the map actually on screen at the look-at point (the night map on the night side).
+    const sub = intent.kind === 'place' ? dirFromLatLon(intent.lat, intent.lon, tmp.sub) : s.initialized ? s.target.d : null
+    const lit = !sub || sub.dot(rt.sunDir) > 0.1
+    const level = lit ? rt.textureLevel : coarserLevel(rt.textureLevel, rt.nightLevel)
+    const floor = minRangeFor(vp, level)
 
-    // Overview look-at: at boot, put the sun ~45° east of centre so the day side faces right and the
-    // terminator (and city lights) sit near the left limb; later, keep the camera's current longitude.
-    let overviewAt: { lat: number; lon: number }
-    if (!s.initialized) {
-      const sun = subsolarPoint(rt.simTime)
-      overviewAt = { lat: 22, lon: sun.lon - 45 }
-    } else {
-      const ll = latLonOfDir(s.pose.d)
-      overviewAt = { lat: clamp(ll.lat, -30, 38) * 0.4 + 22 * 0.6, lon: ll.lon }
+
+    // ── target spec: recomputed only when an input changed (G13).
+    const ik = insetsKeyOf(insets)
+    if (ik !== s.insetsKey) {
+      s.insetsKey = ik
+      s.insetsAt = now
+      s.rangeDirty = true
     }
+    const vpChanged = vp.width !== s.vpW || vp.height !== s.vpH
+    const settledInsets = s.rangeDirty && now - s.insetsAt >= INSETS_SETTLE_MS
+    const recompute =
+      !s.spec ||
+      intent !== s.intent ||
+      store.report !== s.report ||
+      vpChanged ||
+      level !== s.level ||
+      settledInsets ||
+      intent.kind === 'satellite'
+    let key = s.key
+    if (recompute) {
+      // Overview look-at: at boot, put the sun ~45° east of centre so the day side faces right and the terminator
+      // (and city lights) sit near the left limb; later, keep the camera's current longitude.
+      let overviewAt: { lat: number; lon: number }
+      if (!s.initialized) {
+        const sun = subsolarPoint(rt.simTime)
+        overviewAt = { lat: 22, lon: sun.lon - 45 }
+      } else {
+        const ll = latLonOfDir(s.pose.d)
+        overviewAt = { lat: clamp(ll.lat, -30, 38) * 0.4 + 22 * 0.6, lon: ll.lon }
+      }
+      const spec = targetFor(intent, store, vp, insets, floor, rt.simTime, overviewAt)
+      // Only the texture level changed (no layout change): the slower focus move below.
+      const focusOnly = level !== s.level && !settledInsets && !vpChanged && intent === s.intent
+      s.intent = intent
+      s.report = store.report
+      s.vpW = vp.width
+      s.vpH = vp.height
+      s.level = level
+      if (settledInsets) s.rangeDirty = false
+      // A spec that can't resolve yet (the pass isn't in the report) keeps the current target and intent; the
+      // report landing triggers the next recompute.
+      if (spec) {
+        s.spec = spec
+        key = intentKey(intent, store, phone)
+      }
+      // Re-framing of the same intent: range moves smoothly (the shift is tracked below, every frame).
+      if (spec && s.initialized && key === s.key && intent.kind !== 'satellite') {
+        const to = spec.range
+        const curTo = s.rangeMove ? s.rangeMove.to : s.target.range
+        const dl = Math.abs(Math.log(to / curTo))
+        if (dl > 0.004) {
+          const dur = focusOnly ? clamp(RANGE_FOCUS_MS.min + RANGE_FOCUS_MS.perLog * dl, RANGE_FOCUS_MS.min, RANGE_FOCUS_MS.max) : RANGE_MOVE_MS
+          s.rangeMove = { from: s.target.range, to, start: now, dur }
+        }
+        // Overview look-at continuity: only the composition changes, never the look-at.
+        s.target.tilt = spec.tilt ?? 0
+      }
+    }
+    const spec = s.spec
 
-    const key = intentKey(intent, store, phone)
-    const spec = targetFor(intent, store, vp, rt.simTime, overviewAt)
+    // Lens shift wanted right now: the exact free rect (no quantisation) for subjects; the overview spec's own.
+    let wantX = spec?.shiftX ?? 0
+    let wantY = spec?.shiftY ?? 0
+    if (intent.kind !== 'overview') {
+      const f = freeRect(vp, insets, tmp.free)
+      wantX = (f.x0 + f.x1) / Math.max(1, vp.width) - 1
+      wantY = 1 - (f.y0 + f.y1) / Math.max(1, vp.height)
+    }
 
     if (!s.initialized && spec) {
       makePose(spec, s.pose)
       makePose(spec, s.target)
+      s.shiftX = s.target.shiftX
+      s.shiftY = s.target.shiftY
       s.initialized = true
       s.key = key
       rt.camera.arrivedAt = now
+      rt.camera.arrivedKind = intent.kind
+      rt.camera.progress = 1
+      // G15: start a touch further out while the boot curtain is up; the dolly settles as it lifts.
+      if (store.phase === 'boot' && intent.kind === 'overview' && !rt.reducedMotion) {
+        s.pose.range *= BOOT_DOLLY_SCALE
+        s.bootDolly = 'armed'
+      } else s.bootDolly = 'done'
+      s.prevD.copy(s.pose.d)
+      s.prevRange = s.pose.range
     } else if (key !== s.key && spec) {
-      // New intent: fly (or cut).
+      // New intent: fly (or cut). A flight already under way is a retarget.
+      const retarget = s.flight !== null
       s.key = key
       makePose(spec, s.target)
+      s.shiftX = s.target.shiftX
+      s.shiftY = s.target.shiftY
+      s.rangeMove = null
       s.userTouched = false
       control.spin.set(0, 0, 0)
       control.zoomTarget = null
-      rt.camera.flightId++
+      s.bootDolly = 'done'
+      const id = ++rt.camera.flightId
       if (rt.reducedMotion) {
         copyPose(s.target, s.pose)
         s.flight = null
         rt.cutAt = now
-        rt.camera.arrivedAt = now
+        arrive(rt, id, now, intent.kind)
       } else {
         copyPose(s.pose, s.from)
         const plan = planFlight(s.from, s.target)
-        s.flight = { start: now, duration: plan.duration, bump: plan.bump }
+        let duration = plan.duration
+        let ease = easeInOut
+        if (retarget) {
+          duration = Math.max(RETARGET_MIN_S, plan.duration * 0.8)
+          // Carry the current visual speed along the new path.
+          ease = easeCarry(carrySpeed(s.from, s.target, { pan: s.velPan, dir: s.velDir, zoom: s.velZoom }, tanHalf, duration))
+        }
+        s.flight = { id, start: now, duration, bump: plan.bump, ease }
         rt.camera.arrivedAt = -Infinity
+        rt.camera.progress = 0
+        store.setCameraFlight({ id, flying: true, eta: now + duration * 1000, arrivedAt: -1 })
       }
       s.drift = 0
     } else if (spec && intent.kind === 'satellite') {
       // Moving target: keep the destination current.
       makePose(spec, s.target)
-    } else if (spec && !s.flight && !s.userTouched && intent.kind !== 'overview') {
-      // Settled and untouched: follow layout changes (resize, rotation) smoothly.
-      makePose(spec, s.target)
+    }
+
+    // G15: the one focus dolly as the boot curtain lifts (not for URL targets or share boots).
+    if (s.bootDolly === 'armed' && store.phase !== 'boot') {
+      s.bootDolly = 'done'
+      if (store.phase === 'idle' && intent.kind === 'overview' && !s.flight && !rt.reducedMotion) {
+        // Frame for the landing that is mounting right now (its insets may be newer than the settle delay), and
+        // re-seat the start 12% further out while the curtain still covers the globe: a pure dolly-in.
+        const ll = latLonOfDir(s.pose.d)
+        const now0 = overviewPose(vp, insets, ll.lat, ll.lon)
+        s.spec = now0
+        s.target.range = now0.range
+        s.target.shiftX = s.shiftX = now0.shiftX ?? 0
+        s.target.shiftY = s.shiftY = now0.shiftY ?? 0
+        s.rangeMove = null
+        s.rangeDirty = false
+        s.pose.range = now0.range * BOOT_DOLLY_SCALE
+        s.pose.shiftX = s.target.shiftX
+        s.pose.shiftY = s.target.shiftY
+        copyPose(s.pose, s.from)
+        s.target.d.copy(s.pose.d)
+        s.target.fwd.copy(s.pose.fwd)
+        s.drift = 0 // the drift ramps in after the dolly
+        const id = ++rt.camera.flightId
+        s.flight = { id, start: now, duration: BOOT_DOLLY_S, bump: 0, ease: easeOut, dolly: true }
+        rt.camera.arrivedAt = -Infinity
+        rt.camera.progress = 0
+        store.setCameraFlight({ id, flying: true, eta: now + BOOT_DOLLY_S * 1000, arrivedAt: -1 })
+      }
+    }
+
+    // ── framing follows the UI: shift every frame (smoothed), range by a timed move.
+    if (intent.kind !== 'satellite') {
+      const k = damp(dt, SHIFT_TAU)
+      s.shiftX += (wantX - s.shiftX) * k
+      s.shiftY += (wantY - s.shiftY) * k
+      s.target.shiftX = s.shiftX
+      s.target.shiftY = s.shiftY
+      if (s.rangeMove) {
+        const m = s.rangeMove
+        const u = rt.reducedMotion ? 1 : clamp((now - m.start) / m.dur, 0, 1)
+        s.target.range = Math.exp(Math.log(m.from) + (Math.log(m.to) - Math.log(m.from)) * easeInOut(u))
+        if (u >= 1) s.rangeMove = null
+      }
     }
 
     // A new gesture interrupts a running flight right where it is.
     if (input.gestureId !== s.gestureSeen) {
       s.gestureSeen = input.gestureId
       if (s.flight) {
+        const id = s.flight.id
         s.flight = null
-        rt.camera.arrivedAt = now
+        arrive(rt, id, now, intent.kind)
       }
       s.userTouched = true
     }
 
     if (s.flight) {
-      const t = clamp((now - s.flight.start) / (s.flight.duration * 1000), 0, 1)
-      interpolatePose(s.from, s.target, easeInOut(t), s.flight.bump, s.pose)
+      const f = s.flight
+      const t = clamp((now - f.start) / (f.duration * 1000), 0, 1)
+      const e = f.ease(t)
+      interpolatePose(s.from, s.target, e, f.bump, s.pose, tiltProgress(e, s.from.tilt, s.target.tilt))
+      if (f.dolly) s.pose.range = s.target.range * (1 + (BOOT_DOLLY_SCALE - 1) * (1 - e))
+      rt.camera.progress = e
       if (t >= 1) {
         s.flight = null
-        rt.camera.arrivedAt = now
+        arrive(rt, f.id, now, intent.kind)
       }
     } else {
-      const moved = applyControls(s.pose, input, control, dt, fov, vp.height, intent.kind === 'overview')
+      const moved = applyControls(s.pose, input, control, dt, fov, vp.height, intent.kind === 'overview', s.pose.r > 1.0001 ? 0 : floor)
       if (moved) s.userTouched = true
 
       if (intent.kind === 'overview') {
@@ -252,22 +453,21 @@ export function CameraDirector() {
         rotateAbout(s.pose.fwd, s.pose.d, a * damp(dt, 0.4), s.pose.fwd)
         // Drift, resuming after the user lets go.
         const idleFor = now - input.lastInputAt
-        const want = !rt.reducedMotion && !input.dragging && idleFor > RESUME_AFTER_MS ? 1 : 0
+        const want = !rt.reducedMotion && !input.dragging && idleFor > RESUME_AFTER_MS && s.bootDolly !== 'armed' ? 1 : 0
         s.drift = clamp(s.drift + (want ? dt / RAMP_S : -dt / 0.3), 0, 1)
         if (s.drift > 0) {
           const ease = s.drift * s.drift * (3 - 2 * s.drift)
-          rotateAbout(s.pose.d, tmp.up.set(0, 1, 0), -DRIFT_DEG_S * DEG * dt * ease, s.pose.d)
-          rotateAbout(s.pose.fwd, tmp.up, -DRIFT_DEG_S * DEG * dt * ease, s.pose.fwd)
+          tmp.axis.set(0, 1, 0)
+          rotateAbout(s.pose.d, tmp.axis, -DRIFT_DEG_S * DEG * dt * ease, s.pose.d)
+          rotateAbout(s.pose.fwd, tmp.axis, -DRIFT_DEG_S * DEG * dt * ease, s.pose.fwd)
         }
-        // Composition (range, lens shift) follows the layout unless the user zoomed.
-        if (spec) {
-          const k = damp(dt, 0.6)
-          if (!s.userTouched) s.pose.range += (spec.range - s.pose.range) * k
-          s.pose.shiftX += ((spec.shiftX ?? 0) - s.pose.shiftX) * k
-          s.pose.shiftY += ((spec.shiftY ?? 0) - s.pose.shiftY) * k
-          s.pose.tilt += (0 - s.pose.tilt) * (s.userTouched ? 0 : k)
-        }
-      } else if (intent.kind === 'satellite' && spec) {
+        // Composition (range, lens shift) follows the layout unless the user zoomed (held out while the boot
+        // dolly waits for the curtain).
+        if (!s.userTouched) s.pose.range = s.target.range * (s.bootDolly === 'armed' ? BOOT_DOLLY_SCALE : 1)
+        s.pose.shiftX = s.target.shiftX
+        s.pose.shiftY = s.target.shiftY
+        s.pose.tilt += (0 - s.pose.tilt) * (s.userTouched ? 0 : damp(dt, 0.6))
+      } else if (intent.kind === 'satellite') {
         // Ride along: the look-at point follows the satellite; user zoom / tilt are kept.
         const k = damp(dt, 0.15)
         s.pose.d.lerp(s.target.d, k).normalize()
@@ -280,38 +480,34 @@ export function CameraDirector() {
         s.pose.shiftX += (s.target.shiftX - s.pose.shiftX) * k
         s.pose.shiftY += (s.target.shiftY - s.pose.shiftY) * k
         orthonormalize(s.pose)
-      } else if (!s.userTouched) {
-        const k = damp(dt, 0.5)
-        s.pose.range += (s.target.range - s.pose.range) * k
-        s.pose.shiftX += (s.target.shiftX - s.pose.shiftX) * k
-        s.pose.shiftY += (s.target.shiftY - s.pose.shiftY) * k
       } else {
-        // Keep the composition's lens shift even after the user moved.
-        const k = damp(dt, 0.5)
-        s.pose.shiftX += (s.target.shiftX - s.pose.shiftX) * k
-        s.pose.shiftY += (s.target.shiftY - s.pose.shiftY) * k
+        // Settled on a place or pass: the composition follows the (already smoothed) target; user zoom is kept.
+        if (!s.userTouched) s.pose.range = s.target.range
+        s.pose.shiftX = s.target.shiftX
+        s.pose.shiftY = s.target.shiftY
       }
     }
 
     // ── apply to the camera
-    poseToCamera(s.pose, tmp.pos, tmp.up, tmp.target)
-    camera.position.copy(tmp.pos)
-    camera.up.copy(tmp.up)
-    camera.lookAt(tmp.target)
-    const alt = tmp.pos.length() - 1
-    camera.fov = fov
-    camera.aspect = vp.width / Math.max(1, vp.height)
-    camera.near = clamp(alt * 0.3, 0.0005, 0.8)
-    camera.far = 400
-    camera.updateProjectionMatrix()
-    // Lens shift: the look-at point lands at NDC (shiftX, shiftY).
-    camera.projectionMatrix.elements[8] = -s.pose.shiftX
-    camera.projectionMatrix.elements[9] = -s.pose.shiftY
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
-    camera.updateMatrixWorld()
-
+    const alt = applyPoseToCamera(s.pose, camera, vp, fov, tmp.cam)
     rt.camera.flying = s.flight !== null
     rt.camera.altitudeKm = alt * EARTH_RADIUS_KM
+    rt.inputAt = input.dragging ? now : input.lastInputAt
+
+    // ── velocity estimate (smoothed over a few frames) for retargets
+    if (dt > 1e-4) {
+      const ang = s.prevD.angleTo(s.pose.d)
+      const w = Math.min(1, dt / 0.04)
+      s.velPan += (ang / dt - s.velPan) * w
+      if (ang > 1e-9) {
+        tmp.axis.copy(s.pose.d).sub(s.prevD)
+        tmp.axis.addScaledVector(s.pose.d, -tmp.axis.dot(s.pose.d)).normalize()
+        s.velDir.lerp(tmp.axis, w).normalize()
+      }
+      s.velZoom += (Math.log(s.pose.range / s.prevRange) / dt - s.velZoom) * w
+      s.prevD.copy(s.pose.d)
+      s.prevRange = s.pose.range
+    }
 
     // Reduced-motion cut fade.
     const since = now - rt.cutAt

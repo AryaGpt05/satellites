@@ -2,9 +2,13 @@
  * Field: the search input (DESIGN §8). No box, just a baseline hairline that thickens on focus, and a
  * blinking block caret drawn by us (the native caret is hidden).
  *
- * The block caret is positioned by measuring the text before the selection in an invisible mirror
- * that shares the input's font. It inverts the glyph beneath it (mix-blend-mode: difference), stays
- * solid while you type, hides while a range is selected, and does not blink under reduced motion.
+ * The input is monospace, so the caret needs no layout reads: one cell width is measured once with a
+ * canvas in the input's computed font (again when fonts finish loading and on resize), and the caret
+ * sits at selectionStart × cell − scrollLeft. Moves are coalesced into one rAF per frame, driven by
+ * `input` and `selectionchange` only. (A hidden mirror span is kept as the fallback for a proportional
+ * font, should a caller ever restyle the input.) The caret inverts the glyph beneath it
+ * (mix-blend-mode: difference), stays solid while you type, hides while a range is selected, and does
+ * not blink under reduced motion.
  *
  *   <Field label="01 / Place" placeholder="Search a place" leading={<Glyph name="search" />}
  *          trailing={<Kbd>/</Kbd>} busy={searching} />
@@ -31,6 +35,8 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   label?: ReactNode
   /** Mono caps status above the line, right (e.g. "Searching", "3 results") */
   status?: ReactNode
+  /** Keep the label + status row for assistive tech only (visually hidden), e.g. a compact phone hero */
+  metaHidden?: boolean
   /** Element before the text (a Glyph) */
   leading?: ReactNode
   /** Element after the text (a Kbd hint or a button) */
@@ -47,36 +53,99 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
 /** How long the caret stays solid after a keystroke before it resumes blinking. */
 const TYPING_HOLD_MS = 600
 
+let measureCtx: CanvasRenderingContext2D | null | undefined
+/** font-stretch percentages → the keywords the canvas `font` shorthand accepts. */
+const STRETCH: Record<string, string> = {
+  '50%': 'ultra-condensed',
+  '62.5%': 'extra-condensed',
+  '75%': 'condensed',
+  '87.5%': 'semi-condensed',
+  '100%': 'normal',
+  '112.5%': 'semi-expanded',
+  '125%': 'expanded',
+  '150%': 'extra-expanded',
+  '200%': 'ultra-expanded',
+}
+/** Width of one glyph cell of the font, or 0 when it can't be measured or isn't monospace. */
+function cellWidth(style: string, weight: string, stretch: string, size: string, family: string): number {
+  if (measureCtx === undefined) {
+    try {
+      measureCtx = document.createElement('canvas').getContext('2d')
+    } catch {
+      measureCtx = null
+    }
+  }
+  if (!measureCtx) return 0
+  const kw = STRETCH[stretch] ?? (stretch === 'normal' ? 'normal' : '')
+  if (!kw) return 0
+  measureCtx.font = `${style} ${weight} ${kw} ${size} ${family}`
+  // Older engines ignore the shorthand's stretch; set it explicitly where supported.
+  if ('fontStretch' in measureCtx) measureCtx.fontStretch = kw as CanvasFontStretch
+  const zero = measureCtx.measureText('0').width
+  // Monospace check: a narrow and a wide glyph must measure the same.
+  return Math.abs(measureCtx.measureText('i').width - measureCtx.measureText('W').width) < 0.01 ? zero : 0
+}
+
 export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
-  { label, status, leading, trailing, size = 'md', busy, invalid, className, inputClassName, id, onFocus, onBlur, ...rest },
+  { label, status, metaHidden, leading, trailing, size = 'md', busy, invalid, className, inputClassName, id, onFocus, onBlur, ...rest },
   ref,
 ) {
   const inputRef = useRef<HTMLInputElement>(null)
   const mirrorRef = useRef<HTMLSpanElement>(null)
   const caretRef = useRef<HTMLSpanElement>(null)
   const typingTimer = useRef(0)
+  /** One monospace cell (px); 0 = not monospace (or unmeasured): fall back to the mirror. */
+  const cell = useRef(0)
+  /** The input's inner width (px), measured with the cell. */
+  const boxW = useRef(0)
+  const raf = useRef(0)
   const [focused, setFocused] = useState(false)
   useImperativeHandle(ref, () => inputRef.current as HTMLInputElement, [])
 
-  /** Measure and move the block caret. Cheap: two text writes into a hidden span. */
-  const place = useCallback(() => {
+  const measureCell = useCallback(() => {
     const input = inputRef.current
-    const mirror = mirrorRef.current
+    if (!input) return
+    const cs = getComputedStyle(input)
+    // letter-spacing is 0 on this input; a non-zero value would change the advance, so fall back.
+    const spacing = parseFloat(cs.letterSpacing) || 0
+    cell.current = spacing ? 0 : cellWidth(cs.fontStyle, cs.fontWeight, cs.fontStretch || 'normal', cs.fontSize, cs.fontFamily)
+    boxW.current = input.clientWidth
+  }, [])
+
+  /** Move the block caret. Monospace: arithmetic only. Otherwise: measure in the mirror. */
+  const place = useCallback(() => {
+    raf.current = 0
+    const input = inputRef.current
     const caret = caretRef.current
-    if (!input || !mirror || !caret) return
+    if (!input || !caret) return
     const value = input.value
     const start = input.selectionStart ?? value.length
     const end = input.selectionEnd ?? start
-    mirror.textContent = value.slice(0, start)
-    const x = mirror.getBoundingClientRect().width
-    // Width of the glyph under the caret (or of a "0" cell at the end), so the block covers it exactly.
-    mirror.textContent = value.slice(start, start + 1) || '0'
-    const w = mirror.getBoundingClientRect().width
-    const left = x - input.scrollLeft
+    let left: number
+    let w: number
+    if (cell.current > 0) {
+      // While the text fits, the input cannot be scrolled: no need to read (and lay out) scrollLeft.
+      const scroll = (value.length + 1) * cell.current > boxW.current ? input.scrollLeft : 0
+      left = start * cell.current - scroll
+      w = cell.current
+    } else {
+      const mirror = mirrorRef.current
+      if (!mirror) return
+      mirror.textContent = value.slice(0, start)
+      const x = mirror.getBoundingClientRect().width
+      mirror.textContent = value.slice(start, start + 1) || '0'
+      w = mirror.getBoundingClientRect().width
+      left = x - input.scrollLeft
+    }
     caret.style.transform = `translate3d(${left}px, 0, 0)`
     caret.style.width = `${Math.max(2, w)}px`
-    caret.dataset.hidden = String(start !== end || left < -1 || left > input.clientWidth + 1)
+    caret.dataset.hidden = String(start !== end || left < -1 || left > boxW.current + 1)
   }, [])
+
+  /** Coalesce every trigger in a frame into one placement. */
+  const schedule = useCallback(() => {
+    if (!raf.current) raf.current = requestAnimationFrame(place)
+  }, [place])
 
   const markTyping = useCallback(() => {
     const caret = caretRef.current
@@ -88,40 +157,52 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
     }, TYPING_HOLD_MS)
   }, [])
 
-  // Re-place after every render (controlled value changes) and whenever selection moves.
+  // Controlled value changes (clear, choose) move the caret too.
   useLayoutEffect(() => {
-    if (focused) place()
-  })
+    if (focused) schedule()
+  }, [focused, rest.value, schedule])
   useEffect(() => {
     if (!focused) return
     const input = inputRef.current
     if (!input) return
+    measureCell()
+    place()
     const onSel = () => {
-      if (document.activeElement === input) place()
+      if (document.activeElement === input) schedule()
     }
     const onInput = () => {
       markTyping()
-      place()
+      schedule()
+    }
+    const onResize = () => {
+      measureCell()
+      schedule()
     }
     document.addEventListener('selectionchange', onSel)
     input.addEventListener('input', onInput)
-    input.addEventListener('keydown', onSel)
-    input.addEventListener('keyup', onSel)
     input.addEventListener('scroll', onSel)
-    input.addEventListener('pointerup', onSel)
-    window.addEventListener('resize', onSel)
-    // Fonts swapping in after first paint change glyph widths.
-    void document.fonts?.ready.then(onSel)
+    window.addEventListener('resize', onResize)
+    // Fonts swapping in after first paint change the cell width.
+    void document.fonts?.ready.then(onResize)
+    // The line's trailing controls come and go (clear, go): track the input's width without reading it.
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver((entries) => {
+            boxW.current = entries[0]?.contentRect.width ?? boxW.current
+            schedule()
+          })
+        : null
+    ro?.observe(input)
     return () => {
+      ro?.disconnect()
+      cancelAnimationFrame(raf.current)
+      raf.current = 0
       document.removeEventListener('selectionchange', onSel)
       input.removeEventListener('input', onInput)
-      input.removeEventListener('keydown', onSel)
-      input.removeEventListener('keyup', onSel)
       input.removeEventListener('scroll', onSel)
-      input.removeEventListener('pointerup', onSel)
-      window.removeEventListener('resize', onSel)
+      window.removeEventListener('resize', onResize)
     }
-  }, [focused, place, markTyping])
+  }, [focused, place, schedule, markTyping, measureCell])
   useEffect(() => () => window.clearTimeout(typingTimer.current), [])
 
   return (
@@ -130,7 +211,7 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
       data-busy={busy ? 'true' : undefined}
     >
       {label || status ? (
-        <div className={s.meta}>
+        <div className={cx(s.meta, metaHidden && s.srOnly)}>
           {label ? (
             <label className={s.label} htmlFor={id}>
               {label}

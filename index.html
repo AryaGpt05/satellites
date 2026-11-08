@@ -6,29 +6,176 @@
     <meta name="theme-color" content="#07080A" />
     <title>Overflight — what photographed you from orbit</title>
     <meta name="description" content="Enter any place on Earth. See every satellite that passed over it this week, and the actual pictures they took." />
-    <meta property="og:title" content="Overflight" />
-    <meta property="og:description" content="Something photographed you from orbit this week. Find out what." />
-    <meta property="og:url" content="https://overflight-psi.vercel.app/" />
-    <meta property="og:image" content="https://overflight-psi.vercel.app/og-default.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Overflight" />
+    <meta property="og:title" content="Something photographed you this week." />
+    <meta property="og:description" content="Enter any place on Earth. See every satellite that passed over it this week, and the actual pictures they took." />
+    <meta property="og:url" content="__SITE_ORIGIN__/" />
+    <meta property="og:image" content="__SITE_ORIGIN__/og-default.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Overflight: a line-drawn globe with a satellite swath crossing a reticle, and the line: Something photographed you this week." />
+    <meta property="og:image:alt" content="A real Sentinel-2 satellite photograph of a place on Earth, with a targeting reticle, beside the line: Something photographed you this week." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Overflight" />
-    <meta name="twitter:description" content="Something photographed you from orbit this week. Find out what." />
-    <meta name="twitter:image" content="https://overflight-psi.vercel.app/og-default.png" />
+    <meta name="twitter:title" content="Something photographed you this week." />
+    <meta name="twitter:description" content="Enter any place on Earth. See every satellite that passed over it this week, and the actual pictures they took." />
+    <meta name="twitter:image" content="__SITE_ORIGIN__/og-default.png" />
+    <meta name="twitter:image:alt" content="A real Sentinel-2 satellite photograph of a place on Earth, with a targeting reticle, beside the line: Something photographed you this week." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://planetarycomputer.microsoft.com" crossorigin />
     <link rel="preconnect" href="https://photon.komoot.io" crossorigin />
     <link rel="preconnect" href="https://gibs.earthdata.nasa.gov" crossorigin />
+    <!-- First light: the globe's 1k set (image elements, same origin, no crossorigin, as textures.ts loads them). -->
     <link rel="preload" href="/textures/earth-day-1k.webp" as="image" type="image/webp" />
-    <link rel="preload" href="/data/catalog.json" as="fetch" type="application/json" crossorigin />
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Overflight" />
+    <link rel="preload" href="/textures/earth-night-1k.webp" as="image" type="image/webp" />
+    <link rel="preload" href="/textures/earth-clouds-1k.webp" as="image" type="image/webp" />
+    <link rel="preload" href="/textures/earth-data-1k.webp" as="image" type="image/webp" />
+    <!-- The catalog no longer gates the landing: fetched early, but behind the shell and the textures. -->
+    <link rel="preload" href="/data/catalog.json" as="fetch" type="application/json" crossorigin fetchpriority="low" />
+    <!--
+      Static boot frame (K3): a pure HTML/CSS copy of <BootScreen/>'s first frame (bezel, wordmark, the
+      00 / START-UP rule and the empty progress bar), so something designed paints the moment the HTML
+      arrives. src/app/Main.tsx retires it in the commit that mounts the real boot screen (same pixels).
+      Values mirror src/styles/tokens.css, src/ui/system/{Bezel,CornerReadout}.module.css,
+      src/ui/hud/Hud.module.css and src/ui/landing/BootScreen.module.css.
+    -->
+    <style>
+      #boot-static {
+        --bs-inset: 16px;
+        --bs-margin: 32px;
+        --bs-fs: 10.5px;
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        pointer-events: none;
+        background: #07080a;
+        color: rgb(236 232 224 / 0.64);
+        font-family: 'Martian Mono Variable', 'Martian Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+        font-stretch: 87.5%;
+        font-weight: 400;
+        font-size: var(--bs-fs);
+        line-height: 1.4;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-variant-numeric: tabular-nums;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        white-space: nowrap;
+      }
+      @media (max-width: 760px) {
+        #boot-static {
+          --bs-inset: 10px;
+          --bs-margin: 18px;
+          --bs-fs: 11px;
+        }
+      }
+      #boot-static .bs-bezel {
+        position: fixed;
+        inset: var(--bs-inset);
+        border: 1px solid rgb(236 232 224 / 0.1);
+      }
+      #boot-static .bs-c {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border: 0 solid rgb(236 232 224 / 0.4);
+      }
+      #boot-static .bs-tl { top: -1px; left: -1px; border-top-width: 1px; border-left-width: 1px; }
+      #boot-static .bs-tr { top: -1px; right: -1px; border-top-width: 1px; border-right-width: 1px; }
+      #boot-static .bs-bl { bottom: -1px; left: -1px; border-bottom-width: 1px; border-left-width: 1px; }
+      #boot-static .bs-br { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
+      #boot-static .bs-ruler {
+        position: absolute;
+        top: 0;
+        width: 50%;
+        height: 6px;
+        background-image: linear-gradient(to right, rgb(236 232 224 / 0.18) 1px, transparent 1px), linear-gradient(to right, rgb(236 232 224 / 0.18) 1px, transparent 1px);
+        background-size: 120px 6px, 24px 3px;
+        background-repeat: repeat-x;
+      }
+      #boot-static .bs-rl {
+        left: 23px;
+        background-position: 0 0;
+        -webkit-mask-image: linear-gradient(to right, #000 0, #000 18%, transparent 78%);
+        mask-image: linear-gradient(to right, #000 0, #000 18%, transparent 78%);
+      }
+      #boot-static .bs-rr {
+        right: 23px;
+        background-position: right 0 top 0;
+        -webkit-mask-image: linear-gradient(to left, #000 0, #000 18%, transparent 78%);
+        mask-image: linear-gradient(to left, #000 0, #000 18%, transparent 78%);
+      }
+      @media (max-width: 760px) {
+        #boot-static .bs-ruler { height: 4px; background-size: 120px 4px, 24px 2px; }
+      }
+      #boot-static .bs-mark {
+        position: fixed;
+        top: calc(var(--bs-inset) + 14px);
+        left: calc(var(--bs-inset) + var(--bs-margin));
+        display: inline-flex;
+        align-items: center;
+      }
+      @media (max-width: 760px) {
+        #boot-static .bs-mark { top: calc(var(--bs-inset) + 12px); }
+      }
+      #boot-static .bs-word { color: #ece8e0; font-weight: 500; letter-spacing: 0.26em; }
+      #boot-static .bs-ver { margin-left: 1.1em; color: rgb(236 232 224 / 0.52); text-transform: none; }
+      #boot-static .bs-boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        align-items: center;
+      }
+      @media (max-width: 760px) {
+        #boot-static .bs-boot { align-items: end; padding-bottom: calc(var(--bs-inset) + 96px); }
+      }
+      #boot-static .bs-block {
+        margin-left: calc(var(--bs-inset) + var(--bs-margin));
+        width: min(640px, calc(100vw - 2 * (var(--bs-inset) + var(--bs-margin))));
+      }
+      #boot-static .bs-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+      #boot-static .bs-rule { flex: 1; display: flex; align-items: center; gap: 10px; color: rgb(236 232 224 / 0.52); }
+      #boot-static .bs-rule::before { content: ''; width: 12px; height: 1px; background: rgb(236 232 224 / 0.22); flex: none; }
+      #boot-static .bs-rule::after { content: ''; height: 1px; flex: 1; background: rgb(236 232 224 / 0.1); }
+      #boot-static .bs-idx { color: rgb(236 232 224 / 0.64); }
+      /* The log rows wipe in after the first frame: here they only hold their space. */
+      #boot-static .bs-row { height: 32px; }
+      @media (max-width: 760px) {
+        /* two lines + 8px padding + 2px gap + the 1px rule (the first row has one more on top) */
+        #boot-static .bs-row { height: calc(19px + 2.8em); }
+        #boot-static .bs-head + .bs-row { height: calc(20px + 2.8em); }
+      }
+      #boot-static .bs-foot { display: flex; align-items: center; gap: 16px; margin-top: 18px; }
+      #boot-static .bs-bar { position: relative; flex: 1; height: 1px; background: rgb(236 232 224 / 0.1); overflow: hidden; }
+      #boot-static .bs-fill { position: absolute; inset: 0; background: rgb(236 232 224 / 0.64); transform-origin: left center; transform: scaleX(0.25); }
+      #boot-static .bs-count { color: rgb(236 232 224 / 0.52); }
+      /* Retired (React's boot screen is up): only the wordmark stays, until the HUD's own has wiped in. */
+      #boot-static[data-live] { background: transparent; }
+      #boot-static[data-live] > :not(.bs-mark) { display: none; }
+    </style>
   </head>
   <body>
+    <div id="boot-static" aria-hidden="true">
+      <div class="bs-boot">
+        <div class="bs-block">
+          <div class="bs-head">
+            <div class="bs-rule"><span class="bs-idx">00</span><span>/</span>Start-up</div>
+            <span>T+00.00 S</span>
+          </div>
+          <div class="bs-row"></div>
+          <div class="bs-row"></div>
+          <div class="bs-row"></div>
+          <div class="bs-row"></div>
+          <div class="bs-foot">
+            <span class="bs-bar"><span class="bs-fill"></span></span>
+            <span class="bs-count">1 / 4</span>
+          </div>
+        </div>
+      </div>
+      <div class="bs-bezel"><span class="bs-ruler bs-rl"></span><span class="bs-ruler bs-rr"></span><span class="bs-c bs-tl"></span><span class="bs-c bs-tr"></span><span class="bs-c bs-bl"></span><span class="bs-c bs-br"></span></div>
+      <div class="bs-mark"><span class="bs-word">Overflight</span><span class="bs-ver">v0.1</span></div>
+    </div>
     <div id="root"></div>
-    <noscript><p style="font-family:monospace;color:#ece8e0;background:#07080a;padding:24px">Overflight needs JavaScript and WebGL to compute satellite passes in your browser.</p></noscript>
+    <noscript><p style="position:relative;z-index:101;font-family:monospace;color:#ece8e0;background:#07080a;padding:24px">Overflight needs JavaScript and WebGL to compute satellite passes in your browser.</p></noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
