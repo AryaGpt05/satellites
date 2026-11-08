@@ -91,6 +91,10 @@ export interface SatProfile {
   daylightOnly?: boolean
   /** If set, actual imagery is searchable via STAC */
   stac?: { collection: 'sentinel-2-l2a' | 'landsat-c2-l2'; platform: string }
+  /** If set, actual imagery is available from NASA GIBS */
+  gibs?: { collection: CaptureCollection; layer: string; kind: 'daily' | 'subdaily' }
+  /** For geostationary: false if the satellite is in standby/storage (not imaging) */
+  operational?: boolean
   /** One sentence, plain, precise. No hype. */
   blurb: string
   /** Geostationary: imaging cadence in minutes */
@@ -156,11 +160,29 @@ export interface TrackPoint {
   altKm: number
 }
 
+/**
+ * Imagery collections we can show real pixels from.
+ *  - STAC (Planetary Computer / Earth Search): per-scene, 10–30 m
+ *  - NASA GIBS: daily VIIRS/MODIS true-colour mosaics (250–375 m) and 10-min geostationary GeoColor (1–2 km)
+ */
+export type CaptureCollection =
+  | 'sentinel-2-l2a'
+  | 'landsat-c2-l2'
+  | 'gibs-viirs-noaa20'
+  | 'gibs-viirs-noaa21'
+  | 'gibs-viirs-snpp'
+  | 'gibs-modis-terra'
+  | 'gibs-modis-aqua'
+  | 'gibs-goes-east'
+  | 'gibs-goes-west'
+  | 'gibs-himawari'
+
 /** A real image that exists in a public archive. */
 export interface Capture {
   id: string
-  provider: 'earth-search' | 'planetary-computer'
-  collection: 'sentinel-2-l2a' | 'landsat-c2-l2'
+  provider: 'earth-search' | 'planetary-computer' | 'gibs'
+  collection: CaptureCollection
+  /** STAC item id, or for GIBS: "<layer>@<ISO time or date>" */
   itemId: string
   /** e.g. "sentinel-2c", "landsat-9" */
   platform: string
@@ -191,6 +213,8 @@ export interface GeoWatcher {
   cadenceMin: number
   /** Number of full-disk images that included the place in the report window */
   imagesInWindow: number
+  /** Real imagery for this watcher, if GIBS serves it (GOES-East/West, Himawari) */
+  gibs?: { collection: CaptureCollection; layer: string }
 }
 
 export interface Report {

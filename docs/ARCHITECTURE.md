@@ -1,0 +1,108 @@
+# Overflight: architecture and module contracts
+
+**Product:** enter a place → see every satellite that passed over it in the last 7 days, with the real
+images they took. A 3D globe shows the real sun, the real catalog (~17k objects), and each pass replayed.
+
+Stack: Vite 8 + React 19 + TypeScript 7 (`tsc -b`) + three.js 0.187 via @react-three/fiber 9 / drei 10 /
+postprocessing. State: zustand (`src/state/store.ts`). Orbits: satellite.js 7 (SGP4). Hosting: Vercel
+(static + `api/` functions). DB: Supabase (RPC-only access, publishable key).
+
+Read first: `docs/DESIGN.md` (non-negotiable art direction), `src/types.ts` (shared contracts),
+`src/lib/geo.ts` (frame conventions), `src/state/store.ts` (app state), `src/ui/system/*` (primitives).
+
+## Data sources (all verified working, CORS `*`)
+
+| what | endpoint | notes |
+|---|---|---|
+| Orbit catalog | `/data/catalog.json` (built by `.github/workflows/catalog.yml` from CelesTrak) | `CatalogFile` with `CatalogRow`s, ~16.9k rows, 2.4 MB (0.8 MB gz) |
+| Sentinel-2 + Landsat search | `POST https://planetarycomputer.microsoft.com/api/stac/v1/search` | collections `sentinel-2-l2a`, `landsat-c2-l2`; `intersects` Point; `datetime` range; props `platform` (`Sentinel-2A/B/C`, `landsat-8/9`), `eo:cloud_cover`, `view:sun_elevation` |
+| Crops (server-rendered PNG) | `GET https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/{minx},{miny},{maxx},{maxy}/{w}x{h}.png?collection=…&item=…&…` | S2: `assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0`. Landsat: `assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55`. ~1–3 s |
+| Point value (cloud at the spot) | `GET …/api/data/v1/item/point/{lon},{lat}?collection=sentinel-2-l2a&item=…&assets=SCL` | SCL classes 8, 9 = cloud, 10 = cirrus, 3 = cloud shadow |
+| Fallback S2 search | `POST https://earth-search.aws.element84.com/v1/search`, collection `sentinel-2-c1-l2a` | assets `visual` = 8-bit RGB COG (range requests OK) |
+| Weather imagery | NASA GIBS WMS `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS={layer}&STYLES=&FORMAT=image/jpeg&CRS=EPSG:4326&BBOX={minLat},{minLon},{maxLat},{maxLon}&WIDTH=&HEIGHT=&TIME={YYYY-MM-DD or ISO}` | layers: `VIIRS_NOAA20_CorrectedReflectance_TrueColor`, `VIIRS_NOAA21_…`, `VIIRS_SNPP_…`, `MODIS_Terra_…`, `MODIS_Aqua_…` (daily); `GOES-East_ABI_GeoColor`, `GOES-West_ABI_GeoColor` (10 min), `Himawari_AHI_Band3_Red_Visible_1km`. **Note the BBOX axis order for EPSG:4326 in WMS 1.3.0 is lat,lon** |
+| Geocoding | `https://photon.komoot.io/api/?q=…&limit=6` and `/reverse?lat=&lon=` | GeoJSON; properties `name, city, state, country, countrycode, osm_value` |
+| Time zone | `@photostructure/tz-lookup` (installed) | `tzlookup(lat, lon)` → IANA tz |
+
+## Module ownership (parallel build: only touch files you own)
+
+| module | owner dirs | key exports |
+|---|---|---|
+| **engine** | `src/engine/**`, `src/sandbox/engine.tsx` | catalog, profiles, propagation, passes, geostationary, report orchestration, GPU element buffer |
+| **imagery** | `src/imagery/**`, `src/sandbox/imagery.tsx` | STAC + GIBS captures, crop URLs, spot cloud check, geocoding, tz |
+| **globe** | `src/globe/**`, `src/sandbox/globe.tsx` | `<GlobeCanvas/>` and the whole 3D scene |
+| **ui-shell** | `src/ui/hud/**`, `src/ui/landing/**`, `src/ui/pages/**`, `src/ui/system/**` (may ADD components), `src/sandbox/shell.tsx` | bezel, corner readouts, boot screen, hero, search field, about page |
+| **ui-results** | `src/ui/results/**`, `src/ui/share/**`, `src/sandbox/results.tsx` | progress readout, results panel, timeline, pass list and detail, pushbroom reveal, share |
+| **backend** | `api/**`, `supabase/**`, `vercel.json`, `src/lib/backend.ts` | DB schema and RPCs, OG share images, share pages, stats |
+| integrator | `src/app/**`, `src/main.tsx`, `src/types.ts`, `src/state/**`, `src/lib/geo.ts`, `package.json`, `docs/**` | composition |
+
+Rules for parallel work:
+- Do not edit files outside your dirs. If you need a contract change (types, store, a new dependency), **do not make it**. Note it in your final report under "Integration requests" and code against a local adapter in your own dir in the meantime.
+- Do not run `npm install`. All dependencies are already installed (see package.json).
+- Do not use git (no commit, stash or checkout). The integrator commits.
+- Typecheck only your files: `npx tsc -p tsconfig.app.json --noEmit 2>&1 | grep "src/<yourdir>"` (others may be mid-edit).
+- Dev server: `npx vite --port <your port> --strictPort` (engine 5181, imagery 5182, globe 5183, ui-shell 5184, ui-results 5185, backend 5186), and view `http://localhost:<port>/?sandbox=<name>`. Screenshots: Playwright is preinstalled (`require('playwright')`, `chromium.launch()` needs no options). WebGL in headless Chromium works with `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`.
+- Your sandbox file must render your module standalone with realistic data (real API calls are fine), and must never be imported by production code.
+
+## Contracts
+
+### engine → `src/engine/index.ts`
+```ts
+export interface LoadedCatalog { fetchedAt: string; source: string; sats: SatInfo[]; byNorad: Map<number, SatInfo> }
+export function loadCatalog(url?: string): Promise<LoadedCatalog>             // singleton, cached
+export function getSatInfo(norad: number): SatInfo | undefined                  // after loadCatalog
+export function propagate(norad: number, ms: number): SatState | null          // main-thread SGP4 for a handful of sats
+export interface SatState { lat: number; lon: number; altKm: number; ecef: [number, number, number]; velKmS: number }
+export function groundTrack(norad: number, t0: number, t1: number, stepS?: number): TrackPoint[]
+export const CATEGORY_INDEX: Record<SatCategory, number>                      // stable small ints for GPU
+export interface ElementBuffer {
+  count: number
+  refEpochMs: number            // shader time origin; pass uTime = (simTime - refEpochMs)/1000
+  /** stride 12 floats per sat:
+   * [0] a (world units, Earth radii)  [1] e  [2] i (rad)  [3] raan0 (rad)  [4] argp0 (rad)  [5] M0 (rad)
+   * [6] n (rad/s)  [7] raanDot (rad/s, J2)  [8] argpDot (rad/s, J2)  [9] epochOffset (s, sat epoch − refEpoch)
+   * [10] category index  [11] flags (bit0 = featured/interesting) */
+  data: Float32Array
+  norad: Int32Array
+}
+export function buildElementBuffer(cat: LoadedCatalog): ElementBuffer
+export function computeReport(place: Place, opts?: { days?: number; now?: number; onProgress?: (e: ProgressEvent) => void; signal?: AbortSignal }): Promise<Report>
+export function profileFor(norad: number): SatProfile | undefined
+```
+The shader must reproduce: ECI position from Kepler + J2 secular drift, then ECI → ECEF via GMST (`src/lib/geo.ts gmst`), then ECEF → world (`ecefToWorld`).
+`computeReport` runs pass prediction in Web Worker(s) and calls the imagery module for captures. It must finish in **under 4 s** on a laptop for a 7-day window, streaming `ProgressEvent`s.
+
+### imagery → `src/imagery/index.ts`
+```ts
+export function searchCaptures(place: LatLon, start: number, end: number, signal?: AbortSignal): Promise<Capture[]>   // S2 + Landsat (STAC)
+export function weatherCaptures(place: LatLon, passes: Pass[], signal?: AbortSignal): Promise<Capture[]>             // GIBS daily VIIRS/MODIS for daytime weather-leo passes
+export function geoImageUrl(collection: CaptureCollection, place: LatLon, ms: number, opts: { halfSizeKm: number; px: number }): string // GOES/Himawari frame at time
+export function spotCloud(capture: Capture, place: LatLon, signal?: AbortSignal): Promise<'clear' | 'cloud' | 'shadow' | 'unknown'>
+export function searchPlaces(q: string, signal?: AbortSignal): Promise<Place[]>
+export function reversePlace(lat: number, lon: number, signal?: AbortSignal): Promise<Place>
+export function locateMe(): Promise<LatLon>
+export function timeZoneAt(lat: number, lon: number): string
+export function preloadImage(url: string): Promise<HTMLImageElement>
+```
+
+### globe → `src/globe/index.ts`
+`export function GlobeCanvas(props: { className?: string }): JSX.Element`: a full-bleed canvas that reads the store. It renders:
+Earth (real sun), clouds, atmosphere, stars, the whole catalog as GPU points, the place reticle, and the selected pass
+(ground track, swath ribbon, satellite with callout, replay-synced), plus a camera director for `store.camera` intents. It sets `globeReady` once first textures are on screen.
+It must also accept the engine's `ElementBuffer` (loaded internally via `loadCatalog` + `buildElementBuffer`).
+
+### ui-shell → `src/ui/hud/index.ts`, `src/ui/landing/index.ts`, `src/ui/pages/index.ts`
+`<Hud/>` (bezel plus corner readouts, always mounted), `<BootScreen/>` (phase `boot`), `<Landing onSubmit={(place: Place) => void}/>` (phase `idle` / `locating`), `<AboutPage onClose/>`.
+
+### ui-results → `src/ui/results/index.ts`, `src/ui/share/index.ts`
+`<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>`.
+
+### backend
+- `supabase/migrations/*.sql`: tables `lookups`, `shares`; RLS on, no direct anon table access; `security definer` RPCs `record_lookup`, `create_share`, `get_share`, `get_stats`.
+- `src/lib/backend.ts`: browser client wrappers (`recordLookup`, `createShare`, `getShare`, `getStats`) using `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. These must **no-op gracefully** when env vars are missing.
+- `api/og.tsx`: 1200×630 share card (`@vercel/og`) in the Instrument style. `api/s.ts`: share page HTML with OG tags that boots the app at `/?s=<id>`. `vercel.json`: rewrites `/s/:id` and caching headers.
+
+## App flow (integrator)
+`boot` (textures + catalog) → `idle` (hero + search over the spinning globe) → `locating` → `computing`
+(camera flies to place; progress readouts) → `results` (panel + timeline; selecting a pass frames it and replays the
+swath sweep; captured images reveal pushbroom-style) → share.
+URL state: `/?q=<lat>,<lon>&n=<label>` deep-links straight to results; `/?s=<shareId>` opens a shared pass.
