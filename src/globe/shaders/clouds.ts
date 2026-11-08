@@ -64,7 +64,7 @@ export const cloudsFragment = glsl`
     float lambert = sat01((NdL + 0.08) / 1.08);
     vec3 lit = uCloudColor * uSunIntensity * mix(0.32, 1.0, lambert) * shade;
     // Sunset: clouds near the terminator catch warm, low light.
-    float band = exp(-pow((NdL - 0.02) / 0.06, 2.0));
+    float band = gauss((NdL - 0.02) / 0.06);
     lit = mix(lit, uTwilightColor * uSunIntensity * 0.5, band * 0.38);
 
     vec3 col = mix(uNightColor, lit, dayMix);

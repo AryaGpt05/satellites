@@ -49,7 +49,7 @@ export const atmosphereFragment = glsl`
     float cosT = dot(rd, L);
     float rayleigh = 0.75 * (1.0 + cosT * cosT);
     float forward = pow(max(cosT, 0.0), 10.0) * smoothstep(-0.25, 0.1, mu);
-    float twilight = exp(-pow((mu - 0.02) / 0.14, 2.0));
+    float twilight = gauss((mu - 0.02) / 0.14);
 
     vec3 tint = mix(uHorizon, uRayleigh, smoothstep(0.0, 2.5 * uScaleHeight, h));
     vec3 col = tint * rayleigh * lit + uHorizon * forward * 1.6;

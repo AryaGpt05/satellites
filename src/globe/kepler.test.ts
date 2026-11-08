@@ -27,7 +27,7 @@ function transpile(src: string): ShaderFn {
   if (/highp|vec3|int /.test(js)) throw new Error(`untranslated GLSL:\n${js}`)
   const prelude = `
     const TWO_PI = ${2 * Math.PI};
-    const sin = (x) => f(Math.sin(x)), cos = (x) => f(Math.cos(x)), sqrt = (x) => f(Math.sqrt(x));
+    const sin = (x) => f(Math.sin(x)), cos = (x) => f(Math.cos(x)), sqrt = (x) => f(Math.sqrt(x)), max = (a, b) => f(Math.max(a, b));
     const mod = (x, y) => f(x - y * Math.floor(x / y));`
   return new Function('el0', 'el1', 'el2', 'uTime', 'uGmst', 'f', `${prelude}\n${js}`) as ShaderFn
 }

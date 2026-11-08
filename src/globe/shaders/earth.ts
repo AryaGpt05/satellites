@@ -109,7 +109,7 @@ export const earthFragment = glsl`
     float relief = clamp(1.0 + (dot(Nb, L) - NdL) * 2.2, 0.62, 1.32);
     vec3 day = albedo * uSunIntensity * lambert * mix(1.0, relief, smoothstep(0.0, 0.08, NdL));
     // Low sun: light that grazed the atmosphere arrives reddened.
-    float lowSun = exp(-pow((NdL - 0.03) / 0.11, 2.0));
+    float lowSun = gauss((NdL - 0.03) / 0.11);
     day *= mix(vec3(1.0), vec3(1.0, 0.74, 0.55), lowSun * 0.5);
     day *= 1.0 - 0.38 * cloudShadow * smoothstep(0.0, 0.2, NdL);
 
@@ -148,7 +148,7 @@ export const earthFragment = glsl`
     vec3 col = mix(night, day, dayMix);
 
     // ── twilight: the faintest warm glow just past the terminator (the dark side is nearly ink, so this is tiny)
-    float dusk = exp(-pow((NdL + 0.035) / 0.05, 2.0));
+    float dusk = gauss((NdL + 0.035) / 0.05);
     col += uTwilightColor * dusk * 0.003;
 
     gl_FragColor = vec4(col * uReveal, 1.0);
