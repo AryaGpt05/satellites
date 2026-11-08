@@ -1,11 +1,11 @@
-# Overflight
+# Watched
 
-**Something photographed you this week.**
+**Something watched you this week.**
 
-Enter any place on Earth. Overflight shows every satellite that passed over it in the last seven days, and the
+Enter any place on Earth. Watched shows every satellite that passed over it in the last seven days, and the
 actual pictures they took. It runs on a live 3D globe lit by the real sun, with all ~17,000 tracked objects in orbit.
 
-→ **[overflight-psi.vercel.app](https://overflight-psi.vercel.app)**
+→ **[watched.earth](https://watched.earth)**
 
 ---
 
