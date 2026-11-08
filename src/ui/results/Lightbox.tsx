@@ -322,7 +322,9 @@ function Viewer({ model, mobile, startKey, from, onReplay }: ViewerProps) {
       else if (k === '-' || k === '_') A.tweenZoom(z.current.s / 1.6, 0, 0)
       else if (k === '0') A.resetZoom()
       else if (k === 'Tab') trapFocus(e, rootRef.current)
-      else handled = false
+      else if (k === ' ' && !(e.target as HTMLElement | null)?.closest?.('button')) {
+        /* Space: nothing behind the viewer (the replay) reacts while it is open */
+      } else handled = false
       if (handled) {
         e.stopPropagation()
         if (k !== 'Tab') e.preventDefault()

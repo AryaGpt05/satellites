@@ -25,7 +25,7 @@
    * headline, the gallery's bar, the caption, the counts strip, 48 px of 02 / PASSES, and what is below the
    * panel. The hero takes what is left (Gallery.module.css).
    */
-  --hero-chrome: calc(2 * var(--bezel-inset) + var(--sheet-clear, 56px) + var(--below-panel) + 520px);
+  --hero-chrome: calc(2 * var(--bezel-inset) + var(--sheet-clear, 56px) + var(--below-panel) + 548px);
 }
 @media (max-height: 720px) {
   .vars {
@@ -526,6 +526,16 @@
 }
 .section + .section {
   margin-top: 36px;
+}
+/* Laptops: the passes notch follows the summary a little closer, so it shows on the first screen (R2R1). */
+@media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) {
+  .section + .section {
+    margin-top: 28px;
+  }
+  .verdict {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
 }
 .rule {
   margin-bottom: 2px;

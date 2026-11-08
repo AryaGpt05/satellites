@@ -448,27 +448,30 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
         <span className={s.mLines}>
           <span className={s.mLine}>
             {lead ? <b className={cx(s.lead, cover === 'clouded' && s.warn)}>{lead} · </b> : null}
-            <b>{meta.name}</b> · {t.day}
-            {mobile ? null : (
+            <b>{meta.name}</b>
+            {note ? null : (
               <>
                 {' · '}
-                {t.time} {t.zone}
+                {t.day}
+                {mobile ? null : (
+                  <>
+                    {' · '}
+                    {t.time} {t.zone}
+                  </>
+                )}
               </>
             )}
           </span>
-          {note ? (
-            <span className={cx(s.mLine, s.note)}>{note}</span>
-          ) : (
-            <span className={s.mLine}>
-              {mobile ? `${t.time} · ` : null}
-              {int(capture.gsdM)} m
-              <span className={s.dim}>
-                {' · '}
-                <Ago t={when} base={model.clock} />
-              </span>
-              {status ? <span className={cx(photo.clouded && s.warn)}> · {status}</span> : null}
+          <span className={s.mLine}>
+            {note ? `${t.day} · ` : mobile ? `${t.time} · ` : null}
+            {int(capture.gsdM)} m
+            <span className={s.dim}>
+              {' · '}
+              <Ago t={when} base={model.clock} />
             </span>
-          )}
+            {status ? <span className={cx(photo.clouded && s.warn)}> · {status}</span> : null}
+          </span>
+          {note ? <span className={cx(s.mLine, s.note)}>{note}</span> : null}
         </span>
         {replay ? (
           <button type="button" className={s.mReplay} onClick={replay} tabIndex={current ? 0 : -1} aria-label={`Replay this pass on the globe: ${meta.name}, ${t.day} ${t.time}`}>

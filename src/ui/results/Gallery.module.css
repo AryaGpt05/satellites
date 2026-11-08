@@ -10,6 +10,17 @@
   gap: 8px;
   min-width: 0;
 }
+/* Phones, pass view: a tighter bar, so the image step keeps a band of globe above the sheet (R2R3). */
+.detail.mobile {
+  gap: 6px;
+}
+.detail.mobile .seg {
+  height: 32px;
+}
+.detail.mobile .cap {
+  margin-top: 6px;
+  gap: 2px;
+}
 .mobile {
   /* The next photo peeks ~12 % at the right edge: swiping is discoverable. */
   --slide-w: 88%;

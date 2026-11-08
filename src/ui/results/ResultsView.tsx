@@ -218,7 +218,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       return [Math.min(peek, vh * (MID - 0.02)), MID, TOP]
     }
     const flight = Math.min(geo.top + geo.foot + 2, vh * 0.4)
-    const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 12 + geo.foot : vh * 0.7
+    const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 8 + geo.foot : vh * 0.7
     // R2R3: on a short phone the globe band above the sheet would be under ~120 px: the image step goes to
     // the top snap (the sheet meets the HUD band; the globe is simply out of view).
     const band = vh - imageSnap - useApp.getState().uiInsets.top
