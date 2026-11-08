@@ -18,7 +18,7 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Pass } from '@/types'
-import { Button, Glyph, cx, prefersReducedMotion } from '@/ui/system'
+import { Glyph, cx, prefersReducedMotion } from '@/ui/system'
 import { Ago } from './Ago'
 import { Mark } from './Mark'
 import { PhotoFrame, coordsOf } from './PhotoFrame'
@@ -26,7 +26,7 @@ import { selectQuietly } from './actions'
 import { useGallery } from './gallery'
 import { warmPhoto } from './images'
 import { filterCounts, filterPhotos, cardUrl, cropWidthKm, type Photo, type PhotoFilter } from './lib/photos'
-import { productLabel, sensorName } from './lib/captures'
+import { productLabel } from './lib/captures'
 import { dec1, int } from './lib/copy'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from './lib/time'
 import type { ResultsModel } from './model'
@@ -53,6 +53,7 @@ export interface GalleryProps {
 export function Gallery({ model, context, mobile, selectedId, onReplay, onShare }: GalleryProps) {
   const filter = useGallery((g) => g.filter)
   const storeKey = useGallery((g) => g.key)
+  const touched = useGallery((g) => g.touched)
   const detail = context === 'detail'
   // The pass view only shows photos that have a pass (the clear cover from before the window has none).
   const all = useMemo(() => (detail ? model.photos.filter((p) => !!p.pass) : model.photos), [model.photos, detail])
@@ -65,7 +66,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     if (selectedKey && !items.some((p) => p.key === selectedKey)) useGallery.setState({ filter: 'all' })
   }, [selectedKey, items])
 
-  const wantKey = selectedKey ?? storeKey ?? model.cover?.photo.key
+  // Untouched, the summary shows the cover (photo #1); once the user has moved it, the photo they left it on.
+  const wantKey = selectedKey ?? (touched ? storeKey : undefined) ?? model.cover?.photo.key
   const wantIdx = Math.max(0, items.findIndex((p) => p.key === wantKey))
   const [idx, setIdx] = useState(wantIdx)
   const idxRef = useRef(idx)
@@ -85,7 +87,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     (i: number) => {
       const p = items[i]
       if (!p) return ''
-      if (!p.pass) return 'Last clear look'
+      if (!p.pass) return `— / ${windowItems.length}`
       return `${windowItems.indexOf(p) + 1} / ${windowItems.length}`
     },
     [items, windowItems],
@@ -130,11 +132,15 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     return () => ro.disconnect()
   }, [paintChrome])
 
+  /** performance.now() of the last user input on the gallery (a scroll the browser makes on its own, a re-snap after
+   * a layout change, is not the user's: it never selects a pass or marks the gallery touched) */
+  const userAt = useRef(-Infinity)
   const goTo = useCallback(
-    (i: number, smooth = true) => {
+    (i: number, smooth = true, user = true) => {
       const track = trackRef.current
       const k = Math.min(n - 1, Math.max(0, i))
       if (!track || !geo.current.stride) return
+      if (user) userAt.current = performance.now()
       target.current = k
       const left = k * geo.current.stride
       if (Math.abs(track.scrollLeft - left) < 1) return settleRef.current()
@@ -156,9 +162,10 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     paintChrome(i)
     const p = items[i]
     if (!p) return
-    useGallery.getState().setKey(p.key, true)
+    const user = performance.now() - userAt.current < 2500
+    useGallery.getState().setKey(p.key, user)
     window.clearTimeout(selectTimer.current)
-    if (detail && p.pass && p.pass.id !== selectedId) {
+    if (user && detail && p.pass && p.pass.id !== selectedId) {
       const pass = p.pass
       selectTimer.current = window.setTimeout(() => {
         const t = trackRef.current
@@ -194,11 +201,18 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
       window.clearTimeout(timer)
       settleRef.current()
     }
+    const onInput = () => (userAt.current = performance.now())
     track.addEventListener('scroll', onScroll, { passive: true })
     track.addEventListener('scrollend', onEnd)
+    track.addEventListener('pointerdown', onInput, { passive: true })
+    track.addEventListener('touchstart', onInput, { passive: true })
+    track.addEventListener('wheel', onInput, { passive: true })
     return () => {
       track.removeEventListener('scroll', onScroll)
       track.removeEventListener('scrollend', onEnd)
+      track.removeEventListener('pointerdown', onInput)
+      track.removeEventListener('touchstart', onInput)
+      track.removeEventListener('wheel', onInput)
       cancelAnimationFrame(raf)
       window.clearTimeout(timer)
       window.clearTimeout(selectTimer.current)
@@ -215,9 +229,39 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     if (!filterChanged && target.current === wantIdx) return
     setIdx(wantIdx)
     if (!geo.current.ready) return
-    goTo(wantIdx, !filterChanged && Math.abs(wantIdx - idxRef.current) <= 3)
+    goTo(wantIdx, !filterChanged && Math.abs(wantIdx - idxRef.current) <= 3, filterChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantIdx, filter])
+
+  // The cover changed under an untouched summary gallery (the last clear look arrived after the first paint,
+  // owner D): cross-fade to it in place: the old picture fades out over the new one; nothing scrolls.
+  const coverKey = model.cover?.photo.key
+  const prevCover = useRef(coverKey)
+  useLayoutEffect(() => {
+    const prev = prevCover.current
+    prevCover.current = coverKey
+    const track = trackRef.current
+    if (detail || !prev || !coverKey || prev === coverKey || !track || useGallery.getState().touched) return
+    const viewport = track.parentElement
+    const old = track.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(prev)}"]`)
+    const first = track.children[0] as HTMLElement | undefined
+    if (viewport && old && first && typeof old.animate === 'function' && !prefersReducedMotion()) {
+      const ghost = old.cloneNode(true) as HTMLElement
+      ghost.setAttribute('aria-hidden', 'true')
+      ghost.inert = true
+      Object.assign(ghost.style, { position: 'absolute', left: '0px', top: `${first.offsetTop}px`, width: `${old.offsetWidth}px`, height: `${old.offsetHeight}px`, pointerEvents: 'none', zIndex: '1' })
+      viewport.appendChild(ghost)
+      const a = ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 240, easing: 'linear', fill: 'forwards' })
+      a.onfinish = a.oncancel = () => ghost.remove()
+    }
+    target.current = null
+    track.scrollLeft = 0
+    idxRef.current = 0
+    setIdx(0)
+    paintChrome(0)
+    useGallery.getState().setKey(coverKey, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coverKey])
 
   // Preload ±2 (decoded before they are swiped to).
   useEffect(() => {
@@ -227,7 +271,6 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     }
   }, [idx, items])
 
-  const current = items[idx]
   const open = useCallback(
     (p: Photo, el: HTMLElement) => useGallery.getState().openLightbox(p.key, el),
     [],
@@ -307,6 +350,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
               selected={detail && p.pass?.id === selectedId}
               onExpand={open}
               onReplay={hero ? onReplay : undefined}
+              onShare={hero ? onShare : undefined}
             />
           ))}
         </div>
@@ -317,34 +361,6 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
         ) : null}
       </div>
 
-      {hero && !mobile && current ? (
-        <div className={s.actions}>
-          {current.pass ? (
-            <>
-              <Button variant="primary" onClick={() => onReplay?.(current.pass!)} aria-label="Replay this pass on the globe">
-                <Glyph name="play" size={12} />
-                Replay this pass
-              </Button>
-              {onShare ? (
-                <Button onClick={() => onShare(current.pass!)}>
-                  <Glyph name="share" size={13} />
-                  Share
-                </Button>
-              ) : null}
-            </>
-          ) : (
-            <Button
-              onClick={() => {
-                const el = trackRef.current?.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(current.key)}"]`)
-                if (el) open(current, el)
-              }}
-            >
-              <Mark name="expand" size={13} />
-              View it large
-            </Button>
-          )}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -388,9 +404,10 @@ interface SlideProps {
   selected: boolean
   onExpand: (p: Photo, el: HTMLElement) => void
   onReplay?: (pass: Pass) => void
+  onShare?: (pass: Pass) => void
 }
 
-const Slide = memo(function Slide({ photo, model, context, mobile, index, total, near, current, cover, selected, onExpand, onReplay }: SlideProps) {
+const Slide = memo(function Slide({ photo, model, context, mobile, index, total, near, current, cover, selected, onExpand, onReplay, onShare }: SlideProps) {
   const detail = context === 'detail'
   const { capture, pass } = photo
   const meta = model.meta(pass?.norad ?? capture.norad ?? 0)
@@ -401,6 +418,11 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
   const lead = cover === 'closest' ? 'Closest look' : cover === 'lastClear' ? 'Last clear look' : cover === 'clouded' ? 'Clouded over' : undefined
   const label = `${lead ? `${lead}: ` : ''}${meta.name}, ${t.day} ${t.time}${index >= 0 ? `, photo ${index + 1} of ${total}` : ''}`
   const replay = !detail && pass && onReplay ? () => onReplay(pass) : undefined
+  const frameRef = useRef<HTMLDivElement>(null)
+  const onView = () => {
+    const el = frameRef.current?.querySelector<HTMLElement>('[data-photo-frame]')
+    if (el) onExpand(photo, el)
+  }
 
   let caption: ReactNode
   if (detail) {
@@ -417,54 +439,60 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
         </span>
       </figcaption>
     )
-  } else if (mobile) {
+  } else {
+    // The summary card: two lines and one tap target (Replay this pass on the globe; the last clear look, which
+    // has no pass, opens large instead). Laptops add Share.
+    const note = cover === 'lastClear' ? (model.windowPhotos ? 'This week’s passes saw mostly cloud.' : 'Here’s the last clear look.') : undefined
     caption = (
       <figcaption className={s.mCap}>
         <span className={s.mLines}>
           <span className={s.mLine}>
             {lead ? <b className={cx(s.lead, cover === 'clouded' && s.warn)}>{lead} · </b> : null}
-            <b>{meta.name}</b> · {int(capture.gsdM)} m
+            <b>{meta.name}</b> · {t.day}
+            {mobile ? null : (
+              <>
+                {' · '}
+                {t.time} {t.zone}
+              </>
+            )}
           </span>
-          <span className={s.mLine}>
-            {t.day} · {t.time}
-            <span className={s.dim}>
-              {' · '}
-              <Ago t={when} base={model.clock} />
+          {note ? (
+            <span className={cx(s.mLine, s.note)}>{note}</span>
+          ) : (
+            <span className={s.mLine}>
+              {mobile ? `${t.time} · ` : null}
+              {int(capture.gsdM)} m
+              <span className={s.dim}>
+                {' · '}
+                <Ago t={when} base={model.clock} />
+              </span>
+              {status ? <span className={cx(photo.clouded && s.warn)}> · {status}</span> : null}
             </span>
-            {status ? <span className={cx(photo.clouded && s.warn)}> · {status}</span> : null}
-          </span>
+          )}
         </span>
         {replay ? (
           <button type="button" className={s.mReplay} onClick={replay} tabIndex={current ? 0 : -1} aria-label={`Replay this pass on the globe: ${meta.name}, ${t.day} ${t.time}`}>
             <Glyph name="play" size={10} />
             Replay<span className={s.tabletOnly}> this pass</span>
           </button>
+        ) : (
+          <button type="button" className={s.mReplay} onClick={onView} tabIndex={current ? 0 : -1} aria-label="View the photo large">
+            <Mark name="expand" size={11} />
+            View
+          </button>
+        )}
+        {!mobile && pass && onShare ? (
+          <button type="button" className={s.mShare} onClick={() => onShare(pass)} tabIndex={current ? 0 : -1} aria-label="Share this pass" title="Share this pass">
+            <Glyph name="share" size={13} />
+          </button>
         ) : null}
-      </figcaption>
-    )
-  } else {
-    caption = (
-      <figcaption className={s.cap}>
-        <span className={s.capRow}>
-          <span className={s.capMain}>
-            {lead ? <b className={cx(s.lead, cover === 'clouded' && s.warn)}>{lead} · </b> : null}
-            <b>{meta.name}</b>
-          </span>
-          <Ago t={when} base={model.clock} className={s.ago} />
-        </span>
-        <span className={s.capRow}>
-          <span className={s.capMain}>
-            {t.day} · {t.time} {t.zone} · {int(capture.gsdM)} m · {sensorName(capture)}
-          </span>
-          {status ? <span className={cx(s.status, photo.clouded && s.warn)}>{status}</span> : null}
-        </span>
       </figcaption>
     )
   }
 
   return (
     <figure className={s.slide} role="group" aria-roledescription="slide" aria-label={label} aria-hidden={!current || undefined} data-current={current || undefined}>
-      <div className={s.figure} data-image-end={current && detail ? '' : undefined}>
+      <div ref={frameRef} className={s.figure} data-image-end={current && detail ? '' : undefined}>
         <PhotoFrame
           photo={photo}
           model={model}
@@ -479,7 +507,6 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
           className={detail ? s.square : s.heroFrame}
         />
         {caption}
-        {!detail && cover === 'lastClear' ? <p className={s.coverNote}>{model.windowPhotos ? 'This week’s passes saw mostly cloud.' : 'Here’s the last clear look.'}</p> : null}
       </div>
     </figure>
   )

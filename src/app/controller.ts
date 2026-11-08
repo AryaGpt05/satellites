@@ -101,6 +101,7 @@ export async function boot() {
   if (booted) return
   booted = true
   const bootStart = performance.now()
+  mark('boot')
   const target = readUrlTarget(location.search)
   // Everything that can overlap does: the share lookup, the catalog, the globe's first light, the fonts.
   const shareP: Promise<Share | null> | null = target?.kind === 'share' ? getShare(target.id).catch(() => null) : null
@@ -151,6 +152,7 @@ export async function boot() {
     useApp.getState().setPhase('error', CATALOG_ERROR)
     return
   }
+  mark('boot-landing')
   useApp.getState().setPhase('idle')
   afterLandingEntrance(() => {
     void loadEngine().then(warmPassWorkers, () => undefined)
@@ -169,17 +171,16 @@ function shareRun(share: Share): { place: Place; opts: RunOpts; share: Share } {
  * R2K1 (c): the share lookup outlived boot's cap and the landing is up. If it answers within 15 s of boot and
  * the visitor hasn't started anything (still on the landing, About closed, no field focused, the search field
  * empty, the address bar still the share link), open it exactly as the on-time path would. Otherwise drop it:
- * a search replaces ?s= in the address bar (writeUrl), and an unknown share cleans it.
+ * a search replaces ?s= in the address bar (writeUrl). The address bar is never cleaned on this path: a late
+ * null can't tell "unknown" from "timed out".
  */
 function adoptLateShare(shareP: Promise<Share | null>, bootStart: number) {
   void shareP.then((share) => {
     if (performance.now() - bootStart > LATE_SHARE_MS) return
     const st = useApp.getState()
+    // A late null is unknown OR a lookup that timed out: either way ?s= stays (a reload may still find it).
+    if (!share) return
     const linked = new URLSearchParams(location.search).has('s')
-    if (!share) {
-      if (linked && st.phase === 'idle') history.replaceState(null, '', location.pathname)
-      return
-    }
     if (!linked || st.phase !== 'idle' || st.aboutOpen || landingTouched()) return
     const run = shareRun(share)
     st.setShared(share)
