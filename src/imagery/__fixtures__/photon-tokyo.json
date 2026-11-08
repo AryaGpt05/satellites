@@ -1,0 +1,181 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 1543125,
+    "osm_key": "place",
+    "osm_value": "province",
+    "type": "city",
+    "name": "Tokyo",
+    "country": "Japan",
+    "countrycode": "JP",
+    "extra": {
+     "admin_level": "4"
+    },
+    "extent": [
+     135.8536855,
+     35.8984245,
+     154.205541,
+     20.2145811
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.7638947,
+     35.6768601
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "N",
+    "osm_id": 2149761647,
+    "osm_key": "railway",
+    "osm_value": "station",
+    "type": "house",
+    "housenumber": "1",
+    "name": "Tōkyō",
+    "street": "9",
+    "locality": "Marunouchi 1",
+    "district": "Chiyoda",
+    "city": "Tokyo",
+    "state": "東京都",
+    "country": "Japan",
+    "postcode": "100-0005",
+    "countrycode": "JP"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.766706,
+     35.6812546
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 17864987,
+    "osm_key": "place",
+    "osm_value": "island",
+    "type": "other",
+    "name": "Tokyo International Airport",
+    "locality": "羽田空港",
+    "city": "Tokyo",
+    "country": "Japan",
+    "postcode": "144-0041",
+    "countrycode": "JP",
+    "extent": [
+     139.7539835,
+     35.5704477,
+     139.8257329,
+     35.5209727
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.7760994,
+     35.5456924
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 13904308,
+    "osm_key": "natural",
+    "osm_value": "bay",
+    "type": "other",
+    "name": "Tokyo Bay",
+    "state": "Chiba Prefecture",
+    "country": "Japan",
+    "countrycode": "JP",
+    "extent": [
+     139.6215726,
+     35.68371,
+     140.1270476,
+     35.2562939
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.8477024,
+     35.4700117
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "W",
+    "osm_id": 20028328,
+    "osm_key": "leisure",
+    "osm_value": "stadium",
+    "type": "house",
+    "housenumber": "61",
+    "name": "Tokyo Dome",
+    "street": "3",
+    "locality": "Kōraku 1",
+    "district": "Bunkyo",
+    "city": "Tokyo",
+    "state": "東京都",
+    "country": "Japan",
+    "postcode": "112-0004",
+    "countrycode": "JP",
+    "extent": [
+     139.75078,
+     35.7064952,
+     139.7531508,
+     35.704533
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.7519705,
+     35.7055706
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "W",
+    "osm_id": 25805283,
+    "osm_key": "highway",
+    "osm_value": "trunk",
+    "type": "street",
+    "name": "Tokyo Kanjo",
+    "locality": "Minamihashimoto 2-chome",
+    "district": "Chuo Ward",
+    "city": "Sagamihara",
+    "state": "Kanagawa Prefecture",
+    "country": "Japan",
+    "postcode": "252-0253",
+    "countrycode": "JP",
+    "extent": [
+     139.3495094,
+     35.5845117,
+     139.3508173,
+     35.5841288
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.3501652,
+     35.5843268
+    ]
+   }
+  }
+ ]
+}

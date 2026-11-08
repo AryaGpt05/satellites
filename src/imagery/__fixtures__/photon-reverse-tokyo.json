@@ -1,0 +1,36 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "W",
+    "osm_id": 48390188,
+    "osm_key": "leisure",
+    "osm_value": "sports_centre",
+    "type": "house",
+    "name": "日本大学鶴ヶ丘高等学校 総合運動場",
+    "street": "宮前橋",
+    "locality": "Izumi 2-chome",
+    "district": "Suginami",
+    "city": "Tokyo",
+    "country": "Japan",
+    "postcode": "168-0063",
+    "countrycode": "JP",
+    "extent": [
+     139.6486935,
+     35.6769342,
+     139.650145,
+     35.6754143
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     139.6494986,
+     35.6762025
+    ]
+   }
+  }
+ ]
+}

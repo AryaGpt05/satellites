@@ -1,0 +1,188 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 2062153,
+    "osm_key": "place",
+    "osm_value": "city",
+    "type": "city",
+    "name": "Kitchener",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "countrycode": "CA",
+    "extra": {
+     "admin_level": "8"
+    },
+    "extent": [
+     -80.5734577,
+     43.5068282,
+     -80.3784145,
+     43.3538756
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.4927815,
+     43.451291
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "N",
+    "osm_id": 7002769042,
+    "osm_key": "railway",
+    "osm_value": "station",
+    "type": "house",
+    "housenumber": "126",
+    "name": "Kitchener",
+    "street": "Weber Street West",
+    "district": "Mt. Hope",
+    "city": "Kitchener",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "postcode": "N2H 3Z9",
+    "countrycode": "CA"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.4931286,
+     43.455625
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 13094226,
+    "osm_key": "boundary",
+    "osm_value": "political",
+    "type": "other",
+    "name": "Kitchener Centre",
+    "city": "Kitchener",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "countrycode": "CA",
+    "extent": [
+     -80.5429096,
+     43.5068282,
+     -80.3920013,
+     43.42331
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.4615382,
+     43.4651357
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 13094227,
+    "osm_key": "boundary",
+    "osm_value": "political",
+    "type": "other",
+    "name": "Kitchener South—Hespeler",
+    "city": "Kitchener",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "countrycode": "CA",
+    "extent": [
+     -80.51412,
+     43.4723418,
+     -80.2833076,
+     43.3580259
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.4058105,
+     43.415134
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "W",
+    "osm_id": 67791227,
+    "osm_key": "landuse",
+    "osm_value": "recreation_ground",
+    "type": "other",
+    "housenumber": "400",
+    "name": "Kitchener Memorial Auditorium Complex",
+    "street": "East Avenue",
+    "district": "Auditorium",
+    "city": "Kitchener",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "postcode": "N2H 1Z6",
+    "countrycode": "CA",
+    "extent": [
+     -80.4691197,
+     43.4502907,
+     -80.4630748,
+     43.4452237
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.4657825,
+     43.4476101
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "W",
+    "osm_id": 138175760,
+    "osm_key": "amenity",
+    "osm_value": "townhall",
+    "type": "house",
+    "housenumber": "200",
+    "name": "Kitchener City Hall",
+    "street": "King Street West",
+    "locality": "Downtown",
+    "district": "City Commercial Core",
+    "city": "Kitchener",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "postcode": "N2G 4G7",
+    "countrycode": "CA",
+    "extent": [
+     -80.4932024,
+     43.4521752,
+     -80.4917938,
+     43.4511345
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.4921882,
+     43.4516223
+    ]
+   }
+  }
+ ]
+}

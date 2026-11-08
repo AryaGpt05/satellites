@@ -1,0 +1,1005 @@
+{
+ "type": "FeatureCollection",
+ "links": [
+  {
+   "rel": "root",
+   "type": "application/json",
+   "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+  },
+  {
+   "rel": "self",
+   "type": "application/geo+json",
+   "href": "https://planetarycomputer.microsoft.com/api/stac/v1/search?collections=landsat-c2-l2"
+  }
+ ],
+ "features": [
+  {
+   "id": "LC09_L2SP_018030_20261031_02_T1",
+   "bbox": [
+    -81.55873136510222,
+    42.10110498487738,
+    -78.6550822603328,
+    44.240305015122615
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC09_L2SP_018030_20261031_02_T1"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC09_L2SP_018030_20261031_20261101_02_T1_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC09_L2SP_018030_20261031_20261101_02_T1_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC09_L2SP_018030_20261031_02_T1",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/018/030/LC09_L2SP_018030_20261031_20261101_02_T1/LC09_L2SP_018030_20261031_20261101_02_T1_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC09_L2SP_018030_20261031_02_T1&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.959113910624,
+       44.23571912788521
+      ],
+      [
+       -81.51323349788261,
+       42.52300374741167
+      ],
+      [
+       -79.30930168035599,
+       42.11695593704801
+      ],
+      [
+       -78.69208340908006,
+       43.826709183101
+      ],
+      [
+       -80.959113910624,
+       44.23571912788521
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-06T09:20:08.152043Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-31T16:03:53.109576Z",
+    "platform": "landsat-9",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7841,
+     7731
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 11.68,
+    "proj:transform": [
+     30.0,
+     0.0,
+     455385.0,
+     0.0,
+     -30.0,
+     4898715.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC90180302026304LGN00",
+    "landsat:wrs_path": "018",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 162.94058204,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 30.92594659,
+    "landsat:cloud_cover_land": 7.38,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T1"
+   }
+  },
+  {
+   "id": "LC08_L2SP_018030_20261023_02_T1",
+   "bbox": [
+    -81.5399713643129,
+    42.100744984720755,
+    -78.63621225267373,
+    44.24309501527924
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_018030_20261023_02_T1"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC08_L2SP_018030_20261023_20261030_02_T1_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC08_L2SP_018030_20261023_20261030_02_T1_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC08_L2SP_018030_20261023_02_T1",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/018/030/LC08_L2SP_018030_20261023_20261030_02_T1/LC08_L2SP_018030_20261023_20261030_02_T1_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC08_L2SP_018030_20261023_02_T1&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.94746603140528,
+       44.237875117625975
+      ],
+      [
+       -81.50229163866655,
+       42.52494344886982
+      ],
+      [
+       -79.3063709205896,
+       42.11799343505896
+      ],
+      [
+       -78.68869697208734,
+       43.827451022268704
+      ],
+      [
+       -80.94746603140528,
+       44.237875117625975
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-06T09:20:06.772114Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-23T16:03:49.724746Z",
+    "platform": "landsat-8",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7851,
+     7731
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 12.82,
+    "proj:transform": [
+     30.0,
+     0.0,
+     456885.0,
+     0.0,
+     -30.0,
+     4899015.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC80180302026296LGN00",
+    "landsat:wrs_path": "018",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 162.02907337,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 33.5083208,
+    "landsat:cloud_cover_land": 11.34,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T1"
+   }
+  },
+  {
+   "id": "LC09_L2SP_019030_20261022_02_T1",
+   "bbox": [
+    -83.1551613415116,
+    42.09378502471982,
+    -80.2169722173316,
+    44.24978497528018
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC09_L2SP_019030_20261022_02_T1"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC09_L2SP_019030_20261022_20261023_02_T1_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC09_L2SP_019030_20261022_20261023_02_T1_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC09_L2SP_019030_20261022_02_T1",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/019/030/LC09_L2SP_019030_20261022_20261023_02_T1/LC09_L2SP_019030_20261022_20261023_02_T1_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC09_L2SP_019030_20261022_02_T1&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -82.51103426252716,
+       44.23599544823263
+      ],
+      [
+       -83.06513606279326,
+       42.52310280665549
+      ],
+      [
+       -80.86070372418662,
+       42.117170032772336
+      ],
+      [
+       -80.24452918064101,
+       43.826993387170134
+      ],
+      [
+       -82.51103426252716,
+       44.23599544823263
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-05T10:17:28.180980Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-22T16:10:05.021638Z",
+    "platform": "landsat-9",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7921,
+     7821
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 0.17,
+    "proj:transform": [
+     30.0,
+     0.0,
+     327885.0,
+     0.0,
+     -30.0,
+     4899915.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC90190302026295LGN00",
+    "landsat:wrs_path": "019",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 161.88691574,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 33.83849575,
+    "landsat:cloud_cover_land": 0.02,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T1"
+   }
+  },
+  {
+   "id": "LC09_L2SP_018030_20261015_02_T1",
+   "bbox": [
+    -81.57751136587771,
+    42.1014649850742,
+    -78.67384225939762,
+    44.2402050149258
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC09_L2SP_018030_20261015_02_T1"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC09_L2SP_018030_20261015_20261021_02_T1_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC09_L2SP_018030_20261015_20261021_02_T1_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC09_L2SP_018030_20261015_02_T1",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/018/030/LC09_L2SP_018030_20261015_20261021_02_T1/LC09_L2SP_018030_20261015_20261021_02_T1_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC09_L2SP_018030_20261015_02_T1&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.97714636459659,
+       44.2357241585778
+      ],
+      [
+       -81.53149282782456,
+       42.52265034342083
+      ],
+      [
+       -79.32781619777562,
+       42.1166869477108
+      ],
+      [
+       -78.71037133892203,
+       43.82653701757267
+      ],
+      [
+       -80.97714636459659,
+       44.2357241585778
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-06T09:20:07.539096Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-15T16:03:55.928172Z",
+    "platform": "landsat-9",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7841,
+     7731
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 84.85,
+    "proj:transform": [
+     30.0,
+     0.0,
+     453885.0,
+     0.0,
+     -30.0,
+     4898715.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC90180302026288LGN00",
+    "landsat:wrs_path": "018",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 160.7717007,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 36.21771884,
+    "landsat:cloud_cover_land": 89.48,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T1"
+   }
+  },
+  {
+   "id": "LC08_L2SP_019030_20261014_02_T2",
+   "bbox": [
+    -83.1402413342821,
+    42.09134502412519,
+    -80.20190220817567,
+    44.252384975874804
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_019030_20261014_02_T2"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC08_L2SP_019030_20261014_20261021_02_T2_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC08_L2SP_019030_20261014_20261021_02_T2_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC08_L2SP_019030_20261014_02_T2",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/019/030/LC08_L2SP_019030_20261014_20261021_02_T2/LC08_L2SP_019030_20261014_20261021_02_T2_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC08_L2SP_019030_20261014_02_T2&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -82.50132493963639,
+       44.2382842235355
+      ],
+      [
+       -83.05607275676647,
+       42.52515696047966
+      ],
+      [
+       -80.85961261724361,
+       42.11824948061124
+      ],
+      [
+       -80.24339632184277,
+       43.82806634246837
+      ],
+      [
+       -82.50132493963639,
+       44.2382842235355
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-05T10:17:08.048715Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-14T16:10:01.046024Z",
+    "platform": "landsat-8",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7941,
+     7821
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 91.1,
+    "proj:transform": [
+     30.0,
+     0.0,
+     329085.0,
+     0.0,
+     -30.0,
+     4900215.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC80190302026287LGN00",
+    "landsat:wrs_path": "019",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 160.59520983,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 36.56162111,
+    "landsat:cloud_cover_land": 94.2,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T2"
+   }
+  },
+  {
+   "id": "LC08_L2SP_018030_20261007_02_T1",
+   "bbox": [
+    -81.55500136494628,
+    42.10103498487177,
+    -78.65122225191575,
+    44.24302501512824
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_018030_20261007_02_T1"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC08_L2SP_018030_20261007_20261014_02_T1_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC08_L2SP_018030_20261007_20261014_02_T1_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC08_L2SP_018030_20261007_02_T1",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/018/030/LC08_L2SP_018030_20261007_20261014_02_T1/LC08_L2SP_018030_20261007_20261014_02_T1_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC08_L2SP_018030_20261007_02_T1&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.96174206819087,
+       44.23815088469244
+      ],
+      [
+       -81.51690364529735,
+       42.52514864604198
+      ],
+      [
+       -79.32125105179051,
+       42.11794197464333
+      ],
+      [
+       -78.70360916542613,
+       43.82775179249611
+      ],
+      [
+       -80.96174206819087,
+       44.23815088469244
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-05T09:29:54.756066Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-07T16:03:50.245698Z",
+    "platform": "landsat-8",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7851,
+     7731
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 13.26,
+    "proj:transform": [
+     30.0,
+     0.0,
+     455685.0,
+     0.0,
+     -30.0,
+     4899015.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC80180302026280LGN00",
+    "landsat:wrs_path": "018",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 159.19699069,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 39.00276253,
+    "landsat:cloud_cover_land": 11.1,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T1"
+   }
+  },
+  {
+   "id": "LC09_L2SP_019030_20261006_02_T1",
+   "bbox": [
+    -83.17017134103375,
+    42.093525025312665,
+    -80.2320022179184,
+    44.24989497468734
+   ],
+   "type": "Feature",
+   "links": [
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/"
+    },
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC09_L2SP_019030_20261006_02_T1"
+    },
+    {
+     "rel": "cite-as",
+     "href": "https://doi.org/10.5066/P9OGBGM6",
+     "title": "Landsat 8-9 OLI/TIRS Collection 2 Level-2"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr/items/LC09_L2SP_019030_20261006_20261007_02_T1_SR",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "via",
+     "href": "https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-st/items/LC09_L2SP_019030_20261006_20261007_02_T1_ST",
+     "type": "application/json",
+     "title": "USGS STAC Item"
+    },
+    {
+     "rel": "preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/map?collection=landsat-c2-l2&item=LC09_L2SP_019030_20261006_02_T1",
+     "title": "Map of item",
+     "type": "text/html"
+    }
+   ],
+   "assets": {
+    "qa_pixel": {
+     "href": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2026/019/030/LC09_L2SP_019030_20261006_20261007_02_T1/LC09_L2SP_019030_20261006_20261007_02_T1_QA_PIXEL.TIF",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "roles": [
+      "cloud",
+      "cloud-shadow",
+      "snow-ice",
+      "water-mask"
+     ],
+     "title": "Pixel Quality Assessment Band"
+    },
+    "rendered_preview": {
+     "title": "Rendered preview",
+     "href": "https://planetarycomputer.microsoft.com/api/data/v1/item/preview.png?collection=landsat-c2-l2&item=LC09_L2SP_019030_20261006_02_T1&assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55&format=png",
+     "roles": [
+      "overview"
+     ],
+     "type": "image/png"
+    }
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -82.52454692113857,
+       44.23554578112233
+      ],
+      [
+       -83.07864137585501,
+       42.522858536476726
+      ],
+      [
+       -80.87485817381628,
+       42.11664595336583
+      ],
+      [
+       -80.25833951700886,
+       43.826543623402415
+      ],
+      [
+       -82.52454692113857,
+       44.23554578112233
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2",
+   "properties": {
+    "gsd": 30,
+    "created": "2026-11-05T10:17:22.667709Z",
+    "sci:doi": "10.5066/P9OGBGM6",
+    "datetime": "2026-10-06T16:10:06.116246Z",
+    "platform": "landsat-9",
+    "proj:epsg": 32617,
+    "proj:shape": [
+     7921,
+     7821
+    ],
+    "description": "Landsat Collection 2 Level-2",
+    "instruments": [
+     "oli",
+     "tirs"
+    ],
+    "eo:cloud_cover": 45.97,
+    "proj:transform": [
+     30.0,
+     0.0,
+     326685.0,
+     0.0,
+     -30.0,
+     4899915.0
+    ],
+    "view:off_nadir": 0,
+    "landsat:wrs_row": "030",
+    "landsat:scene_id": "LC90190302026279LGN00",
+    "landsat:wrs_path": "019",
+    "landsat:wrs_type": "2",
+    "view:sun_azimuth": 158.97808333,
+    "landsat:correction": "L2SP",
+    "view:sun_elevation": 39.35164188,
+    "landsat:cloud_cover_land": 34.7,
+    "landsat:collection_number": "02",
+    "landsat:collection_category": "T1"
+   }
+  }
+ ],
+ "numberReturned": 7
+}

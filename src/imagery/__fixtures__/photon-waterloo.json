@@ -1,0 +1,195 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 129219,
+    "osm_key": "place",
+    "osm_value": "city",
+    "type": "city",
+    "name": "Waterloo",
+    "county": "Black Hawk",
+    "state": "Iowa",
+    "country": "United States",
+    "countrycode": "US",
+    "extra": {
+     "admin_level": "8"
+    },
+    "extent": [
+     -92.4368211,
+     42.5704868,
+     -92.2488646,
+     42.4211576
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -92.3328743,
+     42.498275
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 2062154,
+    "osm_key": "place",
+    "osm_value": "city",
+    "type": "city",
+    "name": "Waterloo",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "countrycode": "CA",
+    "extra": {
+     "admin_level": "8"
+    },
+    "extent": [
+     -80.6260904,
+     43.5312209,
+     -80.4674214,
+     43.4322663
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.5222961,
+     43.4652699
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 17099832,
+    "osm_key": "boundary",
+    "osm_value": "administrative",
+    "type": "district",
+    "name": "Waterloo",
+    "city": "Waterloo",
+    "county": "Nivelles",
+    "state": "Walloon Brabant",
+    "country": "Belgium",
+    "postcode": "1410",
+    "countrycode": "BE",
+    "extra": {
+     "admin_level": "9"
+    },
+    "extent": [
+     4.3549831,
+     50.7359165,
+     4.4413224,
+     50.6706279
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     4.4084276,
+     50.7032864
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 191673,
+    "osm_key": "place",
+    "osm_value": "town",
+    "type": "city",
+    "name": "Waterloo",
+    "county": "Nivelles",
+    "state": "Walloon Brabant",
+    "country": "Belgium",
+    "postcode": "1410",
+    "countrycode": "BE",
+    "extra": {
+     "admin_level": "8"
+    },
+    "extent": [
+     4.3549831,
+     50.7359165,
+     4.4413224,
+     50.6706279
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     4.3977588,
+     50.7175395
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 2062151,
+    "osm_key": "place",
+    "osm_value": "county",
+    "type": "county",
+    "name": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "countrycode": "CA",
+    "extra": {
+     "admin_level": "6"
+    },
+    "extent": [
+     -80.8690216,
+     43.6895905,
+     -80.1892866,
+     43.2668244
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.5194113,
+     43.4586422
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "R",
+    "osm_id": 176091,
+    "osm_key": "place",
+    "osm_value": "town",
+    "type": "district",
+    "name": "Waterloo",
+    "city": "Waterloo",
+    "county": "Seneca",
+    "state": "New York",
+    "country": "United States",
+    "postcode": "13165",
+    "countrycode": "US",
+    "extra": {
+     "admin_level": "8"
+    },
+    "extent": [
+     -76.877263,
+     42.917773,
+     -76.841833,
+     42.892639
+    ]
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -76.8627887,
+     42.9046933
+    ]
+   }
+  }
+ ]
+}

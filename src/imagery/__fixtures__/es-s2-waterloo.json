@@ -1,0 +1,1054 @@
+{
+ "type": "FeatureCollection",
+ "stac_version": "1.0.0",
+ "stac_extensions": [],
+ "numberMatched": 7,
+ "numberReturned": 7,
+ "features": [
+  {
+   "type": "Feature",
+   "id": "S2B_T17TNJ_20261106T161753_L2A",
+   "properties": {
+    "created": "2026-11-06T21:12:40.755Z",
+    "platform": "sentinel-2b",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 85.635298,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.75639,
+     "lon": -80.31827
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 103.24192260143946,
+    "view:incidence_angle": 5.2016889671540865,
+    "view:sun_azimuth": 167.97026495223,
+    "view:sun_elevation": 29.2934520718594,
+    "s2:tile_id": "S2B_OPER_MSI_L2A_TL_2BPS_20261106T195148_A050502_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0213,
+    "s2:nodata_pixel_percentage": 0,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 4.688186,
+    "s2:vegetation_percentage": 1.188758,
+    "s2:not_vegetated_percentage": 3.676381,
+    "s2:water_percentage": 0.6767,
+    "s2:unclassified_percentage": 4.132219,
+    "s2:medium_proba_clouds_percentage": 14.28681,
+    "s2:high_proba_clouds_percentage": 71.050447,
+    "s2:thin_cirrus_percentage": 0.298038,
+    "s2:snow_ice_percentage": 1e-05,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2B_MSIL2A_20261106T161449_N0513_R140_T17TNJ_20261106T195148.SAFE",
+    "s2:generation_time": "2026-11-06T19:51:48.000000Z",
+    "s2:datatake_id": "GS2B_20261106T161449_050502_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2B_OPER_MSI_L2A_DS_2BPS_20261106T195148_S20261106T161753_N05.13",
+    "s2:reflectance_conversion_factor": 1.01635000373454,
+    "datetime": "2026-11-06T16:21:16.050000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/db9faa41209bc6cd1e8d1e877a732d92",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-11-06T21:12:40.755Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.00023411279822,
+       43.26479938161411
+      ],
+      [
+       -79.64751808492416,
+       43.256803441562624
+      ],
+      [
+       -79.6250726718658,
+       44.24513356156721
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2B_T17TNJ_20261106T161753_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2B_T17TNJ_20261106T161753_L2A/S2B_T17TNJ_20261106T161753_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/11/6/0/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2B_T17TNJ_20261106T161753_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2B_T17TNJ_20261106T161753_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2B_T17TNJ_20261106T161753_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.256803,
+    -79.625073,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  },
+  {
+   "type": "Feature",
+   "id": "S2C_T17TNJ_20261104T162503_L2A",
+   "properties": {
+    "created": "2026-11-04T21:10:46.587Z",
+    "platform": "sentinel-2c",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 99.987924,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.79587,
+     "lon": -80.57003
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 287.8793325702399,
+    "view:incidence_angle": 9.070010291444401,
+    "view:sun_azimuth": 170.600318843339,
+    "view:sun_elevation": 30.2229158546034,
+    "s2:tile_id": "S2C_OPER_MSI_L2A_TL_2CPS_20261104T195405_A011307_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0181,
+    "s2:nodata_pixel_percentage": 38.01741,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 0.00045,
+    "s2:vegetation_percentage": 0.000241,
+    "s2:not_vegetated_percentage": 0.000214,
+    "s2:water_percentage": 0.006295,
+    "s2:unclassified_percentage": 0.004871,
+    "s2:medium_proba_clouds_percentage": 46.39225,
+    "s2:high_proba_clouds_percentage": 48.577335,
+    "s2:thin_cirrus_percentage": 5.01834,
+    "s2:snow_ice_percentage": 0,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2C_MSIL2A_20261104T162441_N0513_R040_T17TNJ_20261104T195405.SAFE",
+    "s2:generation_time": "2026-11-04T19:54:05.000000Z",
+    "s2:datatake_id": "GS2C_20261104T162441_011307_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2C_OPER_MSI_L2A_DS_2CPS_20261104T195405_S20261104T162503_N05.13",
+    "s2:reflectance_conversion_factor": 1.01531196229917,
+    "datetime": "2026-11-04T16:31:07.021000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/997fef7149365581cbbb0a15df9436dc",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-11-04T21:10:46.587Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.00023411624899,
+       43.26569985955691
+      ],
+      [
+       -80.34893089682717,
+       43.264386080111606
+      ],
+      [
+       -79.95996482631179,
+       44.248673925352776
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2C_T17TNJ_20261104T162503_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2C_T17TNJ_20261104T162503_L2A/S2C_T17TNJ_20261104T162503_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/11/4/0/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2C_T17TNJ_20261104T162503_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2C_T17TNJ_20261104T162503_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2C_T17TNJ_20261104T162503_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.264386,
+    -79.959965,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  },
+  {
+   "type": "Feature",
+   "id": "S2C_T17TNJ_20261101T161418_L2A",
+   "properties": {
+    "created": "2026-11-02T18:28:34.917Z",
+    "platform": "sentinel-2c",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 25.456536,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.75639,
+     "lon": -80.31827
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 101.728809179313,
+    "view:incidence_angle": 5.252988733151843,
+    "view:sun_azimuth": 167.686831603978,
+    "view:sun_elevation": 30.814575159164498,
+    "s2:tile_id": "S2C_OPER_MSI_L2A_TL_2CPS_20261102T164803_A011264_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0219,
+    "s2:nodata_pixel_percentage": 0,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 0.353366,
+    "s2:vegetation_percentage": 26.21991,
+    "s2:not_vegetated_percentage": 43.452859,
+    "s2:water_percentage": 1.868322,
+    "s2:unclassified_percentage": 2.63667,
+    "s2:medium_proba_clouds_percentage": 4.5297,
+    "s2:high_proba_clouds_percentage": 10.466923,
+    "s2:thin_cirrus_percentage": 10.459913,
+    "s2:snow_ice_percentage": 0.000813,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2C_MSIL2A_20261101T161421_N0513_R140_T17TNJ_20261102T164803.SAFE",
+    "s2:generation_time": "2026-11-02T16:48:03.000000Z",
+    "s2:datatake_id": "GS2C_20261101T161421_011264_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2C_OPER_MSI_L2A_DS_2CPS_20261102T164803_S20261101T161418_N05.13",
+    "s2:reflectance_conversion_factor": 1.01371484961635,
+    "datetime": "2026-11-01T16:21:11.962000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/ab75dc2c6f27b3e85719be6161c3172f",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-11-02T18:28:34.917Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.00023411279822,
+       43.26479938161411
+      ],
+      [
+       -79.64751808492416,
+       43.256803441562624
+      ],
+      [
+       -79.6250726718658,
+       44.24513356156721
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2C_T17TNJ_20261101T161418_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2C_T17TNJ_20261101T161418_L2A/S2C_T17TNJ_20261101T161418_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/11/1/0/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2C_T17TNJ_20261101T161418_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2C_T17TNJ_20261101T161418_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/11/S2C_T17TNJ_20261101T161418_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.256803,
+    -79.625073,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  },
+  {
+   "type": "Feature",
+   "id": "S2B_T17TNJ_20261030T162645_L2A",
+   "properties": {
+    "created": "2026-10-30T21:19:20.001Z",
+    "platform": "sentinel-2b",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 80.803245,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.79616,
+     "lon": -80.57327
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 287.0028287523762,
+    "view:incidence_angle": 9.128752655935312,
+    "view:sun_azimuth": 170.375461983588,
+    "view:sun_elevation": 31.792423132196397,
+    "s2:tile_id": "S2B_OPER_MSI_L2A_TL_2BPS_20261030T200303_A050402_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0309,
+    "s2:nodata_pixel_percentage": 38.497701,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 7.437524,
+    "s2:vegetation_percentage": 3.610672,
+    "s2:not_vegetated_percentage": 5.217638,
+    "s2:water_percentage": 0.128112,
+    "s2:unclassified_percentage": 2.802806,
+    "s2:medium_proba_clouds_percentage": 13.448641,
+    "s2:high_proba_clouds_percentage": 67.315525,
+    "s2:thin_cirrus_percentage": 0.039079,
+    "s2:snow_ice_percentage": 0,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2B_MSIL2A_20261030T162419_N0513_R040_T17TNJ_20261030T200303.SAFE",
+    "s2:generation_time": "2026-10-30T20:03:03.000000Z",
+    "s2:datatake_id": "GS2B_20261030T162419_050402_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2B_OPER_MSI_L2A_DS_2BPS_20261030T200303_S20261030T162645_N05.13",
+    "s2:reflectance_conversion_factor": 1.01263774347094,
+    "datetime": "2026-10-30T16:31:12.348000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/b9da6bb221276c89f5097b9997a6bae1",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-10-30T21:19:20.001Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.000234116249,
+       43.265699859674
+      ],
+      [
+       -80.35533763231787,
+       43.2644225596623
+      ],
+      [
+       -79.96672731236868,
+       44.24873529944557
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2B_T17TNJ_20261030T162645_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2B_T17TNJ_20261030T162645_L2A/S2B_T17TNJ_20261030T162645_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/10/30/0/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2B_T17TNJ_20261030T162645_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2B_T17TNJ_20261030T162645_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2B_T17TNJ_20261030T162645_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.264423,
+    -79.966727,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  },
+  {
+   "type": "Feature",
+   "id": "S2A_T17TNJ_20261027T162654_L2A",
+   "properties": {
+    "created": "2026-10-28T00:45:42.092Z",
+    "platform": "sentinel-2a",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 38.879627,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.79606,
+     "lon": -80.57249
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 287.7760364360986,
+    "view:incidence_angle": 9.136590414305475,
+    "view:sun_azimuth": 170.195806038901,
+    "view:sun_elevation": 32.7747547999762,
+    "s2:tile_id": "S2A_OPER_MSI_L2A_TL_2APS_20261027T231305_A059268_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0302,
+    "s2:nodata_pixel_percentage": 38.386965,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 0.976746,
+    "s2:vegetation_percentage": 24.392794,
+    "s2:not_vegetated_percentage": 34.012568,
+    "s2:water_percentage": 0.209755,
+    "s2:unclassified_percentage": 1.52801,
+    "s2:medium_proba_clouds_percentage": 7.945141,
+    "s2:high_proba_clouds_percentage": 4.270179,
+    "s2:thin_cirrus_percentage": 26.664308,
+    "s2:snow_ice_percentage": 4.8e-05,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2A_MSIL2A_20261027T162651_N0513_R040_T17TNJ_20261027T231305.SAFE",
+    "s2:generation_time": "2026-10-27T23:13:05.000000Z",
+    "s2:datatake_id": "GS2A_20261027T162651_059268_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2A_OPER_MSI_L2A_DS_2APS_20261027T231305_S20261027T162654_N05.13",
+    "s2:reflectance_conversion_factor": 1.01099289040124,
+    "datetime": "2026-10-27T16:31:18.018000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/93b568e3c929bebef9b1c324d644f7b8",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-10-28T00:45:42.092Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.000234116249,
+       43.265699859647754
+      ],
+      [
+       -80.3536129988322,
+       43.26441303480032
+      ],
+      [
+       -79.96522445833442,
+       44.24872169464628
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2A_T17TNJ_20261027T162654_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2A_T17TNJ_20261027T162654_L2A/S2A_T17TNJ_20261027T162654_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/10/27/1/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2A_T17TNJ_20261027T162654_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2A_T17TNJ_20261027T162654_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2A_T17TNJ_20261027T162654_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.264413,
+    -79.965224,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  },
+  {
+   "type": "Feature",
+   "id": "S2B_T17TNJ_20261027T161353_L2A",
+   "properties": {
+    "created": "2026-10-27T21:24:50.561Z",
+    "platform": "sentinel-2b",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 35.054609,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.75639,
+     "lon": -80.31827
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 103.28079762684092,
+    "view:incidence_angle": 5.2058115646269565,
+    "view:sun_azimuth": 167.316532487837,
+    "view:sun_elevation": 32.4228698858124,
+    "s2:tile_id": "S2B_OPER_MSI_L2A_TL_2BPS_20261027T200624_A050359_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0214,
+    "s2:nodata_pixel_percentage": 1e-05,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 3.731511,
+    "s2:vegetation_percentage": 27.283302,
+    "s2:not_vegetated_percentage": 31.999537,
+    "s2:water_percentage": 0.822768,
+    "s2:unclassified_percentage": 1.103072,
+    "s2:medium_proba_clouds_percentage": 9.211025,
+    "s2:high_proba_clouds_percentage": 3.900034,
+    "s2:thin_cirrus_percentage": 21.94355,
+    "s2:snow_ice_percentage": 0.000249,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2B_MSIL2A_20261027T161359_N0513_R140_T17TNJ_20261027T200624.SAFE",
+    "s2:generation_time": "2026-10-27T20:06:24.000000Z",
+    "s2:datatake_id": "GS2B_20261027T161359_050359_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2B_OPER_MSI_L2A_DS_2BPS_20261027T200624_S20261027T161353_N05.13",
+    "s2:reflectance_conversion_factor": 1.01098794826393,
+    "datetime": "2026-10-27T16:21:15.907000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/978bf79e5d16e70e5d187f9db4893a5e",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-10-27T21:24:50.561Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.00023411279822,
+       43.26479938161411
+      ],
+      [
+       -79.64751808492416,
+       43.256803441562624
+      ],
+      [
+       -79.6250726718658,
+       44.24513356156721
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2B_T17TNJ_20261027T161353_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2B_T17TNJ_20261027T161353_L2A/S2B_T17TNJ_20261027T161353_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/10/27/0/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2B_T17TNJ_20261027T161353_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2B_T17TNJ_20261027T161353_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2B_T17TNJ_20261027T161353_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.256803,
+    -79.625073,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  },
+  {
+   "type": "Feature",
+   "id": "S2C_T17TNJ_20261025T162408_L2A",
+   "properties": {
+    "created": "2026-10-25T21:21:51.195Z",
+    "platform": "sentinel-2c",
+    "constellation": "sentinel-2",
+    "instruments": [
+     "msi"
+    ],
+    "eo:cloud_cover": 31.64027,
+    "proj:epsg": 32617,
+    "proj:centroid": {
+     "lat": 43.79636,
+     "lon": -80.57515
+    },
+    "mgrs:utm_zone": 17,
+    "mgrs:latitude_band": "T",
+    "mgrs:grid_square": "NJ",
+    "grid:code": "MGRS-17TNJ",
+    "view:azimuth": 287.92455566009795,
+    "view:incidence_angle": 9.114363842009942,
+    "view:sun_azimuth": 169.9978524227,
+    "view:sun_elevation": 33.4383318675453,
+    "s2:tile_id": "S2C_OPER_MSI_L2A_TL_2CPS_20261025T195648_A011164_T17TNJ_N05.13",
+    "s2:degraded_msi_data_percentage": 0.0183,
+    "s2:nodata_pixel_percentage": 38.784826,
+    "s2:saturated_defective_pixel_percentage": 0,
+    "s2:cloud_shadow_percentage": 0.219438,
+    "s2:vegetation_percentage": 29.817349,
+    "s2:not_vegetated_percentage": 37.787369,
+    "s2:water_percentage": 0.252738,
+    "s2:unclassified_percentage": 0.282277,
+    "s2:medium_proba_clouds_percentage": 6.355246,
+    "s2:high_proba_clouds_percentage": 2.249354,
+    "s2:thin_cirrus_percentage": 23.035671,
+    "s2:snow_ice_percentage": 0.00013,
+    "s2:product_type": "S2MSI2A",
+    "s2:processing_baseline": "05.13",
+    "s2:product_uri": "S2C_MSIL2A_20261025T162341_N0513_R040_T17TNJ_20261025T195648.SAFE",
+    "s2:generation_time": "2026-10-25T19:56:48.000000Z",
+    "s2:datatake_id": "GS2C_20261025T162341_011164_N05.13",
+    "s2:datatake_type": "INS-NOBS",
+    "s2:datastrip_id": "S2C_OPER_MSI_L2A_DS_2CPS_20261025T195648_S20261025T162408_N05.13",
+    "s2:reflectance_conversion_factor": 1.00988004685941,
+    "datetime": "2026-10-25T16:31:10.507000Z",
+    "earthsearch:payload_id": "roda-sentinel-2-c1-l2a/workflow-sentinel-2-c1-l2a-to-stac/f9b0b36d459d36afa92526cc100a3aa9",
+    "storage:platform": "AWS",
+    "storage:region": "us-west-2",
+    "storage:requester_pays": false,
+    "processing:software": {
+     "sentinel-2-c1-l2a-to-stac": "v2025.06.17"
+    },
+    "updated": "2026-10-25T21:21:51.195Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ],
+      [
+       -81.000234116249,
+       43.26569985974014
+      ],
+      [
+       -80.35928043055344,
+       43.264444498953644
+      ],
+      [
+       -79.97048435715026,
+       44.2487692241037
+      ],
+      [
+       -81.00023799954879,
+       44.253408577534294
+      ]
+     ]
+    ]
+   },
+   "links": [
+    {
+     "rel": "self",
+     "type": "application/geo+json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2C_T17TNJ_20261025T162408_L2A"
+    },
+    {
+     "rel": "canonical",
+     "href": "s3://e84-earth-search-sentinel-data/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2C_T17TNJ_20261025T162408_L2A/S2C_T17TNJ_20261025T162408_L2A.json",
+     "type": "application/json"
+    },
+    {
+     "rel": "via",
+     "href": "s3://sentinel-s2-l2a/tiles/17/T/NJ/2026/10/25/0/metadata.xml",
+     "type": "application/xml",
+     "title": "Granule Metadata in Sinergize RODA Archive"
+    },
+    {
+     "rel": "parent",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "collection",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"
+    },
+    {
+     "rel": "root",
+     "type": "application/json",
+     "href": "https://earth-search.aws.element84.com/v1"
+    },
+    {
+     "rel": "thumbnail",
+     "href": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a/items/S2C_T17TNJ_20261025T162408_L2A/thumbnail"
+    }
+   ],
+   "assets": {
+    "visual": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2C_T17TNJ_20261025T162408_L2A/TCI.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+     "title": "True color image",
+     "roles": [
+      "visual"
+     ]
+    },
+    "thumbnail": {
+     "href": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/17/T/NJ/2026/10/S2C_T17TNJ_20261025T162408_L2A/L2A_PVI.jpg",
+     "type": "image/jpeg",
+     "title": "Thumbnail of preview image",
+     "roles": [
+      "thumbnail"
+     ]
+    }
+   },
+   "bbox": [
+    -81.000238,
+    43.264444,
+    -79.970484,
+    44.253409
+   ],
+   "collection": "sentinel-2-c1-l2a"
+  }
+ ],
+ "links": [
+  {
+   "rel": "next",
+   "title": "Next page of Items",
+   "method": "POST",
+   "type": "application/geo+json",
+   "href": "https://earth-search.aws.element84.com/v1/search",
+   "merge": false,
+   "body": {
+    "datetime": "2026-10-25T00:00:00Z/2026-11-08T23:59:59Z",
+    "intersects": {
+     "type": "Point",
+     "coordinates": [
+      -80.5449,
+      43.4723
+     ]
+    },
+    "collections": [
+     "sentinel-2-c1-l2a"
+    ],
+    "limit": 100,
+    "next": "2026-10-25T16:31:10.507000Z,S2C_T17TNJ_20261025T162408_L2A,sentinel-2-c1-l2a"
+   }
+  },
+  {
+   "rel": "root",
+   "type": "application/json",
+   "href": "https://earth-search.aws.element84.com/v1"
+  }
+ ]
+}

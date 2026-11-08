@@ -1,0 +1,32 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "osm_type": "N",
+    "osm_id": 1927695962,
+    "osm_key": "natural",
+    "osm_value": "tree",
+    "type": "house",
+    "housenumber": "200",
+    "name": "Class of 1995",
+    "street": "University Avenue West",
+    "locality": "Northdale",
+    "city": "Waterloo",
+    "county": "Waterloo",
+    "state": "Ontario",
+    "country": "Canada",
+    "postcode": "N2L 3G1",
+    "countrycode": "CA"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.5448283,
+     43.4723826
+    ]
+   }
+  }
+ ]
+}
