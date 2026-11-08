@@ -87,9 +87,11 @@
 
 /* TL */
 .wordmark {
+  /* The serif wordmark (SVG): letters in bone, the full stop in signal. Its bottom edge is the baseline. */
+  display: inline-block;
   color: var(--bone);
-  font-weight: 500;
-  letter-spacing: 0.26em;
+  vertical-align: -1px;
+  overflow: visible;
 }
 .version {
   margin-left: 1.1em;

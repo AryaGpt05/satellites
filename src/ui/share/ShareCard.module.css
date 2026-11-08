@@ -210,3 +210,9 @@
   line-height: 1;
   color: rgb(236 232 224 / 0.52);
 }
+
+/* The serif wordmark (SVG) as the card lockup. */
+.lockupMark {
+  display: block;
+  color: var(--bone);
+}

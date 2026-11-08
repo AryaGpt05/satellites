@@ -4,7 +4,7 @@
  * and scaled to fit its container, so type and spacing are exact.
  */
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { cx } from '@/ui/system'
+import { cx, Wordmark } from '@/ui/system'
 import {
   CARD_COLOR,
   CARD_FS,
@@ -50,7 +50,7 @@ export function ShareCard({ spec }: { spec: CardSpec }) {
         <div className={s.divider} style={{ left: PLATE }} />
 
         <Row box={PANEL.top}>
-          <span className={s.lockup}>Watched</span>
+          <Wordmark height={20} className={s.lockupMark} />
           {spec.stamp ? <span className={s.row} style={{ color: CARD_COLOR.bone2 }}>{spec.stamp}</span> : null}
         </Row>
         <Hair y={PANEL.rule1} />

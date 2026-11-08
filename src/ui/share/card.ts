@@ -35,6 +35,10 @@ import { pickBestLook } from '../results/lib/bestLook'
 import { captureFor } from '../results/lib/captures'
 import type { SatMeta } from '../results/lib/meta'
 import { roundedPlace, type SummaryLinkInput } from './links'
+import { WORDMARK_BOX, WORDMARK_DOT, WORDMARK_PATH } from '../../../api/_lib/wordmark'
+
+/** Lockup height on the 1200×630 card (fills the 22 px header row). */
+const LOCKUP_H = 22
 
 export { CARD_H, CARD_W, PLATE, type CardSpec }
 
@@ -324,6 +328,22 @@ function drawPlan(ctx: Ctx, plan: PlanPlate) {
 }
 
 /** Mono caps text centred vertically in a [top, height] box; `align` right anchors at x. */
+/** The serif wordmark, height h with its top-left at (x, y): letters in bone, the full stop in signal. */
+function drawWordmark(ctx: Ctx, x: number, y: number, h: number) {
+  const [bx, by, , bh] = WORDMARK_BOX
+  const k = h / bh
+  ctx.save()
+  ctx.translate(x - bx * k, y - by * k)
+  ctx.scale(k, k)
+  ctx.fillStyle = C.bone
+  ctx.fill(new Path2D(WORDMARK_PATH))
+  ctx.fillStyle = C.signal
+  ctx.beginPath()
+  ctx.arc(WORDMARK_DOT.cx, WORDMARK_DOT.cy, WORDMARK_DOT.r, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
 function rowText(ctx: Ctx, text: string, x: number, box: readonly [number, number], color: string, face: Face, align: 'left' | 'right' = 'left') {
   setFace(ctx, face)
   const t = text.toUpperCase()
@@ -383,7 +403,7 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   // ── the panel ──
   const X = PANEL.x
   const R = PANEL.right
-  rowText(ctx, 'Watched', X, PANEL.top, C.bone, monoFace(CARD_FS.lockup, CARD_FS.lockup * TRACK.lockup, 500))
+  drawWordmark(ctx, X, PANEL.top[0] + (PANEL.top[1] - LOCKUP_H) / 2, LOCKUP_H)
   if (spec.stamp) rowText(ctx, spec.stamp, R, PANEL.top, C.bone2, monoFace(CARD_FS.row), 'right')
   ctx.fillStyle = C.line
   ctx.fillRect(X, PANEL.rule1, PANEL.w, 1)

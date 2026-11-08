@@ -19,7 +19,7 @@
 import { memo, useLayoutEffect, useRef, type RefObject } from 'react'
 import { subsolarPoint } from '@/lib/geo'
 import { useApp } from '@/state/store'
-import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync } from '@/ui/system'
+import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync, Wordmark } from '@/ui/system'
 import { useCatalogStatus } from './catalogStatus'
 import { useSecondClock, useSecondDerived } from './clock'
 import { fmtAge, fmtGmst, fmtObjects, fmtSource, fmtStampZ, fmtSun, isStale } from './readouts'
@@ -116,7 +116,7 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
 
       <CornerReadout corner="tl" label="Watched" ref={topLeft}>
         <Reveal axis="x" duration={480} as="div" className={s.line}>
-          <span className={s.wordmark}>Watched</span>
+          <Wordmark height={17} className={s.wordmark} />
           <span className={s.version}>{VERSION}</span>
         </Reveal>
         {onAbout ? (

@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { DUR, EASE } from '@/lib/ease'
 import { useApp } from '@/state/store'
-import { Bezel, Glyph, Kbd, Reveal, cx, fmtInt, useExitClone } from '@/ui/system'
+import { Bezel, Glyph, Kbd, Reveal, cx, fmtInt, useExitClone, Wordmark } from '@/ui/system'
 // Only the vocabulary table (plain data, type-only imports), not the results UI: this chunk stays small.
 import { VERDICTS, VERDICT_GLYPH, VERDICT_META, type Verdict } from '@/ui/results/lib/meta'
 import { VERSION } from '@/ui/hud/Hud'
@@ -154,7 +154,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
     <div ref={rootRef} className={s.overlay} role="dialog" aria-modal="true" aria-labelledby="about-title">
       <header className={s.bar} data-about-content>
         <span className={s.barLabel}>
-          Watched <span className={s.dim}>/ About</span>
+          <Wordmark height={16} className={s.wordmark} /> <span className={s.dim}>/ About</span>
         </span>
         <button ref={closeRef} type="button" className={s.close} onClick={onClose} aria-label="Close" aria-keyshortcuts="Escape">
           <span className={s.closeText}>Close</span>
@@ -293,7 +293,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
 
             <footer className={s.footer}>
               <span>
-                Watched <span className={s.ver}>{VERSION}</span>
+                <Wordmark height={14} className={s.wordmark} /> <span className={s.ver}>{VERSION}</span>
               </span>
               <span className={s.dim}>Built on public data. Nothing here is a picture we took.</span>
             </footer>
