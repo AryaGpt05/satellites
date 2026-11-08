@@ -207,14 +207,14 @@ describe('share page', () => {
     const res = await handleSharePage(new Request('https://overflight.app/api/s?q=43.4723,-80.5449&n=Waterloo'))
     const body = await res.text()
     expect(res.status).toBe(200)
-    expect(body).toContain('<meta property="og:title" content="What photographed Waterloo this week">')
+    expect(body).toContain('<meta property="og:title" content="What watched Waterloo this week">')
     expect(body).toContain('kind=place&#38;place=Waterloo&#38;lat=43.47&#38;lon=-80.54')
     expect(body).toContain(String.raw`location.replace("/?q=43.47%2C-80.54\u0026n=Waterloo")`)
     expect(body).not.toContain('43.4723')
     expect(fetch).not.toHaveBeenCalled()
     // A street address is never printed: the coordinates stand in.
     const addr = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.4723,-80.5449&n=123%20King%20St'))).text()
-    expect(addr).toContain('What photographed 43.47°N 80.54°W this week')
+    expect(addr).toContain('What watched 43.47°N 80.54°W this week')
   })
 
   it('renders the page template with every required tag', () => {

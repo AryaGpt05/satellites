@@ -295,9 +295,9 @@ export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'pl
   return `${s.counts.imaged} real images and ${passes.toLocaleString('en-US')} more passes over ${s.placeLabel} in the last 7 days.${best} What watched you this week?`
 }
 
-/** "What photographed Waterloo this week" */
+/** "What watched Waterloo this week" */
 export function placeTitle(p: SharedPlace): string {
-  return `What photographed ${p.label} this week`
+  return `What watched ${p.label} this week`
 }
 
 export function placeDescription(p: SharedPlace): string {
