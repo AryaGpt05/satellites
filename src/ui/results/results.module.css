@@ -1,0 +1,384 @@
+/*
+ * Results panel (DESIGN §4, §8): right dock on desktop above a full-width timeline, bottom sheet on
+ * phones. Flat ink, hairlines, no radius, no shadow. Numbers mono + tabular.
+ */
+
+/*
+ * Timeline strip geometry, shared by the dock (which it pushes up) and the strip itself.
+ * Both elements carry .vars so the numbers live in one place.
+ */
+.vars {
+  --timeline-h: 132px;
+  --timeline-gap: 16px;
+  --timeline-bottom: 56px;
+  --timeline-clear: calc(var(--timeline-bottom) + var(--timeline-h) + var(--timeline-gap));
+}
+@media (max-height: 720px) {
+  .vars {
+    --timeline-h: 112px;
+  }
+}
+/* Raise the dock so the timeline fits beneath it (doubled selector beats Sheet's .dock). */
+.panel.panel {
+  bottom: calc(var(--bezel-inset) + var(--timeline-clear));
+}
+
+.timelineDock {
+  position: fixed;
+  z-index: var(--z-panel);
+  left: calc(var(--bezel-inset) + var(--margin));
+  right: calc(var(--bezel-inset) + var(--margin));
+  bottom: calc(var(--bezel-inset) + var(--timeline-bottom));
+  height: var(--timeline-h);
+  animation: rise var(--d-md) var(--ease-out) both;
+  animation-delay: 120ms;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timelineDock {
+    animation: fade var(--d-md) linear both;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── header ───────────────────────────────────────────────────── */
+.headTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: -2px;
+  padding: 4px 2px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  white-space: nowrap;
+  transition: color var(--d-hover) var(--ease-out);
+}
+.crumb:hover {
+  color: var(--signal);
+}
+.crumb kbd {
+  margin-left: 2px;
+}
+.headId {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.placeName {
+  margin: 10px 0 0;
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 560;
+  font-size: 30px;
+  line-height: 0.95;
+  letter-spacing: var(--track-display);
+  color: var(--bone);
+  overflow-wrap: anywhere;
+}
+.placeSub {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  line-height: 1.5;
+}
+.placeSub b {
+  font-weight: 400;
+  color: var(--bone-2);
+}
+.passTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.passTitle .placeName {
+  margin: 0;
+}
+
+/* ── sections ─────────────────────────────────────────────────── */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.section + .section {
+  margin-top: 36px;
+}
+.rule {
+  margin-bottom: 2px;
+}
+
+/* ── headline ─────────────────────────────────────────────────── */
+.headline {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 540;
+  font-size: 34px;
+  line-height: 0.98;
+  letter-spacing: var(--track-display);
+  color: var(--bone-2);
+  text-wrap: balance;
+}
+.headline strong {
+  font-weight: 560;
+  color: var(--bone);
+}
+.headline .serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-stretch: 100%;
+  letter-spacing: -0.01em;
+  font-size: 1.08em;
+  color: var(--bone);
+}
+.headlineMore {
+  margin: 10px 0 0;
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 500;
+  font-size: 22px;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--bone-3);
+}
+.num {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  font-size: 0.86em;
+}
+
+/* ── verdict readouts ─────────────────────────────────────────── */
+.verdicts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.verdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 10px 12px 0;
+  text-align: left;
+  min-width: 0;
+  color: var(--bone);
+  transition: color var(--d-hover) var(--ease-out);
+}
+.verdict + .verdict {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.verdict:hover .verdictLabel {
+  color: var(--bone);
+}
+.verdict:disabled {
+  cursor: default;
+}
+.verdictTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.verdictValue {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 300;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.verdictLabel {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+  line-height: 1.35;
+  transition: color var(--d-hover) var(--ease-out);
+}
+.signal {
+  color: var(--signal);
+}
+.ice {
+  color: var(--ice);
+}
+.zero {
+  color: var(--bone-3);
+}
+
+.footnote {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  color: var(--bone-3);
+  font-variant-numeric: tabular-nums;
+}
+.footnote b {
+  font-weight: 400;
+  color: var(--bone-2);
+}
+.notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notes li {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+}
+.pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── body copy ────────────────────────────────────────────────── */
+.prose {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--bone);
+  text-wrap: pretty;
+}
+.prose .num {
+  font-size: 0.84em;
+  letter-spacing: -0.01em;
+  font-weight: 350;
+}
+.unit {
+  margin-left: 0.25em;
+  font-size: 0.82em;
+  color: var(--bone-2);
+}
+.blurb {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--bone-3);
+}
+
+/* ── readout grid ─────────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+}
+.cell {
+  padding: 11px 12px 11px 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.cell:nth-child(2n) {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.cellWide {
+  grid-column: 1 / -1;
+}
+.cellWide.cell {
+  padding-left: 0;
+  border-left: 0;
+}
+.cell > div > span:last-child {
+  white-space: normal;
+}
+.sub {
+  margin-left: 0.5em;
+  color: var(--bone-3);
+  font-size: 0.86em;
+}
+
+/* ── mobile header ────────────────────────────────────────────── */
+.mHeadline {
+  margin: 8px 0 0;
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 540;
+  font-size: 25px;
+  line-height: 1;
+  letter-spacing: var(--track-display);
+  color: var(--bone-2);
+  text-wrap: balance;
+}
+.mHeadline strong {
+  font-weight: 560;
+  color: var(--bone);
+}
+.mHeadline .serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-size: 1.08em;
+  color: var(--bone);
+}
+.mTimeline {
+  margin-top: 12px;
+  height: 52px;
+}
+
+/* ── footer actions ───────────────────────────────────────────── */
+.actions {
+  display: flex;
+  gap: 8px;
+}
+.actions > :first-child {
+  flex: 1;
+}
+
+.empty {
+  padding: 32px 0;
+}

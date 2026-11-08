@@ -1,0 +1,292 @@
+.timeline {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--ink-1);
+  border: 1px solid var(--line-strong);
+  color: var(--bone);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.compact {
+  background: transparent;
+  border: 0;
+}
+
+/* ── header ───────────────────────────────────────────────────── */
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  height: 28px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.idx {
+  color: var(--bone-2);
+}
+.sep {
+  color: var(--bone-4);
+}
+.meta {
+  margin-left: 10px;
+  color: var(--bone-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--bone-3);
+}
+.legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dayKey i {
+  display: inline-block;
+  width: 14px;
+  height: 8px;
+  background: rgb(236 232 224 / 0.09);
+  border: 1px solid var(--line);
+}
+@media (max-width: 1180px) {
+  .legend > span:nth-child(n + 2):not(.dayKey) {
+    display: none;
+  }
+}
+
+/* ── body ─────────────────────────────────────────────────────── */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 10px 14px 0 0;
+}
+.compact .body {
+  padding: 0;
+}
+.lanes {
+  position: relative;
+  flex: none;
+  width: 124px;
+  margin-bottom: 22px;
+  border-right: 1px solid var(--line);
+}
+.laneLabel {
+  position: absolute;
+  left: 14px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.laneEmpty {
+  opacity: 0.5;
+}
+.laneWord {
+  flex: 1;
+}
+.laneCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+}
+.geoLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: -2px;
+  font-size: 9px;
+  color: var(--bone-3);
+}
+.signal {
+  color: var(--signal);
+}
+
+.plotWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: 12px;
+}
+.compact .plotWrap {
+  margin-left: 0;
+}
+.plot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  cursor: crosshair;
+  border-bottom: 1px solid var(--line-strong);
+}
+.compact .plot {
+  cursor: pointer;
+}
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── overlays ─────────────────────────────────────────────────── */
+.selLine,
+.hoverLine,
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  width: 1px;
+  margin-left: -0.5px;
+  pointer-events: none;
+}
+.selLine {
+  background: var(--signal);
+}
+.hoverLine {
+  background: var(--bone-3);
+}
+.selGlyph,
+.hoverGlyph {
+  position: absolute;
+  left: 0;
+  display: flex;
+  padding: 2px;
+  background: var(--ink-1);
+  transform: translate(-50%, -50%);
+}
+.compact .selGlyph {
+  background: var(--ink-1);
+}
+.playhead {
+  background: var(--signal);
+  opacity: 0.9;
+}
+.playheadCap {
+  position: absolute;
+  top: -5px;
+  left: -3px;
+  width: 7px;
+  height: 5px;
+  background: var(--signal);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* ── axis ─────────────────────────────────────────────────────── */
+.axis {
+  position: relative;
+  flex: none;
+  height: 22px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 9.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.compact .axis {
+  height: 16px;
+  font-size: 9px;
+}
+.day {
+  position: absolute;
+  top: 6px;
+  padding-left: 5px;
+  border-left: 1px solid var(--bone-4);
+  line-height: 1;
+}
+.compact .day {
+  top: 4px;
+  padding-left: 3px;
+  border-left: 0;
+}
+.end {
+  position: absolute;
+  right: 0;
+  top: 6px;
+  line-height: 1;
+  color: var(--bone-2);
+}
+.compact .end {
+  top: 4px;
+}
+
+/* ── tooltip ──────────────────────────────────────────────────── */
+.tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 2;
+  display: grid;
+  gap: 3px;
+  min-width: 200px;
+  padding: 9px 11px;
+  background: var(--ink-0);
+  border: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.tip_center {
+  transform: translateX(-50%);
+}
+.tip_left {
+  transform: translateX(-12px);
+}
+.tip_right {
+  transform: translateX(calc(-100% + 12px));
+}
+.tipName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  font-family: var(--font-sans);
+  font-stretch: 80%;
+  font-weight: 540;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--bone);
+}
+.tipLine {
+  line-height: 1.45;
+}

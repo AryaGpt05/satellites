@@ -14,8 +14,12 @@ export type Sentence = Part[]
 
 export const num = (n: string, u?: string): Part => ({ n, u })
 
+/** Units that attach without a space: 5.3°, 25%. */
+export const tightUnit = (u: string) => /^[°%′″]/.test(u)
+
 export function plain(parts: Sentence | Sentence[]): string {
-  const flat = (s: Sentence) => s.map((p) => (typeof p === 'string' ? p : p.u ? `${p.n} ${p.u}` : p.n)).join('')
+  const part = (p: Part) => (typeof p === 'string' ? p : !p.u ? p.n : tightUnit(p.u) ? `${p.n}${p.u}` : `${p.n} ${p.u}`)
+  const flat = (s: Sentence) => s.map(part).join('')
   if (parts.length && Array.isArray(parts[0])) return (parts as Sentence[]).map(flat).join(' ')
   return flat(parts as Sentence)
 }
