@@ -11,7 +11,7 @@ function siteOrigin(env: Record<string, string>): string {
     env.VITE_SITE_ORIGIN ||
     (env.VERCEL_PROJECT_PRODUCTION_URL && `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`) ||
     (env.VERCEL_URL && `https://${env.VERCEL_URL}`) ||
-    'https://watched.earth'
+    'https://www.watched.earth'
   return raw.replace(/\/+$/, '')
 }
 

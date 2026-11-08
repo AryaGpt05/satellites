@@ -5,7 +5,7 @@
 Enter any place on Earth. Watched shows every satellite that passed over it in the last seven days, and the
 actual pictures they took. It runs on a live 3D globe lit by the real sun, with all ~17,000 tracked objects in orbit.
 
-→ **[watched.earth](https://watched.earth)**
+→ **[www.watched.earth](https://www.watched.earth)**
 
 ---
 
