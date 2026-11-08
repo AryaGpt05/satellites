@@ -330,7 +330,8 @@ function heroLines(size: number): ReactElement {
           letterSpacing: serif ? 0 : -0.02 * size,
           lineHeight: 0.94,
           whiteSpace: 'nowrap',
-          color: C.bone,
+          // "you" (the serif accent) in signal, as on the landing hero.
+          color: serif ? C.signal : C.bone,
         },
       },
       s,
