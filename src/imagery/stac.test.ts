@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import pcS2 from './__fixtures__/pc-s2-waterloo.json'
 import pcLandsat from './__fixtures__/pc-landsat-waterloo.json'
 import esS2 from './__fixtures__/es-s2-waterloo.json'
+import clearS2 from './__fixtures__/pc-clear-sentinel-2-l2a-waterloo.json'
+import clearLs from './__fixtures__/pc-clear-landsat-c2-l2-waterloo.json'
 import { pcCropUrl, pcPointUrl } from './endpoints'
 import {
   dedupeCandidates,
@@ -12,7 +14,9 @@ import {
   noradForPlatform,
   pcItemIdFromProductUri,
   pcItemToCandidate,
+  clearSceneBody,
   searchBody,
+  searchClearScenes,
   searchCapturesDetailed,
   stacIso,
   stacSearchAll,
@@ -259,5 +263,56 @@ describe('search', () => {
     const ctrl = new AbortController()
     ctrl.abort()
     await expect(searchCapturesDetailed(WATERLOO, 0, 1e12, ctrl.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('clear scenes (owner D: the last clear look before a cloudy week)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const start = Date.parse('2026-09-02T00:00:00Z')
+  const end = Date.parse('2026-10-25T00:00:00Z')
+
+  it('asks the archive for nearly cloud-free scenes, newest first, one page', () => {
+    const s2 = clearSceneBody('sentinel-2-l2a', WATERLOO, start, end)
+    expect(s2.query).toEqual({ 'eo:cloud_cover': { lt: 20 } })
+    expect(s2.sortby).toEqual([{ field: 'datetime', direction: 'desc' }])
+    expect(s2.limit).toBe(12)
+    expect(s2.intersects).toEqual({ type: 'Point', coordinates: [-80.5449, 43.4723] })
+    // Landsat keeps its platform filter alongside the cloud filter.
+    expect(clearSceneBody('landsat-c2-l2', WATERLOO, start, end).query).toEqual({ platform: { in: ['landsat-8', 'landsat-9'] }, 'eo:cloud_cover': { lt: 20 } })
+  })
+
+  it('returns both collections as captures, newest first, deduped (recorded PC answers)', async () => {
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { collections: string[] }
+        bodies.push(body)
+        return Response.json(body.collections[0] === 'sentinel-2-l2a' ? clearS2 : clearLs)
+      }),
+    )
+    const caps = await searchClearScenes(WATERLOO, start, end)
+    expect(bodies).toHaveLength(2)
+    expect(caps.length).toBe((clearS2 as unknown as StacItemCollection).features.length + (clearLs as unknown as StacItemCollection).features.length)
+    expect(caps.map((c) => c.datetime)).toEqual([...caps.map((c) => c.datetime)].sort((a, b) => b - a))
+    expect(caps[0].itemId).toBe('S2A_MSIL2A_20261024T161701_R140_T17TNJ_20261024T205201')
+    expect(caps.every((c) => (c.cloudCoverPct ?? 100) < 20 && c.provider === 'planetary-computer')).toBe(true)
+    expect(caps.find((c) => c.collection === 'landsat-c2-l2')?.gsdM).toBe(30)
+    expect(caps[0].cropUrl({ halfSizeKm: 5, px: 1024 })).toMatch(/item\/bbox\/.*1024x1024\.png\?collection=sentinel-2-l2a/)
+  })
+
+  it('keeps whichever collection answered, and resolves [] when neither does', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { collections: string[] }
+        return body.collections[0] === 'sentinel-2-l2a' ? new Response('down', { status: 503 }) : Response.json(clearLs)
+      }),
+    )
+    const caps = await searchClearScenes(WATERLOO, start, end)
+    expect(caps.every((c) => c.collection === 'landsat-c2-l2')).toBe(true)
+    expect(caps.length).toBeGreaterThan(0)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })))
+    await expect(searchClearScenes(WATERLOO, start, end)).resolves.toEqual([])
   })
 })

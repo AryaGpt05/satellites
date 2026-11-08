@@ -207,6 +207,42 @@
 .thumbOk img {
   opacity: 1;
 }
+/* Already shown this session: no fade on a remount (owner A2). */
+.thumbInstant img {
+  transition: none;
+}
+/* A photographed row leaves room for its thumbnail, which is its own control (expand, owner B2). */
+.rowThumb {
+  padding-right: 72px;
+}
+.rows > li {
+  position: relative;
+}
+.thumbBtn {
+  position: absolute;
+  right: 8px;
+  top: 12px;
+  padding: 0;
+  cursor: zoom-in;
+  -webkit-tap-highlight-color: transparent;
+}
+.thumbBtn:focus-visible {
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .thumbBtn:hover .thumb {
+    border-color: var(--bone-3);
+  }
+}
+.thumbExpand {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  padding: 3px;
+  color: var(--bone);
+  background: color-mix(in srgb, var(--ink-0) 70%, transparent);
+}
 /* Mostly cloud: dimmed, hatched and labelled, never a bright unexplained square (decision #2). */
 .thumbClouded img {
   filter: brightness(0.55) contrast(1.3) saturate(0.5);

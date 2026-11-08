@@ -29,6 +29,11 @@
  * hero can be ranked without another round trip; and, when the week has no Sentinel-2 scene at all, it
  * asks whether Sentinel-2 images this spot at all (open ocean: no), so geometry never claims "likely".
  *
+ * The clear cover (owner request D, clearCover.ts): the newest nearly cloud-free scenes of the 60 days before
+ * the window are listed in parallel with the archive search; only when the window has no clear detailed photo
+ * are their spots checked, and the newest clear one rides on the report as `clearCover` (the final report when
+ * it is in by then, else a background `onUpdate`). It never holds the partial or the final report.
+ *
  * After the final report, GIBS stragglers keep probing in the background; each one that comes back with
  * pixels patches the report through `onUpdate` (counts only ever go up). VIIRS stragglers count as imaged
  * by rule at the budget (see weather.ts), so the headline doesn't depend on how fast GIBS answered.
@@ -39,6 +44,7 @@ import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } 
 import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
 import { satrecFor } from './sgp4'
 import { geoWatchers } from './geostationary'
+import { needsClearCover, startClearCover } from './clearCover'
 import { attachCaptures, attachDailyCaptures, captureNorad, dailyCaptureTarget, MATCH_AFTER_MS, MATCH_BEFORE_MS } from './match'
 import { passNear, passTargetFor, type PassTarget } from './passes'
 import { passWorkerCount, runPassSearch, warmPassWorkers } from './pool'
@@ -134,6 +140,8 @@ const SPOT_CANDIDATES = 4
 const SPOT_BUDGET_MS = 1_500
 /** How long the partial report waits for the acquisition-plan check (open ocean). */
 const PLAN_BUDGET_MS = 2_000
+/** Without onUpdate (no way to deliver it later), the final report waits at most this long for the clear cover. */
+const COVER_WAIT_MS = 2_500
 export const OCEAN_NOTE = "This spot is outside Sentinel-2's acquisition plan (open ocean)."
 
 const nf = /* @__PURE__ */ new Intl.NumberFormat('en-US')
@@ -298,6 +306,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       .then(() => sentinel2PlanCovers(latLon, windowEnd, signal))
       .catch(() => undefined)
   }, noop)
+  // The clear cover's candidate scenes (60 days before the window): listed now, checked only if needed.
+  const coverLeg = startClearCover(latLon, windowStart, signal)
+  let clearCover: Capture | undefined
   // Time zones for the report's local times (a lazy chunk; usually loaded long before).
   const tz = Promise.resolve()
     .then(() => ensureTz())
@@ -387,6 +398,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       notes: [...notes, ...weatherNotes],
       partial,
       archiveFailed,
+      ...(clearCover ? { clearCover } : {}),
       timings: {
         catalogMs,
         passesMs,
@@ -427,6 +439,15 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       recast++
     }
     if (recast) notes.push(OCEAN_NOTE)
+  }
+
+  // No clear Sentinel-2 / Landsat photo this week: find the last clear look from before it, in the background.
+  let coverP: Promise<Capture | undefined> | undefined
+  if (!archiveFailed && needsClearCover(passes, stac)) {
+    coverP = coverLeg.pick().then(
+      (c) => (clearCover = c),
+      (): undefined => undefined,
+    )
   }
 
   let firstResultMs = 0
@@ -480,6 +501,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   weatherNotes = gibsNotes()
   const weatherMatched = attachDailyCaptures(passes, [...weather.verified(), ...rule])
   const firstMs = firstResultMs || performance.now() - tStart
+  // Nobody to hand a late cover to: give it a short wait (a retry of the same report is a cache hit).
+  if (coverP && !clearCover && !opts.onUpdate) await waitAtMost(coverP, COVER_WAIT_MS, signal)
+  throwIfAborted(signal)
   let latest = build(passes, [...stac, ...weatherMatched], false, firstMs)
   emit('done', `${plural(latest.counts.passes, 'PASS', 'PASSES')} · ${plural(latest.counts.imaged, 'IMAGE')}`, 1)
 
@@ -488,6 +512,14 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   if (opts.onUpdate) {
     let current = passes
     const weatherCaps = [...weatherMatched]
+    // A clear cover that came in after the final report: the same report, plus its cover.
+    if (coverP && !clearCover) {
+      void coverP.then((c) => {
+        if (!c || signal?.aborted) return
+        latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+        safely(opts.onUpdate, latest)
+      })
+    }
     onLate = (c, byRule) => {
       if (signal?.aborted) return
       if (byRule) {

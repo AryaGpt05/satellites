@@ -1,0 +1,169 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "id": "LC08_L2SP_018030_20261023_02_T1",
+   "properties": {
+    "eo:cloud_cover": 12.82,
+    "platform": "landsat-8",
+    "datetime": "2026-10-23T16:03:49.724746Z",
+    "landsat:collection_number": "02",
+    "view:sun_elevation": 33.5083208,
+    "landsat:wrs_path": "018",
+    "landsat:wrs_row": "030",
+    "created": "2026-11-06T09:20:06.772114Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.94747,
+       44.23788
+      ],
+      [
+       -81.50229,
+       42.52494
+      ],
+      [
+       -79.30637,
+       42.11799
+      ],
+      [
+       -78.6887,
+       43.82745
+      ],
+      [
+       -80.94747,
+       44.23788
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2"
+  },
+  {
+   "id": "LC09_L2SP_019030_20261022_02_T1",
+   "properties": {
+    "eo:cloud_cover": 0.17,
+    "platform": "landsat-9",
+    "datetime": "2026-10-22T16:10:05.021638Z",
+    "landsat:collection_number": "02",
+    "view:sun_elevation": 33.83849575,
+    "landsat:wrs_path": "019",
+    "landsat:wrs_row": "030",
+    "created": "2026-11-05T10:17:28.180980Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -82.51103,
+       44.236
+      ],
+      [
+       -83.06514,
+       42.5231
+      ],
+      [
+       -80.8607,
+       42.11717
+      ],
+      [
+       -80.24453,
+       43.82699
+      ],
+      [
+       -82.51103,
+       44.236
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2"
+  },
+  {
+   "id": "LC08_L2SP_018030_20261007_02_T1",
+   "properties": {
+    "eo:cloud_cover": 13.26,
+    "platform": "landsat-8",
+    "datetime": "2026-10-07T16:03:50.245698Z",
+    "landsat:collection_number": "02",
+    "view:sun_elevation": 39.00276253,
+    "landsat:wrs_path": "018",
+    "landsat:wrs_row": "030",
+    "created": "2026-11-05T09:29:54.756066Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.96174,
+       44.23815
+      ],
+      [
+       -81.5169,
+       42.52515
+      ],
+      [
+       -79.32125,
+       42.11794
+      ],
+      [
+       -78.70361,
+       43.82775
+      ],
+      [
+       -80.96174,
+       44.23815
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2"
+  },
+  {
+   "id": "LC08_L2SP_018030_20260905_02_T1",
+   "properties": {
+    "eo:cloud_cover": 9.57,
+    "platform": "landsat-8",
+    "datetime": "2026-09-05T16:03:37.349718Z",
+    "landsat:collection_number": "02",
+    "view:sun_elevation": 49.85796218,
+    "landsat:wrs_path": "018",
+    "landsat:wrs_row": "030",
+    "created": "2026-11-05T09:29:49.477231Z"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -80.94747,
+       44.23869
+      ],
+      [
+       -81.50266,
+       42.52575
+      ],
+      [
+       -79.30672,
+       42.11854
+      ],
+      [
+       -78.68905,
+       43.828
+      ],
+      [
+       -80.94747,
+       44.23869
+      ]
+     ]
+    ]
+   },
+   "collection": "landsat-c2-l2"
+  }
+ ]
+}

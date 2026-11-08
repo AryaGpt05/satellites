@@ -437,7 +437,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
         {replay ? (
           <button type="button" className={s.mReplay} onClick={replay} tabIndex={current ? 0 : -1} aria-label={`Replay this pass on the globe: ${meta.name}, ${t.day} ${t.time}`}>
             <Glyph name="play" size={10} />
-            Replay
+            Replay<span className={s.tabletOnly}> this pass</span>
           </button>
         ) : null}
       </figcaption>

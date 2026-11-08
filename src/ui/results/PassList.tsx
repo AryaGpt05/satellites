@@ -1,6 +1,7 @@
 /**
  * PASSES, grouped by verdict (see lib/groups.ts for the model). Photographs are individual rows with
- * a live thumbnail of the real crop, clearest first (decision #2); everything else is one row per
+ * a live thumbnail of the real crop, in the gallery's order (owner B1: the closest look, then newest first);
+ * the thumbnail is its own control that opens the photo large (owner B2). Everything else is one row per
  * satellite, expandable to its passes. Long groups show their top rows, then page in 40 at a time.
  *
  * Signal colour only where a detailed image of the place exists (V07): photographed rows carry no tag
@@ -15,7 +16,9 @@ import { Ago, reportNow } from './Ago'
 import { Mark } from './Mark'
 import { prefetchPassImage } from './actions'
 import { isClouded } from './lib/bestLook'
-import { captureFor, cropSpec, displayUrl, isDailyMosaic } from './lib/captures'
+import { captureFor, isDailyMosaic } from './lib/captures'
+import { thumbUrl } from './lib/photos'
+import { useGallery } from './gallery'
 import { int } from './lib/copy'
 import { visibleCount, type ListItem, type PassGroup, type PassItem, type SatItem } from './lib/groups'
 import { glyphForPass, markColorVar, VERDICT_GLYPH, VERDICT_META, VERDICT_TITLE, verdictUnit, type Verdict } from './lib/meta'
@@ -86,7 +89,7 @@ function Group({ group, model, selectedId, onSelect }: { group: PassGroup } & Pr
         <span className={cx(s.groupTitle, imaged && s.signal)}>
           <Glyph name={VERDICT_GLYPH[group.verdict]} size={12} color={imaged ? 'var(--signal)' : undefined} />
           {VERDICT_TITLE[group.verdict]}
-          {imaged && group.items.some((i) => i.kind === 'pass') ? <span className={s.order}> · clearest first</span> : null}
+          {imaged && group.items.some((i) => i.kind === 'pass') ? <span className={s.order}> · closest look, then newest</span> : null}
         </span>
         <span className={s.groupCount}>
           {int(group.passCount)} {verdictUnit(group.verdict, group.passCount)}
@@ -166,50 +169,63 @@ const PassRow = memo(function PassRow({
   ]
     .filter(Boolean)
     .join(', ')
+  const photoKey = model.photoByPass.get(p.id)
+  const thumb = capture && !isDailyMosaic(capture) ? thumbUrl(capture) : undefined
   return (
-    <button
-      type="button"
-      className={cx(s.row, selected && s.selected)}
-      aria-current={selected || undefined}
-      aria-label={label}
-      data-pass-row
-      onClick={() => onSelect(p)}
-      onPointerEnter={() => {
-        hover(p)
-        prefetch()
-      }}
-      onPointerDown={prefetch}
-      onPointerLeave={() => hover(undefined)}
-      onFocus={prefetch}
-    >
-      <span className={s.glyph}>
-        <Mark name={glyphForPass(p.verdict, meta.category)} size={14} color={markColorVar(p.verdict, meta.category)} />
-      </span>
-      <span className={s.main}>
-        <span className={s.nameLine}>
-          <span className={s.name}>{meta.name}</span>
-          {tag ? <Tag className={cx(s.tag, tag.warn && s.tagWarn)}>{tag.text}</Tag> : null}
+    <>
+      <button
+        type="button"
+        className={cx(s.row, selected && s.selected, thumb && s.rowThumb)}
+        aria-current={selected || undefined}
+        aria-label={label}
+        data-pass-row
+        onClick={() => onSelect(p)}
+        onPointerEnter={() => {
+          hover(p)
+          prefetch()
+        }}
+        onPointerDown={prefetch}
+        onPointerLeave={() => hover(undefined)}
+        onFocus={prefetch}
+      >
+        <span className={s.glyph}>
+          <Mark name={glyphForPass(p.verdict, meta.category)} size={14} color={markColorVar(p.verdict, meta.category)} />
         </span>
-        <span className={s.metaLine}>
-          {t.day} · {t.time}
-          {/* Narrow phones drop the zone (the timeline and the footnote name it) before the age. */}
-          <span className={s.zone}> {t.zone}</span>
-          <span className={s.dim}>
-            {' · '}
-            <Ago t={p.tClosest} base={model.clock} />
+        <span className={s.main}>
+          <span className={s.nameLine}>
+            <span className={s.name}>{meta.name}</span>
+            {tag ? <Tag className={cx(s.tag, tag.warn && s.tagWarn)}>{tag.text}</Tag> : null}
+          </span>
+          <span className={s.metaLine}>
+            {t.day} · {t.time}
+            {/* Narrow phones drop the zone (the timeline and the footnote name it) before the age. */}
+            <span className={s.zone}> {t.zone}</span>
+            <span className={s.dim}>
+              {' · '}
+              <Ago t={p.tClosest} base={model.clock} />
+            </span>
+          </span>
+          <span className={s.metaLine}>
+            {p.offNadirDeg.toFixed(1)}° off-nadir
+            {/* …and the ground distance before the cloud, which is what a photograph is judged by. */}
+            <span className={capture?.cloudCoverPct !== undefined ? s.km : undefined}> · {int(p.groundDistanceKm)} km</span>
+            {capture?.cloudCoverPct !== undefined ? <span className={s.dim}> · cloud {int(capture.cloudCoverPct)}%</span> : null}
           </span>
         </span>
-        <span className={s.metaLine}>
-          {p.offNadirDeg.toFixed(1)}° off-nadir
-          {/* …and the ground distance before the cloud, which is what a photograph is judged by. */}
-          <span className={capture?.cloudCoverPct !== undefined ? s.km : undefined}> · {int(p.groundDistanceKm)} km</span>
-          {capture?.cloudCoverPct !== undefined ? <span className={s.dim}> · cloud {int(capture.cloudCoverPct)}%</span> : null}
-        </span>
-      </span>
-      {capture && !isDailyMosaic(capture) ? (
-        <Thumb url={displayUrl(capture, { ...cropSpec(capture.collection), px: 112 })} eager={eager} clouded={clouded} />
+      </button>
+      {thumb && photoKey ? (
+        <button
+          type="button"
+          className={s.thumbBtn}
+          aria-label={`Expand the photo: ${meta.name}, ${t.day} ${t.time}`}
+          title="Expand the photo"
+          onClick={(e) => useGallery.getState().openLightbox(photoKey, e.currentTarget)}
+          onPointerEnter={prefetch}
+        >
+          <Thumb url={thumb} eager={eager} clouded={clouded} />
+        </button>
       ) : null}
-    </button>
+    </>
   )
 })
 
@@ -312,11 +328,15 @@ const SatRow = memo(function SatRow({
   )
 })
 
+/** Thumbnail URLs already shown this session: a remount (back from a pass) shows them at once, no fade (A2). */
+const shownThumbs = new Set<string>()
+
 /** Thumbnail of the real crop: eager for the first rows, else loads when scrolled near. */
 function Thumb({ url, eager, clouded }: { url: string; eager: boolean; clouded: boolean }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const [visible, setVisible] = useState(eager)
-  const [state, setState] = useState<'idle' | 'ok' | 'err'>('idle')
+  const known = shownThumbs.has(url)
+  const [visible, setVisible] = useState(eager || known)
+  const [state, setState] = useState<'idle' | 'ok' | 'err'>(known ? 'ok' : 'idle')
   useEffect(() => {
     if (visible) return
     const el = ref.current
@@ -327,14 +347,27 @@ function Thumb({ url, eager, clouded }: { url: string; eager: boolean; clouded: 
     return () => io.disconnect()
   }, [visible])
   return (
-    <span ref={ref} className={cx(s.thumb, state === 'ok' && s.thumbOk, clouded && s.thumbClouded)} aria-hidden>
+    <span ref={ref} className={cx(s.thumb, state === 'ok' && s.thumbOk, known && s.thumbInstant, clouded && s.thumbClouded)} aria-hidden>
       {visible && state !== 'err' ? (
-        <img src={url} alt="" crossOrigin="anonymous" decoding="async" onLoad={() => setState('ok')} onError={() => setState('err')} />
+        <img
+          src={url}
+          alt=""
+          crossOrigin="anonymous"
+          decoding="async"
+          onLoad={() => {
+            shownThumbs.add(url)
+            setState('ok')
+          }}
+          onError={() => setState('err')}
+        />
       ) : null}
       {clouded ? <span className={s.hatch} /> : null}
       <span className={s.thumbMark} />
       {/* The word only: the row's tag carries the number, and "CLOUD 100%" does not fit a 56 px thumb. */}
       {clouded ? <span className={s.cloudChip}>Cloud</span> : null}
+      <span className={s.thumbExpand}>
+        <Mark name="expand" size={10} />
+      </span>
     </span>
   )
 }

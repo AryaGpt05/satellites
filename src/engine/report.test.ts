@@ -8,6 +8,7 @@ const imagery = vi.hoisted(() => ({
   spotCloud: vi.fn(),
   ensureTz: vi.fn(),
   sentinel2PlanCovers: vi.fn(),
+  searchClearScenes: vi.fn(),
 }))
 vi.mock('@/imagery', async () => {
   // Pure helpers are the real ones.
@@ -19,6 +20,7 @@ import { getRow, getSatInfo } from './catalog'
 import { satrecFor } from './sgp4'
 import { findPassesForSat, passTargetFor } from './passes'
 import { computeReport, OCEAN_NOTE } from './report'
+import { _resetClearCoverCache } from './clearCover'
 import { loadTestCatalog, TOKYO, WATERLOO } from './testing'
 
 let now: number
@@ -50,6 +52,8 @@ beforeEach(() => {
   imagery.spotCloud.mockReset().mockResolvedValue('unknown')
   imagery.ensureTz.mockReset().mockResolvedValue(undefined)
   imagery.sentinel2PlanCovers.mockReset().mockResolvedValue(true)
+  imagery.searchClearScenes.mockReset().mockResolvedValue([])
+  _resetClearCoverCache()
 })
 
 describe('computeReport', () => {
@@ -275,6 +279,64 @@ describe('computeReport', () => {
     expect(byId.get('S2_12')).toBe('clear')
     expect(byId.get('S2_40')).toBeUndefined()
     if (partialSpot.length) expect(partialSpot).toContain('cirrus')
+  })
+
+  it('finds the last clear look before a cloudy week, without holding the first results (owner D)', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const t = s2c[s2c.length - 1].tClosest
+    // The week's only detailed photo is cloud at the spot.
+    const white = capture({ id: 'S2_WHITE', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: t - 7 * 60_000, cloudCoverPct: 88 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [white], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const windowStart = now - 7 * 86_400_000
+    const older = [10, 20, 30].map((d, i) =>
+      capture({ id: `OLD_${d}`, platform: i === 1 ? 'landsat-9' : 'sentinel-2b', collection: i === 1 ? 'landsat-c2-l2' : 'sentinel-2-l2a', datetime: windowStart - d * 86_400_000, cloudCoverPct: 5, gsdM: i === 1 ? 30 : 10 }),
+    )
+    imagery.searchClearScenes.mockResolvedValue(older)
+    imagery.spotCloud.mockImplementation(async (c: Capture) => (c.id === 'S2_WHITE' || c.id === 'OLD_10' ? 'cloud' : 'clear'))
+    let partialCover: Capture | undefined | null = null
+    const report = await computeReport(waterloo, { now, onPartial: (r) => (partialCover = r.clearCover) })
+    expect(imagery.searchClearScenes).toHaveBeenCalledWith({ lat: WATERLOO.lat, lon: WATERLOO.lon }, windowStart - 60 * 86_400_000, windowStart)
+    // The newest candidate is clouded at the spot: the next one (Landsat 9, 20 days before) is the cover.
+    expect(report.clearCover?.id).toBe('OLD_20')
+    expect(report.clearCover?.spot).toBe('clear')
+    // It never counts toward the window: no pass, not in the captures.
+    expect(report.captures.map((c) => c.id)).not.toContain('OLD_20')
+    expect(report.passes.some((p) => p.captureId === 'OLD_20')).toBe(false)
+    if (partialCover !== null) expect(partialCover).toBeUndefined()
+  })
+
+  it('delivers a late clear cover as a background update', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const old = capture({ id: 'OLD', platform: 'sentinel-2a', collection: 'sentinel-2-l2a', datetime: now - 9 * 86_400_000, cloudCoverPct: 2 })
+    imagery.searchClearScenes.mockImplementation(async () => {
+      await gate
+      return [old]
+    })
+    imagery.spotCloud.mockResolvedValue('clear')
+    const ctl = new AbortController()
+    const updates: (string | undefined)[] = []
+    const report = await computeReport(waterloo, { now, budgetMs: 200, signal: ctl.signal, onUpdate: (r) => updates.push(r.clearCover?.id) })
+    expect(report.clearCover).toBeUndefined()
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(updates).toEqual(['OLD'])
+    ctl.abort()
+  })
+
+  it('never looks for a clear cover when the week has a clear photo', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const clear = capture({ id: 'S2_CLEAR', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: s2c[0].tClosest - 7 * 60_000, cloudCoverPct: 8 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [clear], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.searchClearScenes.mockResolvedValue([capture({ id: 'OLD', platform: 'sentinel-2a', collection: 'sentinel-2-l2a', datetime: now - 20 * 86_400_000, cloudCoverPct: 1 })])
+    imagery.spotCloud.mockResolvedValue('clear')
+    const report = await computeReport(waterloo, { now })
+    expect(report.clearCover).toBeUndefined()
+    expect(imagery.spotCloud.mock.calls.map(([c]) => (c as Capture).id)).toEqual(['S2_CLEAR'])
   })
 
   it('does not wait for a slow spot check longer than its budget', async () => {

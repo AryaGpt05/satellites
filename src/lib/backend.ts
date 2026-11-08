@@ -119,7 +119,11 @@ export function backendConfigured(): boolean {
 
 // ── Transport ───────────────────────────────────────────────────────────────────────────────
 
-export const TIMEOUTS = { lookup: 5_000, share: 10_000, read: 8_000, stats: 6_000 } as const
+/**
+ * Per-call timeouts. `read` (get_share) outlives boot's share cap on purpose: a share that answers after the
+ * landing appeared still opens if the landing is untouched (controller, within 15 s of boot).
+ */
+export const TIMEOUTS = { lookup: 5_000, share: 10_000, read: 12_000, stats: 6_000 } as const
 
 type RpcResult = { ok: true; data: unknown } | { ok: false; status: number }
 

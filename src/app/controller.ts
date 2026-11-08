@@ -70,6 +70,8 @@ const MAX_CAMERA_WAIT_MS = 6000
 const FINAL_RACE_MS = 600
 /** The hero image gets at most this much extra time to decode. */
 const HERO_RACE_MS = 1200
+/** A clear cover that arrives after the results gets this long to decode before it is shown anyway. */
+const COVER_RACE_MS = 6000
 /** An archive outage is retried once, this long after the report landed. */
 const ARCHIVE_RETRY_MS = 8000
 
@@ -254,6 +256,7 @@ export function retryReport() {
 }
 
 export async function runReport(place: Place, opts: RunOpts = {}) {
+  mark('run-report')
   inflight?.abort()
   const ctrl = new AbortController()
   inflight = ctrl
@@ -287,6 +290,8 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   let heroP: Promise<unknown> | undefined
   let firstShow: Promise<void> | undefined
   let shown = false
+  /** The clear cover already preloaded for this run (its id). */
+  let coverSeen: string | undefined
 
   /** The first time results appear: wait for the camera, the final report (briefly) and the hero image. */
   const showFirst = async (r: Report) => {
@@ -352,7 +357,10 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
       onUpdate: (r) => {
         finalReport = r
         // Built in idle time first, so the swap's render only reads the cache; a newer update supersedes it.
-        void prewarmModel(r).then(() => finalReport === r && apply(r))
+        // A clear cover that arrives late (owner D) is decoded first too, so it cross-fades in, never blank.
+        const cover = r.clearCover && r.clearCover.id !== coverSeen ? raceTimeout(preloadCover(r), COVER_RACE_MS) : undefined
+        if (r.clearCover) coverSeen = r.clearCover.id
+        void Promise.all([prewarmModel(r), cover]).then(() => finalReport === r && apply(r))
       },
     })
     if (inflight !== ctrl) return
@@ -520,6 +528,18 @@ async function heroUrl(r: Report, opts: RunOpts): Promise<string | undefined> {
   const pass = pre ? r.passes.find((p) => p.id === pre) : undefined
   const capture = pass ? captureFor(r, pass) : undefined
   return capture ? cardUrl(capture) : bestLookImageUrl(r)
+}
+
+/** Download and decode the report's cover photo (gallery photo #1: the clear cover when it leads). Never rejects. */
+async function preloadCover(r: Report): Promise<unknown> {
+  try {
+    const { bestLookImageUrl, loadPhoto } = await loadHeroTools()
+    const url = bestLookImageUrl(r)
+    return url ? await loadPhoto(url).catch(() => undefined) : undefined
+  } catch (err) {
+    console.error(err)
+    return undefined
+  }
 }
 
 /** Download and decode the photo that leads the panel (see heroUrl). Never rejects. */
