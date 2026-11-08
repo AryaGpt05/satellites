@@ -1,0 +1,221 @@
+/**
+ * Shared contracts between modules. Every module codes against these types.
+ * Changing a type here is an integration decision — keep it backwards compatible.
+ *
+ * Time: all instants are epoch milliseconds (UTC) as `number` unless named *Iso.
+ * Angles: degrees unless suffixed Rad. Distances: km unless suffixed M (metres).
+ */
+
+export interface LatLon {
+  lat: number
+  lon: number
+}
+
+/** A geocoded place the user is asking about. */
+export interface Place extends LatLon {
+  /** Primary label, e.g. "Waterloo" */
+  label: string
+  /** Secondary label, e.g. "Ontario, Canada" */
+  sublabel?: string
+  /** ISO 3166-1 alpha-2, lowercase, if known */
+  countryCode?: string
+  /** Where this place came from */
+  source: 'search' | 'geolocation' | 'url' | 'demo'
+}
+
+/**
+ * Category drives every visual + copy decision. Keep this list short.
+ *  - open-optical:     public-imagery optical satellites whose actual photos we can show (Sentinel-2, Landsat)
+ *  - commercial-optical: high-res commercial imagers (Planet, Maxar, Airbus, BlackSky…) — "passed within view", never "photographed"
+ *  - radar:            SAR satellites (Sentinel-1, ICEYE, Capella, Umbra) — see through cloud & night
+ *  - weather-leo:      polar-orbiting weather/climate imagers (NOAA-20/21, Suomi NPP, Terra, Aqua, MetOp)
+ *  - weather-geo:      geostationary weather imagers (GOES, Himawari, Meteosat, GK-2A…) — image you every ~10 min
+ *  - crewed:           ISS, Tiangong
+ *  - other:            everything else in the catalog (ambient only)
+ */
+export type SatCategory =
+  | 'open-optical'
+  | 'commercial-optical'
+  | 'radar'
+  | 'weather-leo'
+  | 'weather-geo'
+  | 'crewed'
+  | 'other'
+
+/**
+ * Compact catalog row as written by scripts/fetch-catalog*.ts into public/data/catalog.json.
+ * Order is fixed. Mean elements are TEME/SGP4 mean elements from the GP (OMM) data.
+ * [norad, name, intlDes, epochIso, meanMotionRevPerDay, ecc, inclDeg, raanDeg, argpDeg, meanAnomalyDeg, bstar, ndot, nddot]
+ */
+export type CatalogRow = [
+  number,
+  string,
+  string,
+  string,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+]
+
+export interface CatalogFile {
+  /** ISO time the catalog was fetched */
+  fetchedAt: string
+  /** e.g. "CelesTrak GP (GROUP=active)" or "SatNOGS DB (dev fallback)" */
+  source: string
+  count: number
+  rows: CatalogRow[]
+}
+
+/** Curated knowledge about a satellite (or a family matched by name pattern). */
+export interface SatProfile {
+  /** Exact NORAD ids this profile applies to (preferred) */
+  norad?: number[]
+  /** Or a name regex source string, matched against catalog name (case-insensitive) */
+  namePattern?: string
+  displayName?: string
+  operator: string
+  category: SatCategory
+  /** Full swath width at nadir, km (for pushbroom/fixed sensors) */
+  swathKm?: number
+  /** Max off-nadir pointing angle for agile/pointable imagers, degrees */
+  maxOffNadirDeg?: number
+  /** Best ground sample distance, metres */
+  resolutionM?: number
+  /** Only acquires in daylight (optical) */
+  daylightOnly?: boolean
+  /** If set, actual imagery is searchable via STAC */
+  stac?: { collection: 'sentinel-2-l2a' | 'landsat-c2-l2'; platform: string }
+  /** One sentence, plain, precise. No hype. */
+  blurb: string
+  /** Geostationary: imaging cadence in minutes */
+  cadenceMin?: number
+}
+
+/** A satellite resolved against profiles, ready to compute with. */
+export interface SatInfo {
+  norad: number
+  name: string
+  displayName: string
+  category: SatCategory
+  profile?: SatProfile
+}
+
+/** One overflight of the place by one satellite. */
+export interface Pass {
+  id: string
+  norad: number
+  /** Time of closest approach (minimum ground distance between sub-satellite point and place) */
+  tClosest: number
+  /** When the place entered / left the satellite's field of regard (or swath) */
+  tStart: number
+  tEnd: number
+  /** Ground distance from sub-satellite point to place at closest approach, km */
+  groundDistanceKm: number
+  /** Off-nadir angle from the satellite to the place at closest approach, degrees */
+  offNadirDeg: number
+  /** Elevation of the satellite as seen from the place at closest approach, degrees */
+  elevationDeg: number
+  /** Azimuth from the place to the satellite at closest approach, degrees from north */
+  azimuthDeg: number
+  altitudeKm: number
+  /** Ground speed of the sub-satellite point, km/s */
+  groundSpeedKmS: number
+  /** Heading of the ground track at closest approach, degrees from north (direction of motion) */
+  headingDeg: number
+  /** Ascending (moving north) or descending */
+  node: 'ascending' | 'descending'
+  /** Sun elevation at the place at tClosest, degrees */
+  sunElevationDeg: number
+  /** Place fell inside the fixed nadir swath (pushbroom instruments) */
+  inSwath: boolean
+  /** Place was within max off-nadir pointing (agile imagers) */
+  inFieldOfRegard: boolean
+  /**
+   * Classification of what this pass means for the user:
+   *  - 'imaged'   : a real captured image exists (matched to STAC)  → "photographed"
+   *  - 'likely'   : geometry + daylight say a fixed-swath imager covered it, no image found (yet / cloud filter)
+   *  - 'could'    : agile/commercial imager that could have pointed here → "passed within view"
+   *  - 'overhead' : just passed over (crewed, other)
+   */
+  verdict: 'imaged' | 'likely' | 'could' | 'overhead'
+  /** Sampled ground track around tClosest (±~8 min), for drawing */
+  track: TrackPoint[]
+  captureId?: string
+}
+
+export interface TrackPoint {
+  t: number
+  lat: number
+  lon: number
+  altKm: number
+}
+
+/** A real image that exists in a public archive. */
+export interface Capture {
+  id: string
+  provider: 'earth-search' | 'planetary-computer'
+  collection: 'sentinel-2-l2a' | 'landsat-c2-l2'
+  itemId: string
+  /** e.g. "sentinel-2c", "landsat-9" */
+  platform: string
+  /** NORAD id resolved from platform */
+  norad?: number
+  datetime: number
+  cloudCoverPct?: number
+  gsdM: number
+  sunElevationDeg?: number
+  /** Footprint polygon of the full scene, [lon,lat][] outer ring */
+  footprint?: [number, number][]
+  /** Square crop centred on the place, ready to <img src>; size in px is in the URL */
+  cropUrl: (opts: { halfSizeKm: number; px: number }) => string
+  /** Full scene quicklook */
+  previewUrl?: string
+  /** Human link to the item in a browser (STAC browser / PC explorer) */
+  sourceUrl?: string
+}
+
+/** Geostationary imagers that see the place continuously. */
+export interface GeoWatcher {
+  norad: number
+  name: string
+  operator: string
+  subLon: number
+  /** Elevation angle of the satellite from the place */
+  elevationDeg: number
+  cadenceMin: number
+  /** Number of full-disk images that included the place in the report window */
+  imagesInWindow: number
+}
+
+export interface Report {
+  place: Place
+  windowStart: number
+  windowEnd: number
+  generatedAt: number
+  catalogFetchedAt: string
+  passes: Pass[]
+  captures: Capture[]
+  geo: GeoWatcher[]
+  counts: {
+    satellitesConsidered: number
+    passes: number
+    imaged: number
+    likely: number
+    could: number
+    overhead: number
+  }
+}
+
+/** Progress messages from long computations, shown verbatim in the HUD (mono, uppercase). */
+export interface ProgressEvent {
+  stage: 'catalog' | 'propagate' | 'archive' | 'match' | 'done'
+  message: string
+  /** 0..1 or undefined for indeterminate */
+  fraction?: number
+}

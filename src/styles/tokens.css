@@ -1,0 +1,92 @@
+/* Overflight design tokens — see docs/DESIGN.md. Never hard-code these values in components. */
+:root {
+  color-scheme: dark;
+
+  /* ink */
+  --ink-0: #07080a;
+  --ink-1: #0c0e11;
+  --ink-2: #14171c;
+  --ink-3: #1c2027;
+
+  /* bone (warm off-white) */
+  --bone: #ece8e0;
+  --bone-2: rgb(236 232 224 / 0.64);
+  --bone-3: rgb(236 232 224 / 0.4);
+  --bone-4: rgb(236 232 224 / 0.18);
+  --line: rgb(236 232 224 / 0.1);
+  --line-strong: rgb(236 232 224 / 0.22);
+
+  /* signal + secondary */
+  --signal: #ff6a1a;
+  --signal-hover: #ff8340;
+  --signal-2: rgb(255 106 26 / 0.22);
+  --signal-3: rgb(255 106 26 / 0.1);
+  --ice: #a9c7d3;
+  --ice-2: rgb(169 199 211 / 0.22);
+  --warn: #e8c547;
+
+  /* type */
+  --font-sans: 'Instrument Sans Variable', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Martian Mono Variable', 'Martian Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
+
+  --fs-display: clamp(44px, 7.2vw, 128px);
+  --fs-h1: clamp(34px, 4.4vw, 72px);
+  --fs-h2: clamp(24px, 2.6vw, 40px);
+  --fs-h3: 20px;
+  --fs-body: 15px;
+  --fs-small: 13px;
+  --fs-label: 10.5px;
+  --fs-readout: 12px;
+
+  --track-label: 0.08em;
+  --track-display: -0.02em;
+
+  /* space (4px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+
+  --bezel-inset: 16px;
+  --gutter: 24px;
+  --margin: 32px;
+  --panel-w: 432px;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.6, 0, 0.2, 1);
+  --d-hover: 120ms;
+  --d-sm: 240ms;
+  --d-md: 480ms;
+  --d-lg: 900ms;
+
+  --z-scene: 0;
+  --z-hud: 10;
+  --z-panel: 20;
+  --z-overlay: 40;
+  --z-toast: 60;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --bezel-inset: 10px;
+    --margin: 18px;
+    --gutter: 16px;
+    --fs-body: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-hover: 0ms;
+    --d-sm: 0ms;
+    --d-md: 160ms;
+    --d-lg: 200ms;
+  }
+}

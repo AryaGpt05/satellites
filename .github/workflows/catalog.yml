@@ -1,0 +1,36 @@
+name: Refresh orbit catalog
+
+on:
+  schedule:
+    # every 6 hours, offset from the top of the hour (CelesTrak asks for ≥2h between downloads)
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalog
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch CelesTrak GP catalog
+        run: npx --yes tsx@4.23.15 scripts/fetch-catalog.ts public/data/catalog.json
+      - name: Commit catalog
+        run: |
+          git config user.name "overflight-bot"
+          git config user.email "overflight-bot@users.noreply.github.com"
+          git add public/data/catalog.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "data: refresh orbit catalog"
+          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && break; sleep 5; done

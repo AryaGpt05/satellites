@@ -1,0 +1,129 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+html {
+  background: var(--ink-0);
+  color: var(--bone);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  font-stretch: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+::selection {
+  background: var(--signal);
+  color: var(--ink-0);
+}
+a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--bone-4);
+}
+a:hover {
+  text-decoration-color: var(--signal);
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+input {
+  font: inherit;
+  color: inherit;
+}
+:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 3px;
+}
+img {
+  display: block;
+  max-width: 100%;
+}
+
+/* utility type styles */
+.t-display {
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 560;
+  font-size: var(--fs-display);
+  letter-spacing: var(--track-display);
+  line-height: 0.92;
+}
+.t-h1 {
+  font-stretch: 75%;
+  font-weight: 560;
+  font-size: var(--fs-h1);
+  letter-spacing: var(--track-display);
+  line-height: 0.95;
+}
+.t-h2 {
+  font-stretch: 80%;
+  font-weight: 540;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.01em;
+  line-height: 1.02;
+}
+.t-serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-stretch: 100%;
+  letter-spacing: -0.01em;
+}
+.t-label {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 400;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--bone-3);
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 350;
+  font-size: var(--fs-readout);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.t-dim {
+  color: var(--bone-2);
+}
+.t-faint {
+  color: var(--bone-3);
+}
+.t-signal {
+  color: var(--signal);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
