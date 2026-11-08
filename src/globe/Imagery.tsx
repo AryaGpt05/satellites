@@ -23,6 +23,7 @@ import { bboxAround, EARTH_RADIUS_KM } from '@/lib/geo'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { CaptureCollection } from '@/types'
 import { captureOf, closestLookPass, decalSpecFor, decalUrl } from './acquisition'
+import { kmPerTexel } from './framing'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
 import { canUpload } from './textures'
 
@@ -42,6 +43,8 @@ const PREFETCH_DELAY_MS = 1500
 /** Fresh-exposure band: this much REAL time of scan behind the line, never thinner than FRESH_MIN_KM. */
 const FRESH_S = 0.4
 const FRESH_MIN_KM = 3
+/** The context patch keeps the global map's tone at this scale (km) and adds its own detail below it. */
+const TONE_KM = 60
 
 /**
  * Half extent of the panel's photo (results lib/captures cropSpec: Sentinel-2 ±5 km, Landsat ±7.5 km, daily mosaics
@@ -298,6 +301,10 @@ export function Imagery() {
       state.prev = null
       p.uDecal2Map.value = null
     }
+
+    // Tone matching scale, in each map's own mip levels.
+    p.uDayLod.value = Math.max(0, Math.log2(TONE_KM / kmPerTexel(rt.textureLevel)))
+    p.uCtxLod.value = Math.max(0, Math.log2(TONE_KM / ((2 * CTX_HALF_KM) / (mobile ? 1024 : 1536))))
 
     // Scan line and development.
     p.uScanT0.value.copy(acq.t0)

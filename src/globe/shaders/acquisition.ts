@@ -99,7 +99,7 @@ export const curtainFragment = glsl`
     // A whisper of light, warmest and densest toward the ground; the colour is mostly bone, tinted by the verdict.
     vec3 tint = mix(uBone, uColor, 0.45);
     // (Additive in linear light: over dark ground even 0.01 reads clearly, so everything here is tiny.)
-    float body = mix(0.0006, 0.006, vV * vV);
+    float body = mix(0.001, 0.011, vV * vV);
     // Scan lines streaming down: ~1 px lines, 40 across the curtain's height.
     float k = vV * 40.0 - uTime * 2.6;
     float f = fract(k);
@@ -107,7 +107,7 @@ export const curtainFragment = glsl`
     float lines = (1.0 - smoothstep(0.3, 1.2, dpx)) * (0.15 + 0.85 * vV * vV);
     // A soft brightening toward the two edges.
     float edge = smoothstep(0.86, 1.0, abs(vS)) * 0.008;
-    float a = (body + lines * 0.009 + edge) * uOpacity;
+    float a = (body + lines * 0.016 + edge) * uOpacity;
     if (a < 0.0002) discard;
     gl_FragColor = vec4(tint, a);
     ${OUTPUT}

@@ -126,6 +126,8 @@ export interface PaintUniforms {
   uCtxMap: { value: Texture | null }
   uCtxUv: { value: Vector4 }
   uCtxOn: { value: number }
+  uCtxLod: { value: number }
+  uDayLod: { value: number }
   uDecalMap: { value: Texture | null }
   uDecalUv: { value: Vector4 }
   uDecalOn: { value: number }
@@ -145,6 +147,8 @@ export function createPaintUniforms(): PaintUniforms {
     uCtxMap: { value: null },
     uCtxUv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
     uCtxOn: { value: 0 },
+    uCtxLod: { value: 6 },
+    uDayLod: { value: 3 },
     uDecalMap: { value: null },
     uDecalUv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
     uDecalOn: { value: 0 },

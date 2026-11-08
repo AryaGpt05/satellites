@@ -31,6 +31,7 @@ export const earthFragment = glsl`
   ${PAINT}
 
   uniform vec3 uFreshColor;     // fresh-exposure tint (signal)
+  uniform float uDayLod;        // mip level of the day map at the context patch's tone-matching scale
   uniform float uPanelHalf;     // the panel photo's half extent, in decal patch units (0 = none)
   uniform vec3 uPanelColor;
 
@@ -74,7 +75,13 @@ export const earthFragment = glsl`
     // ── painted imagery (uniform branches: no cost when nothing is painted)
     vec2 suv = sphereUv(N);
     vec4 ctx = vec4(0.0);
-    if (uCtxOn > 0.001) ctx = contextSample(suv);
+    if (uCtxOn > 0.001) {
+      vec3 ctxLow;
+      ctx = contextSample(suv, ctxLow);
+      // Detail from the patch, tone from the global map: the patch sharpens the ground without a visible square.
+      vec3 dayLow = textureLod(uDay, vUv, uDayLod).rgb;
+      ctx.rgb *= clamp((dayLow + 0.004) / (ctxLow + 0.004), vec3(0.35), vec3(2.8));
+    }
     float fresh = 0.0;
     vec4 decal = vec4(0.0);
     if (uDecalOn > 0.001) decal = decalSample(N, suv, fresh);

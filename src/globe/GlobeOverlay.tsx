@@ -433,16 +433,13 @@ function SatLabel({
 }
 
 /**
- * The acquisition countdown in the HUD's top-right cluster: on desktops beside the UTC clock and scene time (on their
- * two lines, left of them), on stacked layouts under them, right-aligned: "ACQUISITION · SENTINEL-2C" over
+ * The acquisition countdown, top-right under the HUD clock band (the top-right corner of the free area: the HUD's scrim
+ * would dim it inside the band), right-aligned: "ACQUISITION · SENTINEL-2C" over
  * "T−00:01:12", snapping to "ACQUIRED" at the capture; for passes without an image "CLOSEST APPROACH". Visible while
  * a live sequence runs and for a moment after its capture. Written every frame from the runtime (text only when it
  * changes), never through React state. While it shows, callouts keep below it.
  */
 const READOUT_HOLD_MS = 2600
-/** Desktop: the HUD's top-right readout block spans 336 px from the right edge (framing.trReadoutBox). */
-const HUD_TR_WIDTH = 336
-const READOUT_GAP = 28
 const READOUT_H = 34
 
 function AcqReadout({
@@ -486,7 +483,7 @@ function AcqReadout({
     const ins = useApp.getState().uiInsets
     const { W, H } = sizeOf(vp)
     const stacked = isStacked(W, H)
-    runtime.readoutBottom = show && stacked ? ins.top + 8 + READOUT_H : 0
+    runtime.readoutBottom = show ? ins.top + 8 + READOUT_H : 0
     if (!show) return
     const text = captured ? (imaged ? 'ACQUIRED' : 'CLOSEST APPROACH') : fmtCountdown(runtime.simTime, q.tc)
     if (text !== st.text) {
@@ -497,8 +494,8 @@ function AcqReadout({
       st.done = captured
       d.classList.toggle(s.acqDone, captured)
     }
-    const x = Math.round(stacked ? edgeFor(true) : HUD_TR_WIDTH + READOUT_GAP)
-    const y = Math.round(stacked ? ins.top + 8 : 26)
+    const x = Math.round(ins.right + edgeFor(stacked))
+    const y = Math.round(ins.top + 8)
     if (x !== st.x || y !== st.y) {
       st.x = x
       st.y = y

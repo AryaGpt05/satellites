@@ -103,10 +103,12 @@ export const ribbonFragment = glsl`
     if (uKind == 2) {
       acc = vec4(uColor, track * mix(0.3, 0.85, swept));
     } else {
-      // ── fresh-exposure glow right behind the front (real-time decay; none when not playing)
+      // ── fresh-exposure glow right behind the front (real-time decay; none when not playing), never wider than a
+      // few dozen pixels however close the camera is (the developing image carries the exposure there)
       float realBehind = uRate > 0.001 ? max(lead, 0.0) / uRate : 1e3;
-      float fresh = exp(-realBehind / 0.16) * swept;
-      float fillA = uFill * 3.2 * fresh * mix(0.5, 1.0, daylight) * (1.0 - 0.6 * cover);
+      float leadPx0 = max(lead, 0.0) / max(fwA, 1e-6) / max(uPx, 1.0);
+      float fresh = exp(-realBehind / 0.16) * exp(-leadPx0 / 36.0) * swept;
+      float fillA = uFill * 2.2 * fresh * mix(0.5, 1.0, daylight) * (1.0 - 0.6 * cover);
       acc = vec4(uColor, min(1.0, fillA));
 
       // ── edges: faint bone ahead of the front, the verdict colour behind it (dashed for a field of regard)

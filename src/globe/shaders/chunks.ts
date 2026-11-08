@@ -100,6 +100,7 @@ export const PAINT = glsl`
   uniform sampler2D uCtxMap;
   uniform vec4 uCtxUv;
   uniform float uCtxOn;
+  uniform float uCtxLod;          // mip level of the patch at the tone-matching scale (~60 km)
   uniform sampler2D uDecalMap;
   uniform vec4 uDecalUv;
   uniform float uDecalOn;
@@ -125,11 +126,15 @@ export const PAINT = glsl`
     vec2 a = smoothstep(vec2(0.0), f, p) * smoothstep(vec2(0.0), f, 1.0 - p);
     return a.x * a.y;
   }
-  /** Context basemap colour (linear) and weight. */
-  vec4 contextSample(vec2 uv) {
+  /**
+   * Context basemap colour (linear) and weight. low gets the patch's own colour at the tone-matching scale, so the
+   * caller can keep the global map's low-frequency tone and take only the patch's detail (no visible square).
+   */
+  vec4 contextSample(vec2 uv, out vec3 low) {
     vec2 p = patchCoord(uv, uCtxUv);
     vec2 t = vec2(p.x, 1.0 - p.y);
     vec3 c = textureGrad(uCtxMap, t, dFdx(t), dFdy(t)).rgb;
+    low = textureLod(uCtxMap, t, uCtxLod).rgb;
     float w = patchMask(p, vec2(0.16)) * uCtxOn;
     return vec4(c, w);
   }
