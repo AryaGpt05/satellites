@@ -237,6 +237,12 @@ export interface Report {
   partial?: boolean
   /** True when the Sentinel-2/Landsat search failed or timed out on every provider (≠ "answered with nothing") */
   archiveFailed?: boolean
+  /**
+   * The latest CLEAR detailed capture (Sentinel-2/Landsat, not clouded at the spot) from up to ~60 days before the
+   * window, used as the cover only when the window itself has no clear detailed photo. Shown honestly with its
+   * date ("Last clear look · 24 Oct · 15 days ago"); it never counts toward the window's numbers.
+   */
+  clearCover?: Capture
   counts: {
     satellitesConsidered: number
     passes: number
