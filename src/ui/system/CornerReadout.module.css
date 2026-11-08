@@ -1,0 +1,56 @@
+/*
+ * Corner readouts sit inside the bezel, horizontally on the grid's outer margin so they share a
+ * vertical axis with the content column below (Swiss grid), vertically just under the frame line.
+ */
+.corner {
+  position: fixed;
+  z-index: 1;
+  display: grid;
+  gap: 3px;
+  max-width: calc(50vw - var(--bezel-inset) - var(--margin) - 12px);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 400;
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.corner :is(a, button, [tabindex]) {
+  pointer-events: auto;
+}
+.tl,
+.tr {
+  top: calc(var(--bezel-inset) + 14px);
+}
+.bl,
+.br {
+  bottom: calc(var(--bezel-inset) + 14px);
+}
+.tl,
+.bl {
+  left: calc(var(--bezel-inset) + var(--margin));
+  justify-items: start;
+  text-align: left;
+}
+.tr,
+.br {
+  right: calc(var(--bezel-inset) + var(--margin));
+  justify-items: end;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .tl,
+  .tr {
+    top: calc(var(--bezel-inset) + 12px);
+  }
+  .bl,
+  .br {
+    bottom: calc(var(--bezel-inset) + 12px + env(safe-area-inset-bottom, 0px));
+  }
+}

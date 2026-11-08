@@ -186,16 +186,26 @@ export function buildRibbon(
       const b = a + 1
       const c = a + vpr
       const d = c + 1
+      // Counter-clockwise seen from outside the globe (rows run along-track, columns left → right).
       index[w++] = a
-      index[w++] = c
-      index[w++] = b
       index[w++] = b
       index[w++] = c
+      index[w++] = b
       index[w++] = d
+      index[w++] = c
     }
   }
   const mid = pts.reduce((best, p) => (Math.abs(p.t - tRef) < Math.abs(best.t - tRef) ? p : best), pts[0])
   return { positions, along, side, u, index, rows, cols, halfWidthKm: mid ? halfWidthKm(mid.altKm) : 0 }
+}
+
+/**
+ * True when playback carried sim time across `tCross` this frame (prev < tCross ≤ now), moving forward by less
+ * than `maxStepMs`. Larger jumps are seeks, not playback, and must not fire the crossing flash.
+ */
+export function sweptAcross(prev: number, now: number, tCross: number, maxStepMs = 5 * 60_000): boolean {
+  const step = now - prev
+  return step > 0 && step < maxStepMs && prev < tCross && now >= tCross
 }
 
 /** Position on the track at time `ms` (great-circle interpolation between samples), or null outside it. */

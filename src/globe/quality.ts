@@ -28,6 +28,11 @@ export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
 }
 
+/** Best guess before a GL context exists (replaced by detectTier once the canvas is up). */
+export function provisionalTier(mobile: boolean): QualityTier {
+  return { mobile, allow4k: true, allow8k: false, sphereSegments: mobile ? 160 : 288, msaa: 0, maxAnisotropy: 4 }
+}
+
 export function detectTier(gl: WebGLRenderer): QualityTier {
   const mobile = detectMobile()
   const maxTex = gl.capabilities.maxTextureSize

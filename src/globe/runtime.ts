@@ -14,7 +14,27 @@ export const FRAME = {
   clock: -30,
   camera: -20,
   scene: -10,
+  /** After every scene component has written its screen anchors */
+  anchors: -5,
 } as const
+
+/**
+ * A point the DOM overlay follows (callouts, the coordinate label). Written by scene components each frame
+ * in CSS pixels relative to the canvas; read by GlobeOverlay in the same frame.
+ */
+export interface Anchor {
+  x: number
+  y: number
+  visible: boolean
+  /** Put the callout box below the point (near the top edge) */
+  below: boolean
+  /** Altitude readout, km (satellites) */
+  altKm: number | null
+}
+
+export function createAnchor(): Anchor {
+  return { x: 0, y: 0, visible: false, below: false, altKm: null }
+}
 
 export interface GlobeRuntime {
   /** Simulation time (epoch ms) for the current frame. Written by <Clock/> before anything else runs. */
@@ -51,6 +71,9 @@ export interface GlobeRuntime {
   cutAt: number
   /** NORAD the pass overlay draws itself; the ambient field hides its own point for it (-1 = none) */
   overlayNorad: number
+  /** Screen anchors by id ('place', 'hover', 'selected') and the DOM listeners flushed after the scene */
+  anchors: Map<string, Anchor>
+  anchorListeners: Set<() => void>
 }
 
 export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: number): GlobeRuntime {
@@ -71,6 +94,8 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     flashAt: -Infinity,
     cutAt: -Infinity,
     overlayNorad: -1,
+    anchors: new Map(),
+    anchorListeners: new Set(),
   }
 }
 

@@ -1,0 +1,228 @@
+.field {
+  --h: 48px;
+  --fs: 15px;
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.lg {
+  --h: 60px;
+  --fs: 20px;
+}
+@media (max-width: 760px) {
+  .lg {
+    --h: 52px;
+    --fs: 17px; /* ≥ 16px: iOS does not zoom on focus */
+  }
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  min-width: 0;
+}
+.label,
+.status {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--h);
+  min-width: 0;
+  cursor: text;
+}
+.leading,
+.trailing {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--bone-3);
+  transition: color var(--d-sm) var(--ease-out);
+}
+.focused .leading {
+  color: var(--bone);
+}
+.trailing {
+  gap: 8px;
+  cursor: default;
+}
+
+.inputWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+.input,
+.mirror {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 300;
+  font-size: var(--fs);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.input {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--bone);
+  caret-color: transparent;
+  text-overflow: ellipsis;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.input::placeholder {
+  color: var(--bone-3);
+  opacity: 1;
+}
+/* The focus ring is the thickened baseline; the default outline would double it. */
+.input:focus-visible {
+  outline: none;
+}
+.input::-webkit-search-cancel-button,
+.input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.input:disabled {
+  cursor: default;
+  color: var(--bone-2);
+}
+
+.mirror {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* Block caret: inverts what it covers; hard 1 Hz blink with 50% duty (no fade). */
+.caret {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0.6em;
+  height: 1.22em;
+  margin-top: -0.64em;
+  font-size: var(--fs);
+  background: var(--bone);
+  mix-blend-mode: difference;
+  pointer-events: none;
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+.caret[data-hidden='true'] {
+  visibility: hidden;
+}
+.caret[data-typing='true'] {
+  animation: none;
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Baseline: 1px hairline; on focus a 2px bone line wipes in from the left over it. */
+.line,
+.lineFocus,
+.scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+.line {
+  height: 1px;
+  background: var(--line-strong);
+}
+.lineFocus {
+  height: 2px;
+  bottom: -0.5px;
+  background: var(--bone);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path var(--d-sm) var(--ease-out);
+}
+.focused .lineFocus {
+  clip-path: inset(0 0 0 0);
+}
+.invalid .line,
+.invalid .lineFocus {
+  background: var(--warn);
+}
+.disabled .line {
+  background: var(--line);
+}
+
+/* Busy: a short segment travels the baseline. */
+.scan {
+  height: 2px;
+  bottom: -0.5px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--d-sm) var(--ease-out);
+}
+.scan::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 22%;
+  background: var(--bone-2);
+  transform: translateX(-100%);
+}
+.field[data-busy='true'] .scan {
+  opacity: 1;
+}
+.field[data-busy='true'] .scan::before {
+  animation: scan 1.1s var(--ease-in-out) infinite;
+}
+@keyframes scan {
+  to {
+    transform: translateX(460%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+  .lineFocus {
+    transition: none;
+  }
+  .field[data-busy='true'] .scan::before {
+    animation: none;
+    transform: none;
+    width: 100%;
+    background: var(--bone-4);
+  }
+}

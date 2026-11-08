@@ -1,0 +1,155 @@
+.search {
+  position: relative;
+}
+.idx {
+  color: var(--bone-2);
+}
+
+.clear,
+.go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.clear {
+  width: 28px;
+  height: 28px;
+  color: var(--bone-3);
+  transition: color var(--d-hover) var(--ease-out);
+}
+.clear:hover {
+  color: var(--bone);
+}
+/* The one primary action on the landing: appears only once there is something to act on. */
+.go {
+  width: 40px;
+  height: 40px;
+  background: var(--signal);
+  color: var(--ink-0);
+  animation: go-in var(--d-sm) var(--ease-out) both;
+  transition: background-color var(--d-hover) var(--ease-out);
+}
+.go:hover {
+  background: var(--signal-hover);
+}
+.go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@keyframes go-in {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Suggestions: flat ink, hairline frame, flush under the baseline. */
+.list {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 1px);
+  left: 0;
+  right: 0;
+  display: none;
+  max-height: min(360px, 46vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--ink-1);
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bone-4) transparent;
+}
+.listOpen {
+  display: block;
+  animation: list-in var(--d-sm) var(--ease-out) both;
+}
+@keyframes list-in {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 50px;
+  padding: 8px 16px 8px 18px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.option:first-child {
+  border-top: 0;
+}
+.active {
+  background: var(--ink-2);
+}
+.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--bone);
+}
+.optText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.optLabel {
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--bone);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.optSub {
+  font-size: var(--fs-small);
+  line-height: 1.3;
+  color: var(--bone-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.optCoord {
+  flex: none;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.active .optCoord {
+  color: var(--bone-2);
+}
+
+.empty {
+  margin: 0;
+  padding: 16px 18px;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--bone-2);
+}
+
+@media (max-width: 760px) {
+  .optCoord {
+    display: none;
+  }
+  .list {
+    max-height: 52vh;
+  }
+}

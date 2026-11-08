@@ -1,0 +1,434 @@
+/*
+ * Landing layout on the 12-column grid inside the bezel (DESIGN §4):
+ *   desktop ≥ 1200px  text column spans 6 columns, left; globe owns the right half
+ *   761–1199px        text column spans 8 columns
+ *   phones            stacked under the globe, anchored to the bottom
+ */
+.landing {
+  --content-w: calc(100vw - 2 * (var(--bezel-inset) + var(--margin)));
+  --col: calc((var(--content-w) - 11 * var(--gutter)) / 12);
+  --span-6: calc(var(--col) * 6 + var(--gutter) * 5);
+  --span-5: calc(var(--col) * 5 + var(--gutter) * 4);
+  --span-4: calc(var(--col) * 4 + var(--gutter) * 3);
+  --span-3: calc(var(--col) * 3 + var(--gutter) * 2);
+  position: absolute;
+  inset: 0;
+}
+/* Doubled selector: the app layer sets pointer-events: auto on its direct children. The globe
+   behind must stay draggable through the empty parts of the landing. */
+.landing.landing {
+  pointer-events: none;
+}
+
+.column {
+  position: absolute;
+  left: calc(var(--bezel-inset) + var(--margin));
+  top: calc(var(--bezel-inset) + 72px);
+  bottom: calc(var(--bezel-inset) + 72px);
+  width: var(--span-6);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  pointer-events: none;
+}
+.column > * {
+  pointer-events: auto;
+}
+
+/* ── kicker ───────────────────────────────────────────────────── */
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 30px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.kickerRule {
+  width: 24px;
+  height: 1px;
+  background: var(--bone-4);
+}
+.kickerIdx {
+  color: var(--bone-2);
+}
+.kickerSep {
+  color: var(--bone-4);
+}
+
+/* ── headline ─────────────────────────────────────────────────── */
+.headline {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-family: var(--font-sans);
+  font-stretch: 75%;
+  font-weight: 560;
+  /* never taller than the viewport allows */
+  font-size: min(var(--fs-display), 12.2vh);
+  line-height: 0.92;
+  letter-spacing: var(--track-display);
+  color: var(--bone);
+  font-kerning: normal;
+}
+/* Each line is a mask; pad the box so descenders and the italic overhang are inside the clip. */
+.hl {
+  padding: 0.05em 0.08em 0.16em 0;
+  margin: -0.05em -0.08em -0.16em 0;
+}
+.serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-size: 1.08em;
+  line-height: 0;
+  letter-spacing: -0.015em;
+  margin-right: 0.02em;
+}
+
+/* ── sub copy ─────────────────────────────────────────────────── */
+.sub {
+  margin: 30px 0 0;
+  max-width: min(var(--span-5), 34em);
+  font-size: clamp(15px, 1.22vw, 18px);
+  line-height: 1.45;
+  color: var(--bone-2);
+  text-wrap: pretty;
+}
+
+/* ── search + locate ──────────────────────────────────────────── */
+.searchBlock {
+  width: var(--span-5);
+  max-width: 640px;
+  margin-top: 48px;
+}
+/* Mask rise for blocks that must not stay clipped afterwards (the suggestion list overflows). */
+.rise {
+  animation: rise var(--d-lg) var(--ease-out) backwards;
+}
+@keyframes rise {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(10px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    transform: none;
+  }
+}
+
+/* "Use my location" lives at the end of the search line, behind a hairline divider. */
+.locateInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 0 0 16px;
+  border-left: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  white-space: nowrap;
+  transition: color var(--d-hover) var(--ease-out);
+}
+.locateInline:hover {
+  color: var(--bone);
+}
+.locStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--bone-2);
+  white-space: nowrap;
+}
+/* Locating is about "you are here": the signal colour, hard 1 Hz blink. */
+.locDot {
+  width: 6px;
+  height: 6px;
+  background: var(--signal);
+  animation: hard-blink 1s steps(1, end) infinite;
+}
+.locTime {
+  color: var(--bone-3);
+}
+@keyframes hard-blink {
+  50% {
+    opacity: 0;
+  }
+}
+/* honesty footnote: mono, bone-3 (DESIGN §7) */
+.footnote {
+  margin: 14px 0 0;
+  max-width: 58ch;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  line-height: 1.6;
+  color: var(--bone-3);
+}
+.error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 0 0;
+  padding: 10px 12px 10px 14px;
+  max-width: var(--span-5);
+  border-left: 2px solid var(--warn);
+  background: var(--ink-1);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--bone-2);
+}
+.errorClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--bone-3);
+}
+.errorClose:hover {
+  color: var(--bone);
+}
+
+/* ── examples ─────────────────────────────────────────────────── */
+.examples {
+  margin-top: 40px;
+  width: var(--span-6);
+}
+.examplesHead,
+.exHint,
+.stats {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.exIdx {
+  color: var(--bone-2);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  white-space: nowrap;
+  transition:
+    color var(--d-hover) var(--ease-out),
+    border-color var(--d-hover) var(--ease-out),
+    background-color var(--d-hover) var(--ease-out);
+}
+.chip:hover {
+  color: var(--bone);
+  border-color: var(--bone-3);
+  background: var(--ink-2);
+}
+.chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.exHint {
+  margin: 12px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exCoord {
+  color: var(--bone-2);
+}
+.exSep {
+  margin: 0 0.7em;
+  color: var(--bone-4);
+}
+
+.stats {
+  margin: 28px 0 0;
+}
+.statNum {
+  color: var(--bone-2);
+}
+
+/* ── tablet ───────────────────────────────────────────────────── */
+@media (max-width: 1199px) {
+  .column,
+  .examples {
+    width: calc(var(--col) * 7 + var(--gutter) * 6);
+  }
+  .searchBlock {
+    width: var(--span-6);
+  }
+}
+
+/* ── phones ───────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .column {
+    top: auto;
+    right: calc(var(--bezel-inset) + var(--margin));
+    bottom: calc(var(--bezel-inset) + 22px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    justify-content: flex-end;
+    isolation: isolate;
+  }
+  /* Phones: the copy sits on a flat ink panel (hairline top, inside the bezel lines) so it stays
+     legible wherever the globe is framed — the same language as the results bottom sheet. */
+  .column::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    left: calc(1px - var(--margin));
+    right: calc(1px - var(--margin));
+    top: -22px;
+    bottom: calc(1px - 22px - env(safe-area-inset-bottom, 0px));
+    background: var(--ink-0);
+    border-top: 1px solid var(--line);
+    pointer-events: none;
+  }
+  .kicker {
+    margin-bottom: 16px;
+  }
+  .headline {
+    font-size: clamp(40px, 12.4vw, 64px);
+  }
+  .kickerIdx,
+  .kickerSep {
+    display: none;
+  }
+  .sub {
+    margin-top: 16px;
+    max-width: 30em;
+    font-size: 15px;
+  }
+  .searchBlock,
+  .examples {
+    width: 100%;
+  }
+  .searchBlock {
+    margin-top: 22px;
+  }
+  .locateLabel {
+    display: none;
+  }
+  .locateInline {
+    height: 40px;
+    padding: 0 4px 0 14px;
+  }
+  .examples {
+    margin-top: 22px;
+  }
+  /* one swipeable row of chips, bleeding to the bezel */
+  .chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin-left: calc(-1 * var(--margin));
+    margin-right: calc(-1 * var(--margin));
+    padding: 0 var(--margin);
+    scrollbar-width: none;
+  }
+  .chips::-webkit-scrollbar {
+    display: none;
+  }
+  .exHint {
+    display: none;
+  }
+  .stats {
+    margin-top: 16px;
+  }
+
+  /* Search mode: the field rises to the top, clear of the on-screen keyboard. */
+  .landing[data-searching='true'] .column {
+    top: calc(var(--bezel-inset) + 64px);
+    bottom: auto;
+    justify-content: flex-start;
+  }
+  .landing[data-searching='true'] .column::before {
+    display: none;
+  }
+  .landing[data-searching='true'] :is(.kicker, .headline, .sub, .examples, .stats, .footnote, .error) {
+    display: none;
+  }
+  /* a flat ink band behind the field, edge to edge inside the bezel, so typing reads over the globe */
+  .landing[data-searching='true'] .searchBlock {
+    margin: 0 calc(-1 * var(--margin));
+    padding: 12px var(--margin) 0;
+    width: auto;
+    background: var(--ink-0);
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* short phones (e.g. 375 × 667): drop the kicker and tighten, so the globe keeps the top third */
+@media (max-width: 760px) and (max-height: 720px) {
+  .kicker {
+    display: none;
+  }
+  .headline {
+    font-size: 40px;
+  }
+  .sub {
+    margin-top: 12px;
+    font-size: 14px;
+  }
+  .searchBlock {
+    margin-top: 14px;
+  }
+  .examples {
+    margin-top: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation-name: fade;
+    animation-duration: 200ms;
+    animation-delay: 0ms !important;
+  }
+  .locDot {
+    animation: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}

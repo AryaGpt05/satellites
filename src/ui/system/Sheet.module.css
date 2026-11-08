@@ -1,0 +1,182 @@
+/*
+ * Sheet — see Sheet.tsx. Desktop: right dock inside the bezel. Mobile: bottom sheet.
+ * `--sheet-clear` keeps the dock clear of the top/bottom corner readouts.
+ */
+.sheet {
+  --sheet-clear: 56px;
+  --sheet-pad: 24px;
+  position: fixed;
+  z-index: var(--z-panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ink-1);
+  border: 1px solid var(--line-strong);
+  color: var(--bone);
+}
+
+/* ── desktop dock ─────────────────────────────────────────────── */
+.dock {
+  top: calc(var(--bezel-inset) + var(--sheet-clear));
+  bottom: calc(var(--bezel-inset) + var(--sheet-clear));
+  right: calc(var(--bezel-inset) + var(--margin));
+  width: min(var(--panel-w), calc(100vw - 2 * (var(--bezel-inset) + var(--margin))));
+  animation: dock-in var(--d-md) var(--ease-out) both;
+}
+@keyframes dock-in {
+  from {
+    opacity: 0;
+    translate: 16px 0;
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* ── mobile bottom sheet ──────────────────────────────────────── */
+.bottom {
+  --sheet-pad: 18px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  transition: transform var(--d-md) var(--ease-out);
+  will-change: transform;
+  animation: sheet-in var(--d-md) var(--ease-out) both;
+}
+.dragging {
+  transition: none;
+}
+@keyframes sheet-in {
+  from {
+    translate: 0 100%;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+
+.dragZone {
+  flex: none;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dragging .dragZone {
+  cursor: grabbing;
+}
+.grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 22px;
+  cursor: inherit;
+}
+.grip:focus-visible {
+  outline-offset: -4px;
+}
+/* Two hairlines, 3px apart: a mechanical grip, not a pill. */
+.gripMark {
+  width: 32px;
+  height: 4px;
+  border-top: 1px solid var(--bone-3);
+  border-bottom: 1px solid var(--bone-3);
+}
+
+/* ── shared structure ─────────────────────────────────────────── */
+.head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px var(--sheet-pad) 16px;
+  border-bottom: 1px solid var(--line);
+}
+.bottom .head {
+  padding-top: 2px;
+}
+.headMain {
+  flex: 1;
+  min-width: 0;
+}
+.close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -6px -8px 0 0;
+  border: 1px solid transparent;
+  color: var(--bone-2);
+  transition:
+    color var(--d-hover) var(--ease-out),
+    border-color var(--d-hover) var(--ease-out);
+}
+.close:hover {
+  color: var(--bone);
+  border-color: var(--line-strong);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px var(--sheet-pad) 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bone-4) transparent;
+}
+.bottom .body {
+  /* At lower snaps part of the sheet is below the fold: pad so the end can scroll into view. */
+  padding-bottom: calc(24px + var(--sheet-hidden, 0px) + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+.body::-webkit-scrollbar {
+  width: 6px;
+}
+.body::-webkit-scrollbar-thumb {
+  background: var(--bone-4);
+}
+
+.foot {
+  flex: none;
+  padding: 14px var(--sheet-pad);
+  border-top: 1px solid var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock,
+  .bottom {
+    animation-name: fade-in;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Mobile footer: pinned to the bottom of the visible part of the sheet, not of the sheet itself. */
+.bottom .foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--sheet-hidden, 0px);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--ink-1);
+  transition: bottom var(--d-md) var(--ease-out);
+}
+.bottom:has(.foot) .body {
+  padding-bottom: calc(24px + var(--sheet-hidden, 0px) + var(--sheet-foot, 64px));
+}
+.dragging .foot {
+  transition: none;
+}

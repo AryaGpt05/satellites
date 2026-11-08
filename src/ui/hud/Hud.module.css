@@ -1,0 +1,107 @@
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-hud);
+  pointer-events: none;
+}
+
+.line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
+.value {
+  color: var(--bone);
+}
+.dim {
+  color: var(--bone-3);
+}
+.sep {
+  margin: 0 0.7em;
+  color: var(--bone-4);
+}
+.warn {
+  color: var(--warn);
+}
+.pending {
+  color: var(--bone-3);
+}
+.pending::after {
+  content: '';
+  display: inline-block;
+  width: 0.62em;
+  height: 1em;
+  margin-left: 0.5em;
+  vertical-align: -0.12em;
+  background: var(--bone-3);
+  animation: hard-blink 1s steps(1, end) infinite;
+}
+
+/* TL */
+.wordmark {
+  color: var(--bone);
+  font-weight: 500;
+  letter-spacing: 0.26em;
+}
+.version {
+  margin-left: 1.1em;
+  color: var(--bone-3);
+  letter-spacing: var(--track-label);
+  text-transform: none;
+}
+.about {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  /* generous hit area without moving the text off the grid */
+  padding: 6px 0;
+  margin: -6px 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--bone-3);
+  transition: color var(--d-hover) var(--ease-out);
+}
+.about:hover {
+  color: var(--bone);
+}
+
+/* TR */
+.clock {
+  color: var(--bone);
+}
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 10px;
+  background: var(--signal);
+  animation: hard-blink 1s steps(1, end) infinite;
+}
+@keyframes hard-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.mob {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .desk {
+    display: none !important;
+  }
+  .mob {
+    display: inline-flex !important;
+    color: var(--bone-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot,
+  .pending::after {
+    animation: none;
+  }
+}

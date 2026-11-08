@@ -1,0 +1,149 @@
+.root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--ink-0);
+  /* The canvas takes drag gestures; overlay UI above it keeps its own pointer events. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.root canvas {
+  display: block;
+  outline: none;
+}
+
+/* ── fallback (no WebGL 2) ─────────────────────────────── */
+.fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--ink-0);
+}
+.fallbackFigure {
+  width: min(56vh, 72vw);
+  aspect-ratio: 1;
+  color: var(--bone-4);
+}
+.fallbackNote {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--bezel-inset) + 56px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* ── screen-space overlay (GlobeOverlay.tsx) ─────────────────────────────── */
+.overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  will-change: transform, opacity;
+  transition: opacity var(--d-sm) var(--ease-out);
+}
+.callout {
+  pointer-events: none;
+}
+.calloutLeader {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  transform-origin: 0 0;
+}
+.calloutFlip .calloutLeader {
+  transform: scaleX(-1);
+}
+.calloutBelow .calloutLeader {
+  transform: scaleY(-1);
+}
+.calloutFlip.calloutBelow .calloutLeader {
+  transform: scale(-1, -1);
+}
+.calloutBox {
+  position: absolute;
+  left: 44px;
+  bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px 6px;
+  background: var(--ink-1);
+  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.calloutFlip .calloutBox {
+  left: auto;
+  right: 44px;
+}
+.calloutBelow .calloutBox {
+  bottom: auto;
+  top: 24px;
+}
+.calloutName {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bone);
+  font-variant-numeric: tabular-nums;
+}
+.calloutMeta {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 350;
+  font-size: 10px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+  font-variant-numeric: tabular-nums;
+}
+.calloutMeta b {
+  font-weight: 400;
+  color: var(--bone-2);
+}
+.calloutSignal .calloutBox {
+  border-color: var(--signal);
+}
+.calloutSignal .calloutName {
+  color: var(--signal);
+}
+
+/* ── place coordinate label ─────────────────────────────── */
+.coord {
+  position: absolute;
+  left: 36px;
+  top: -8px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 350;
+  font-size: 10.5px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  /* cartographic halo: legibility over bright cloud, not a drop shadow */
+  text-shadow:
+    0 0 2px var(--ink-0),
+    0 0 1px var(--ink-0);
+  transition: opacity var(--d-md) var(--ease-out);
+}
+.coordSub {
+  margin-left: 0.8em;
+  color: var(--bone-3);
+}
