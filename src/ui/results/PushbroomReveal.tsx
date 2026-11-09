@@ -155,6 +155,56 @@ export function PushbroomReveal({
     onPhaseRef.current?.(p)
   }, [])
 
+  /**
+   * The picture pre-scaled to the canvas (cover crop, device pixels), so every paint is a 1:1 blit (U-1). Drawing the
+   * 1024 px element with high-quality smoothing cost ~25 ms per frame at 4× CPU, and its first draw (upload + mips)
+   * 100–150 ms inside a ResizeObserver callback; the bitmap is made once (~25 ms, in an idle slot before the scan).
+   */
+  const bmpRef = useRef<{ bmp: ImageBitmap; W: number; H: number } | null>(null)
+  const bmpPending = useRef<Promise<void> | null>(null)
+  const dropBitmap = useCallback(() => {
+    bmpRef.current?.bmp.close?.()
+    bmpRef.current = null
+    bmpPending.current = null
+  }, [])
+  useEffect(() => dropBitmap, [dropBitmap])
+
+  /** Cover-fit crop of the source for a w×h box: a square crop in a 16:9 hero frame shows its centre (the place stays centred). */
+  const coverCrop = (img: HTMLImageElement, w: number, h: number) => {
+    const iw = img.naturalWidth || img.width
+    const ih = img.naturalHeight || img.height
+    const scale = Math.max(w / iw, h / ih)
+    const sw = w / scale
+    const sh = h / scale
+    return { sx: (iw - sw) / 2, sy: (ih - sh) / 2, sw, sh }
+  }
+
+  /** Make the pre-scaled bitmap for the current size (resolves at once if it exists). Never rejects. */
+  const ensureBitmap = useCallback((): Promise<void> => {
+    const img = imgRef.current
+    const { w, h } = sizeRef.current
+    if (!img || !w || !h || typeof createImageBitmap !== 'function') return Promise.resolve()
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    const W = Math.round(w * dpr)
+    const H = Math.round(h * dpr)
+    const have = bmpRef.current
+    if (have && have.W === W && have.H === H) return Promise.resolve()
+    if (bmpPending.current) return bmpPending.current
+    const { sx, sy, sw, sh } = coverCrop(img, w, h)
+    const p = createImageBitmap(img, Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh), { resizeWidth: W, resizeHeight: H, resizeQuality: 'high' })
+      .then((bmp) => {
+        if (bmpPending.current !== p) return void bmp.close?.()
+        bmpPending.current = null
+        bmpRef.current?.bmp.close?.()
+        bmpRef.current = { bmp, W, H }
+      })
+      .catch(() => {
+        if (bmpPending.current === p) bmpPending.current = null
+      })
+    bmpPending.current = p
+    return p
+  }, [])
+
   /** Paint the image scanned up to progress p (0..1). */
   const paint = useCallback(
     (p: number) => {
@@ -165,24 +215,37 @@ export function PushbroomReveal({
       const dpr = Math.min(2, window.devicePixelRatio || 1)
       const W = Math.round(w * dpr)
       const H = Math.round(h * dpr)
+      const T: number[] = [performance.now()]
       if (cv.width !== W || cv.height !== H) {
         cv.width = W
         cv.height = H
       }
-      const ctx = cv.getContext('2d')
+      T.push(performance.now())
+      // A CPU-backed canvas (U-1): a GPU-backed one makes the first paint (and every resize) wait on the GPU process,
+      // which on a phone is busy drawing the globe (70–145 ms of main thread at 4× CPU). Each frame here is a small
+      // blit plus a few paths; the compositor uploads the result.
+      const ctx = cv.getContext('2d', { willReadFrequently: true })
       if (!ctx) return
+      T.push(performance.now())
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
+      T.push(performance.now())
+      ;((window as any).__pb ||= []).push({ p, T })
       ctx.imageSmoothingQuality = 'high'
-      // Cover-fit: a square crop in a 16:9 hero frame shows its centre (the place stays centred).
-      const iw = img.naturalWidth || img.width
-      const ih = img.naturalHeight || img.height
-      const scale = Math.max(w / iw, h / ih)
-      const sw = w / scale
-      const sh = h / scale
-      const sx = (iw - sw) / 2
-      const sy = (ih - sh) / 2
-      const draw = () => ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
+      const draw = () => {
+        const b = bmpRef.current
+        if (b && b.W === W && b.H === H) {
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.drawImage(b.bmp, 0, 0)
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        } else if (b) {
+          // Resized since the bitmap was made (a new one is on its way): scale the old one, never the 1024 px source.
+          ctx.drawImage(b.bmp, 0, 0, w, h)
+        } else {
+          const { sx, sy, sw, sh } = coverCrop(img, w, h)
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
+        }
+      }
       if (p >= 1) {
         draw()
         return
@@ -207,22 +270,25 @@ export function PushbroomReveal({
       }
       ctx.stroke()
       ctx.restore()
+      T.push(performance.now())
 
-      // Scanned part.
-      ctx.save()
-      const poly = scannedPolygon(w, h, d, front)
-      tracePoly(ctx, poly)
-      ctx.clip()
-      draw()
-      // Trailing glow just behind the front (DESIGN §5: ≈ 6px, 30 % → 0). Screen-blended so it reads
-      // as light on dark terrain at 1× DPR, not as a tint lost in the antialiasing of the line.
-      const g = ctx.createLinearGradient(d.x * front, d.y * front, d.x * (front - GLOW_PX), d.y * (front - GLOW_PX))
-      g.addColorStop(0, 'rgba(255,106,26,0.42)')
-      g.addColorStop(0.35, 'rgba(255,106,26,0.18)')
-      g.addColorStop(1, 'rgba(255,106,26,0)')
-      ctx.globalCompositeOperation = 'screen'
-      fillPoly(ctx, scannedPolygon(w, h, d, front, GLOW_PX), g)
-      ctx.restore()
+      // Scanned part (none yet at 0: the waiting raster never touches the picture's pixels).
+      if (p > 0) {
+        ctx.save()
+        const poly = scannedPolygon(w, h, d, front)
+        tracePoly(ctx, poly)
+        ctx.clip()
+        draw()
+        // Trailing glow just behind the front (DESIGN §5: ≈ 6px, 30 % → 0). Screen-blended so it reads
+        // as light on dark terrain at 1× DPR, not as a tint lost in the antialiasing of the line.
+        const g = ctx.createLinearGradient(d.x * front, d.y * front, d.x * (front - GLOW_PX), d.y * (front - GLOW_PX))
+        g.addColorStop(0, 'rgba(255,106,26,0.42)')
+        g.addColorStop(0.35, 'rgba(255,106,26,0.18)')
+        g.addColorStop(1, 'rgba(255,106,26,0)')
+        ctx.globalCompositeOperation = 'screen'
+        fillPoly(ctx, scannedPolygon(w, h, d, front, GLOW_PX), g)
+        ctx.restore()
+      }
 
       // Scan front: a signal line with a 1px bone core (a hot read head, not a crack in a JPEG).
       const [l0, l1] = frontLine(w, h, d, front)
@@ -238,6 +304,7 @@ export function PushbroomReveal({
       ctx.moveTo(l0.x, l0.y)
       ctx.lineTo(l1.x, l1.y)
       ctx.stroke()
+      T.push(performance.now())
     },
     [headingDeg],
   )
@@ -252,14 +319,23 @@ export function PushbroomReveal({
       sizeRef.current = { w: box.clientWidth, h: box.clientHeight }
       return
     }
+    let idle = 0
     const ro = new ResizeObserver((entries) => {
       const r = entries[entries.length - 1].contentRect
       sizeRef.current = { w: r.width, h: r.height }
       paint(progressRef.current)
+      // A picture already on the canvas at another size: a new pre-scaled bitmap in an idle slot, then repaint.
+      if (imgRef.current && bmpRef.current && progressRef.current > 0) {
+        cancelIdle(idle)
+        idle = whenIdle(() => void ensureBitmap().then(() => paint(progressRef.current)))
+      }
     })
     ro.observe(box)
-    return () => ro.disconnect()
-  }, [paint])
+    return () => {
+      ro.disconnect()
+      cancelIdle(idle)
+    }
+  }, [paint, ensureBitmap])
 
   // Phones: the frame must be on screen before the scan runs: essentially all of it, so the sheet has
   // finished rising past the footer (the body clips it) and no line is read under the fold.
@@ -283,6 +359,8 @@ export function PushbroomReveal({
     const ctl = new AbortController()
     const mountedAt = performance.now()
     imgRef.current = null
+    dropBitmap()
+    let idle = 0
     progressRef.current = 0
     setCentreLocked(false)
     setSlow(false)
@@ -301,6 +379,11 @@ export function PushbroomReveal({
       if (!alive) return
       if (seenKey) markSeen(seenKey)
       useApp.getState().holdMotion(DUR.pushbroom + 200)
+      cancelIdle(idle)
+      // Every frame of the scan blits the pre-scaled picture (usually made already, in the wait).
+      void ensureBitmap().then(() => alive && scan())
+    }
+    const scan = () => {
       if (reduced) {
         finish()
         return
@@ -363,9 +446,11 @@ export function PushbroomReveal({
         if (!alive) return
         window.clearTimeout(slowTimer)
         imgRef.current = img
-        if (instant) return finish()
+        if (instant) return void ensureBitmap().then(() => alive && finish())
         paint(0)
         setP('waiting')
+        // The scan's pre-scaled picture, made while it waits (one ~25 ms slice at 4× CPU, off the critical path).
+        idle = whenIdle(() => void ensureBitmap())
         schedule()
       })
       .catch(() => {
@@ -376,13 +461,14 @@ export function PushbroomReveal({
     return () => {
       alive = false
       ctl.abort()
+      cancelIdle(idle)
       cancelAnimationFrame(raf)
       window.clearTimeout(poll)
       window.clearTimeout(slowTimer)
     }
     // `attempt` re-runs the load on retry. `instant`/`startAt` are read at start only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, lines, reduced, paint, setP, attempt])
+  }, [src, lines, reduced, paint, setP, attempt, ensureBitmap, dropBitmap])
 
   const shown = phase === 'revealing' || phase === 'done'
 
@@ -434,6 +520,17 @@ export function PushbroomReveal({
 function awaitText(tc: number): string {
   const c = awaitCountdown(sceneClock.simTime, sceneClock.mode, tc)
   return c ? ` · ${c}` : ''
+}
+
+/** requestIdleCallback with a short deadline (a fallback timer where it is missing); returns a handle for cancelIdle. */
+function whenIdle(cb: () => void): number {
+  if (typeof requestIdleCallback === 'function') return requestIdleCallback(cb, { timeout: 400 })
+  return -window.setTimeout(cb, 60)
+}
+function cancelIdle(id: number) {
+  if (!id) return
+  if (id < 0) window.clearTimeout(-id)
+  else if (typeof cancelIdleCallback === 'function') cancelIdleCallback(id)
 }
 
 function tracePoly(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]) {
