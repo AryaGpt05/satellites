@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 746" width="360" height="746" role="img" aria-labelledby="t d">
+<title id="t">What runs where</title>
+<desc id="d">One lookup, top to bottom. In your browser: 01 place, 02 passes (SGP4 over 7 days in Web Workers), 03 photos (archive search matched to passes), 04 pixels (toning and the cloud at your spot), 05 share. Beside each step, the service it talks to: Photon for place names, CelesTrak element sets refreshed every 6 hours by GitHub Actions, Microsoft Planetary Computer, Element 84 and NASA GIBS for the archive search, Planetary Computer for each crop and its cloud mask, and Vercel and Supabase for the share card and link.</desc>
+<rect x="0.5" y="0.5" width="359" height="745" fill="#FFFFFF" stroke="rgba(7,8,10,0.16)"/>
+<path d="M8 18 V8 H18" fill="none" stroke="rgba(7,8,10,0.34)" stroke-width="1"/>
+<path d="M352 18 V8 H342" fill="none" stroke="rgba(7,8,10,0.34)" stroke-width="1"/>
+<path d="M8 728 V738 H18" fill="none" stroke="rgba(7,8,10,0.34)" stroke-width="1"/>
+<path d="M352 728 V738 H342" fill="none" stroke="rgba(7,8,10,0.34)" stroke-width="1"/>
+<text x="14" y="36" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1.3" fill="rgba(7,8,10,0.70)">WHAT RUNS WHERE</text>
+<rect x="14.5" y="55.5" width="9" height="9" fill="#F6F5F2" stroke="rgba(7,8,10,0.34)"/>
+<text x="30" y="64" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1.2" fill="rgba(7,8,10,0.54)">IN YOUR BROWSER</text>
+<rect x="186.5" y="55.5" width="9" height="9" fill="none" stroke="rgba(7,8,10,0.54)" stroke-dasharray="2 2"/>
+<text x="202" y="64" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1.2" fill="rgba(7,8,10,0.54)">SERVICES</text>
+<rect x="12.5" y="82.5" width="149" height="113" fill="#F6F5F2" stroke="rgba(7,8,10,0.34)"/>
+<text x="26" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1" fill="rgba(7,8,10,0.54)">01</text>
+<text x="26" y="126" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" letter-spacing="1.4" fill="#07080A">PLACE</text>
+<text x="26" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">Search, your</text>
+<text x="26" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">location or</text>
+<text x="26" y="182" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">an example</text>
+<circle cx="138" cy="102" r="6" fill="none" stroke="#FF6A1A" stroke-width="1.25"/>
+<circle cx="138" cy="102" r="1.6" fill="#FF6A1A"/>
+<path d="M146 102 L150 102" stroke="#FF6A1A" stroke-width="1.25"/>
+<path d="M130 102 L126 102" stroke="#FF6A1A" stroke-width="1.25"/>
+<path d="M138 110 L138 114" stroke="#FF6A1A" stroke-width="1.25"/>
+<path d="M138 94 L138 90" stroke="#FF6A1A" stroke-width="1.25"/>
+<path d="M40 200 V210" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M36.5 205 L40 210 L43.5 205" fill="none" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<rect x="186.5" y="82.5" width="161" height="113" fill="none" stroke="rgba(7,8,10,0.34)" stroke-dasharray="3 3"/>
+<text x="198" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1" fill="rgba(7,8,10,0.54)">NAMES</text>
+<text x="198" y="126" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#07080A">Photon</text>
+<text x="198" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">Place names from</text>
+<text x="198" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">OpenStreetMap</text>
+<path d="M166 122 H182" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M171 118.5 L166 122 L171 125.5" fill="none" stroke="rgba(7,8,10,0.54)"/>
+<rect x="12.5" y="214.5" width="149" height="113" fill="#F6F5F2" stroke="rgba(7,8,10,0.34)"/>
+<text x="26" y="236" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1" fill="rgba(7,8,10,0.54)">02</text>
+<text x="26" y="258" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" letter-spacing="1.4" fill="#07080A">PASSES</text>
+<text x="26" y="280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">SGP4 over 7 days,</text>
+<text x="26" y="297" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">in Web Workers</text>
+<path d="M40 332 V342" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M36.5 337 L40 342 L43.5 337" fill="none" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<rect x="186.5" y="214.5" width="161" height="113" fill="none" stroke="rgba(7,8,10,0.34)" stroke-dasharray="3 3"/>
+<text x="198" y="236" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1" fill="rgba(7,8,10,0.54)">ORBITS</text>
+<text x="198" y="258" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#07080A">CelesTrak</text>
+<text x="198" y="280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">Element sets, every</text>
+<text x="198" y="297" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">6 hours, via</text>
+<text x="198" y="314" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">GitHub Actions</text>
+<path d="M166 254 H182" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M171 250.5 L166 254 L171 257.5" fill="none" stroke="rgba(7,8,10,0.54)"/>
+<rect x="12.5" y="346.5" width="149" height="113" fill="#F6F5F2" stroke="rgba(7,8,10,0.34)"/>
+<text x="26" y="368" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1" fill="rgba(7,8,10,0.54)">03</text>
+<text x="26" y="390" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" letter-spacing="1.4" fill="#07080A">PHOTOS</text>
+<text x="26" y="412" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">Archive search,</text>
+<text x="26" y="429" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">matched to passes</text>
+<path d="M40 464 V474" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M36.5 469 L40 474 L43.5 469" fill="none" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<rect x="186.5" y="346.5" width="161" height="113" fill="none" stroke="rgba(7,8,10,0.34)" stroke-dasharray="3 3"/>
+<text x="198" y="368" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1" fill="rgba(7,8,10,0.54)">SCENES</text>
+<text x="198" y="390" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#07080A">Archives</text>
+<text x="198" y="412" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">Planetary Computer,</text>
+<text x="198" y="429" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">Element 84,</text>
+<text x="198" y="446" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">NASA GIBS</text>
+<path d="M166 386 H182" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M171 382.5 L166 386 L171 389.5" fill="none" stroke="rgba(7,8,10,0.54)"/>
+<rect x="12.5" y="478.5" width="149" height="113" fill="#F6F5F2" stroke="rgba(7,8,10,0.34)"/>
+<text x="26" y="500" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1" fill="rgba(7,8,10,0.54)">04</text>
+<text x="26" y="522" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" letter-spacing="1.4" fill="#07080A">PIXELS</text>
+<text x="26" y="544" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">Photo toning and</text>
+<text x="26" y="561" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">cloud at your spot</text>
+<path d="M40 596 V606" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M36.5 601 L40 606 L43.5 601" fill="none" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<rect x="186.5" y="478.5" width="161" height="113" fill="none" stroke="rgba(7,8,10,0.34)" stroke-dasharray="3 3"/>
+<text x="198" y="500" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1" fill="rgba(7,8,10,0.54)">CROPS</text>
+<text x="198" y="522" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#07080A">Planetary Computer</text>
+<text x="198" y="544" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">Renders each crop</text>
+<text x="198" y="561" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">and its cloud mask</text>
+<path d="M166 518 H182" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M171 514.5 L166 518 L171 521.5" fill="none" stroke="rgba(7,8,10,0.54)"/>
+<rect x="12.5" y="610.5" width="149" height="113" fill="#F6F5F2" stroke="rgba(7,8,10,0.34)"/>
+<text x="26" y="632" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1" fill="rgba(7,8,10,0.54)">05</text>
+<text x="26" y="654" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" letter-spacing="1.4" fill="#07080A">SHARE</text>
+<text x="26" y="676" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">A link and a card</text>
+<text x="26" y="693" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="rgba(7,8,10,0.70)">for the pass</text>
+<rect x="186.5" y="610.5" width="161" height="113" fill="none" stroke="rgba(7,8,10,0.34)" stroke-dasharray="3 3"/>
+<text x="198" y="632" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="10.5" letter-spacing="1" fill="rgba(7,8,10,0.54)">CARD</text>
+<text x="198" y="654" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#07080A">Vercel, Supabase</text>
+<text x="198" y="676" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">Renders the card,</text>
+<text x="198" y="693" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="rgba(7,8,10,0.70)">stores the link</text>
+<path d="M166 650 H182" stroke="rgba(7,8,10,0.54)" stroke-width="1"/>
+<path d="M177 646.5 L182 650 L177 653.5" fill="none" stroke="rgba(7,8,10,0.54)"/>
+</svg>
