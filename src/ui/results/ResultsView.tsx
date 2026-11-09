@@ -20,10 +20,11 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { timeZoneAt } from '@/imagery'
 import { SHORT_LANDSCAPE_QUERY } from '@/lib/layout'
+import { announceUiEntrance } from '@/lib/uiEvents'
 import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
-import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion, useViewportHeight } from '@/ui/system'
+import { Button, Glyph, Rule, Sheet, cx, safeAreaTop, useIsMobile, useMediaQuery, useReducedMotion, useViewportHeight } from '@/ui/system'
 import { GeoLook } from './BestLook'
 import { ComputingBody } from './ComputingBody'
 import { Gallery, galleryCtl } from './Gallery'
@@ -205,9 +206,13 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     }
   }, [mobile])
 
-  // The results handoff: let the globe keep its GPU work for after the entrance.
-  useEffect(() => {
-    if (handoff) useApp.getState().holdMotion(900)
+  // The results handoff: let the globe keep its GPU work for after the entrance. In the commit itself (a layout effect),
+  // so the hold and the phone's one skipped globe frame (INT-04) apply to the very next frame, the one that lays the
+  // new panel out.
+  useLayoutEffect(() => {
+    if (!handoff) return
+    useApp.getState().holdMotion(900)
+    announceUiEntrance()
   }, [handoff])
 
   // Staging (PERF-03, R2R7): the list, the geostationary frames and the compact timeline mount one frame
@@ -517,7 +522,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         const pad = parseFloat(getComputedStyle(body).paddingTop) || 20
         const chrome = headHeight(body) + pad + offset + caption + (foot?.offsetHeight ?? 0) + 6
         const withBand = vh - useApp.getState().uiInsets.top - PHONE_CAPTURE_BAND - chrome
-        const room = withBand >= 240 ? withBand : Math.min(vh * TOP, vh - 64) - chrome
+        const room = withBand >= 240 ? withBand : Math.min(vh * TOP, vh - 64 - safeAreaTop()) - chrome
         sec.style.setProperty('--detail-chrome', `${Math.round(vh - room)}px`)
         return
       }

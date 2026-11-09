@@ -88,7 +88,13 @@
 }
 .panel.shortLandscape {
   top: calc(var(--bezel-inset) + 8px);
-  width: min(600px, 66vw);
+  /* PH-04: with the notch's side insets the dock narrows rather than sliding left over the HUD's top-left column
+     (the wordmark, v0.1 and How this works, ≈ 124 px from the margin): its left edge stays a gutter clear of it. */
+  width: min(
+    600px,
+    66vw,
+    calc(100vw - 2 * (var(--bezel-inset) + var(--margin)) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 124px - var(--gutter))
+  );
 }
 .panel.shortLandscape :global(section) {
   scroll-margin-top: 0;

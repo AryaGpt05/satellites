@@ -44,7 +44,7 @@ import { useIsMobile } from './media'
 import { prefersReducedMotion } from './motion'
 import { cx } from './primitives'
 import { clampIndex, resolveSnap, rubberband, settleMs, snapHeightsPx, topOvershoot } from './sheetMath'
-import { useViewportHeight } from './viewport'
+import { safeAreaTop, useViewportHeight } from './viewport'
 import s from './Sheet.module.css'
 
 export interface SheetProps {
@@ -141,7 +141,9 @@ export function Sheet({
   // Leave room above the tallest snap for the top corner readouts.
   // `snapKey` stands in for `snaps`, which callers often pass as a fresh inline array.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const heights = useMemo(() => snapHeightsPx(snaps, vh, vh - TOP_CLEAR_PX), [snapKey, vh])
+  // …and below a top safe-area inset (a notch over a home-screen web app, PH-09), which moves those readouts down.
+  const topClear = TOP_CLEAR_PX + safeAreaTop()
+  const heights = useMemo(() => snapHeightsPx(snaps, vh, vh - topClear), [snapKey, vh, topClear])
   const max = heights[heights.length - 1]
 
   const [own, setOwn] = useState(() => defaultSnap ?? Math.floor((snaps.length - 1) / 2))
@@ -362,7 +364,7 @@ export function Sheet({
       const { heights: hs, max: mx, vh: h, dismissible: dis } = live.current
       const lowest = mx - hs[0]
       let off = offset0 + (ev.clientY - yA)
-      if (off < 0) off = topOvershoot(off, h - mx, TOP_CEILING_PX, 32)
+      if (off < 0) off = topOvershoot(off, h - mx, TOP_CEILING_PX + safeAreaTop(), 32)
       else if (off > lowest) off = lowest + (dis ? off - lowest : rubberband(off - lowest, 60))
       jump(off)
       emit(mx - off, false)

@@ -653,7 +653,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
         </>
       ) : null}
 
-      <div ref={setChrome(1)} className={s.meta} style={{ top: layout.top + side + 12, left: mobile ? 16 : layout.left, width: mobile ? undefined : side }}>
+      <div ref={setChrome(1)} className={s.meta} style={{ top: layout.top + side + 12, left: mobile ? undefined : layout.left, width: mobile ? undefined : side }}>
         <MetaStrip photo={photo} model={model} />
         {photo.pass && onReplay ? (
           <Button
@@ -674,7 +674,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
 
       {!mobile ? (
         <div ref={setChrome(2)} className={s.film} role="listbox" aria-label="All photos" aria-activedescendant={`lb-thumb-${index}`}>
-          <Filmstrip items={items} index={index} onPick={goTo} />
+          <Filmstrip items={items} index={index} onPick={goTo} tz={model.tz} />
         </div>
       ) : null}
     </div>
@@ -743,24 +743,30 @@ function MetaStrip({ photo, model }: { photo: Photo; model: ResultsModel }) {
   const tz = model.tz
   const t = pass ? model.times(pass) : { day: fmtLocalDay(capture.datetime, tz), time: fmtLocalTime(capture.datetime, tz), zone: zoneAbbr(capture.datetime, tz) }
   const w = cropWidthKm(capture)
-  const status = photo.kind === 'mosaic' ? 'Daily mosaic' : photo.clouded ? `Clouded${capture.cloudCoverPct !== undefined ? ` · ${int(capture.cloudCoverPct)}%` : ''}` : capture.spot === 'clear' ? 'Clear at your spot' : capture.spot === 'cirrus' ? 'Thin cirrus' : undefined
+  // A daily mosaic says so once, in the product line ('Daily mosaic · 250 m'), not again as its status (PH-11).
+  const status = photo.kind === 'mosaic' ? undefined : photo.clouded ? `Clouded${capture.cloudCoverPct !== undefined ? ` · ${int(capture.cloudCoverPct)}%` : ''}` : capture.spot === 'clear' ? 'Clear at your spot' : capture.spot === 'cirrus' ? 'Thin cirrus' : undefined
+  // Phones wrap these rows like prose: every value keeps its unit and its leading separator (PH-11: '15:24 / EST',
+  // '240 / KM', a dangling '·').
+  const unit = (text: string) => <span className={s.nowrap}>{text}</span>
   return (
     <div className={s.metaText}>
       <span className={s.metaRow}>
         <span className={cx(s.metaMain, s.metaFit)}>
           <span className={s.metaKeep}>
-            <b>{meta.name}</b> · {t.day} · {t.time} {t.zone}
+            <b>{meta.name}</b> {unit(`· ${t.day}`)} {unit(`· ${t.time} ${t.zone}`)}
           </span>
           <span className={cx(s.dim, s.metaOpt)}>
-            {'\u00a0· '}
-            <Ago t={pass?.tClosest ?? capture.datetime} base={model.clock} />
+            <span className={s.nowrap}>
+              {'\u00a0· '}
+              <Ago t={pass?.tClosest ?? capture.datetime} base={model.clock} />
+            </span>
           </span>
         </span>
         {status ? <span className={cx(s.status, photo.clouded && s.warn)}>{status}</span> : null}
       </span>
       <span className={s.metaRow}>
         <span className={s.metaMain}>
-          {productLabel(capture)} · {w >= 100 ? int(w) : dec1(w)} km · <span className={s.nowrap}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
+          {unit(productLabel(capture))} {unit(`· ${w >= 100 ? int(w) : dec1(w)} km`)} <span className={s.nowrap}>· {coordsOf(model.report.place.lat, model.report.place.lon)}</span>
         </span>
       </span>
       <span className={s.credit}>{credit(capture)}</span>
@@ -768,7 +774,7 @@ function MetaStrip({ photo, model }: { photo: Photo; model: ResultsModel }) {
   )
 }
 
-function Filmstrip({ items, index, onPick }: { items: Photo[]; index: number; onPick: (i: number) => void }) {
+function Filmstrip({ items, index, onPick, tz }: { items: Photo[]; index: number; onPick: (i: number) => void; tz: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = ref.current?.children[index] as HTMLElement | undefined
@@ -788,15 +794,18 @@ function Filmstrip({ items, index, onPick }: { items: Photo[]; index: number; on
           aria-label={`Photo ${i + 1}`}
           tabIndex={i === index ? 0 : -1}
         >
-          <Thumb url={thumbUrl(p.capture)} near={Math.abs(i - index) <= 12} />
+          <Thumb url={thumbUrl(p.capture)} near={Math.abs(i - index) <= 12} day={fmtLocalDay(p.capture.datetime, tz)} />
         </button>
       ))}
     </div>
   )
 }
 
-/** A filmstrip thumbnail: loads when near the current photo, then stays. */
-function Thumb({ url, near }: { url: string; near: boolean }) {
+/**
+ * A filmstrip thumbnail: loads when near the current photo, then stays. Until then the slot is an instrument tag with
+ * the photo's local day (LAP-07: a row of empty dark boxes read as unfinished).
+ */
+function Thumb({ url, near, day }: { url: string; near: boolean; day: string }) {
   const [ok, setOk] = useState(() => !!decodedPhoto(url) || hasPhotoElement('film', url))
   useEffect(() => {
     if (ok || !near) return
@@ -808,7 +817,15 @@ function Thumb({ url, near }: { url: string; near: boolean }) {
       alive = false
     }
   }, [url, near, ok])
-  return ok ? <Img view="film" url={url} alt="" /> : null
+  if (ok) return <Img view="film" url={url} alt="" />
+  // 'Sat 31 Oct' → 'SAT' / '31 OCT'
+  const [wd, ...rest] = day.split(' ')
+  return (
+    <span className={s.thumbPh} aria-hidden>
+      <span>{wd}</span>
+      <span>{rest.join(' ')}</span>
+    </span>
+  )
 }
 
 /**

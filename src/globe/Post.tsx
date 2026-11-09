@@ -14,6 +14,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { BlendFunction, BloomEffect, EffectComposer, EffectPass, NoiseEffect, RenderPass, ShaderPass, VignetteEffect } from 'postprocessing'
 import { ShaderMaterial } from 'three'
 import { useEffect, useMemo, useRef } from 'react'
+import { UI_ENTRANCE_EVENT } from '@/lib/uiEvents'
 import { HalfFloatType, Vector2 } from 'three'
 import { msaaFor } from './quality'
 import { useRuntime } from './runtime'
@@ -95,6 +96,14 @@ export function usePost(): EffectComposer {
     return c
   }, [gl, scene, camera, msaa, mobile])
   useEffect(() => () => composer.dispose(), [composer])
+  // Phones: the frame after a heavy UI entrance keeps the last image (src/lib/uiEvents.ts), so the panel's layout
+  // and this frame's draw are two tasks, not one long one.
+  useEffect(() => {
+    if (!mobile) return
+    const onEntrance = () => void (rt.skipRender = Math.max(rt.skipRender, 1))
+    window.addEventListener(UI_ENTRANCE_EVENT, onEntrance)
+    return () => window.removeEventListener(UI_ENTRANCE_EVENT, onEntrance)
+  }, [rt, mobile])
 
   const size = useMemo(() => new Vector2(), [])
   const applied = useRef({ composer: null as EffectComposer | null, w: -1, h: -1, dpr: -1 })

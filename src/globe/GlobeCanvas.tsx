@@ -46,7 +46,12 @@ export function GlobeCanvas({ className }: { className?: string }) {
   const [runtime] = useState(() => createRuntime(provisionalTier(detectMobile()), prefersReducedMotion(), Date.now()))
 
   useEffect(() => {
-    if (unavailable) useApp.getState().setGlobeReady(true)
+    // No WebGL: no globe is coming, and no sharp day map either (INT-01 / PH-13: deep and share links held the logo
+    // the full sharp-map wait for one that never comes).
+    if (unavailable) {
+      useApp.getState().setGlobeReady(true)
+      useApp.getState().setDayMapSharp(true)
+    }
   }, [unavailable])
 
   // Follow the OS setting live: camera cuts, frozen cloud drift and instant reveals switch with it.

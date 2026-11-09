@@ -286,6 +286,20 @@
   color: var(--signal);
   transition-duration: 0ms;
 }
+/* Touch: a 44 px hit box over the 28 px text action (PH-08 / INT-03); its look and the row stay as they were. */
+@media (pointer: coarse) {
+  .textAction {
+    position: relative;
+  }
+  .textAction::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -8px;
+    bottom: -8px;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .dialog {

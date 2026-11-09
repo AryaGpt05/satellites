@@ -184,7 +184,9 @@ function ImagePlateView({ plate }: { plate: ImagePlate }) {
           key={url}
           crossOrigin="anonymous"
           decoding={img.instant ? 'sync' : 'async'}
-          src={url}
+          // The bytes already decoded for the panel (a weather mosaic is decoded from a blob: of what the pixels
+          // worker fetched, and NASA GIBS sends no-store): never a second download (PH-07 / LAP-05).
+          src={decodedPhoto(url)?.src ?? url}
           alt=""
           className={rect ? s.cut : s.img}
           style={style}

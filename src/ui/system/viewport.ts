@@ -11,19 +11,40 @@ let vh = typeof window === 'undefined' ? 800 : window.innerHeight
 const subs = new Set<() => void>()
 let raf = 0
 
+/**
+ * The top safe-area inset (px): a notch / status bar over a home-screen web app, or a landscape notch's top. Read
+ * from a fixed probe's computed padding (a style read, no layout), at load and after each resize (a rotation changes
+ * it). PH-09: the sheet's top snap and the landing's lifted search keep the HUD band below it clear.
+ */
+let safeTop = 0
+let probe: HTMLElement | null = null
+function readSafeTop(): number {
+  if (typeof document === 'undefined') return 0
+  if (!probe) {
+    probe = document.createElement('div')
+    probe.setAttribute('aria-hidden', 'true')
+    probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px)'
+    document.documentElement.appendChild(probe)
+  }
+  return Number.parseFloat(getComputedStyle(probe).paddingTop) || 0
+}
+
 function onResize() {
   if (raf) return
   raf = requestAnimationFrame(() => {
     raf = 0
     const h = window.innerHeight
-    if (h === vh) return
+    const top = readSafeTop()
+    if (h === vh && top === safeTop) return
     vh = h
+    safeTop = top
     subs.forEach((f) => f())
   })
 }
 
 // Listening from module load (not only while a component subscribes), so the cache is right whenever it is read.
 if (typeof window !== 'undefined') {
+  safeTop = readSafeTop()
   window.addEventListener('resize', onResize)
   window.visualViewport?.addEventListener('resize', onResize)
 }
@@ -40,3 +61,6 @@ export const viewportHeight = (): number => vh
 export function useViewportHeight(): number {
   return useSyncExternalStore(subscribe, viewportHeight, () => 800)
 }
+
+/** The top safe-area inset (px) as of the last frame: safe to read in a render (changes re-render useViewportHeight users). */
+export const safeAreaTop = (): number => safeTop

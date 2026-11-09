@@ -220,7 +220,12 @@ export function scrambleFrame(text: string, t: number): string {
   return out
 }
 
-const blank = (text: string) => text.replace(/[^\s]/g, ' ')
+/**
+ * The string's footprint before the scramble starts: every glyph a no-break space, which (unlike a plain space) never
+ * collapses, so the slot keeps its width and nothing after it moves (LAP-06: a collapsed coordinates slot pulled the
+ * time zone 85–146 px left for a frame). The text's own spaces stay breakable.
+ */
+const blank = (text: string) => text.replace(/[^\s]/g, '\u00a0')
 
 /**
  * Drive a scramble of `text` on `el` (textContent) and call `done` once it has settled. Returns a
