@@ -1011,3 +1011,21 @@
   -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
   mask-image: linear-gradient(to right, transparent, #000 28px);
 }
+
+/* Search mode (phones): the location glyph beside Cancel. Its divider is drawn 32 px tall like Cancel's (the button
+   keeps its 44 px touch box, whose own border would draw a taller line). Last in the file: it overrides the location
+   button's size rules above. */
+.locateInline.locateGlyphOnly {
+  position: relative;
+  border-left: 0;
+}
+.locateInline.locateGlyphOnly::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 32px;
+  margin-top: -16px;
+  border-left: 1px solid var(--line-strong);
+}
+

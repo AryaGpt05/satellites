@@ -355,6 +355,26 @@
 .crumbOutlined:focus-visible {
   outline-offset: 2px;
 }
+/* Its three labels (New search / Close / Cancel) share one cell sized for the longest: centred in the outline, not
+   pushed to its right edge. */
+.crumbOutlined .crumbLabels {
+  justify-items: center;
+}
+/* Touch in the wide layout (a landscape phone, a tablet): a 44 px tall target, drawn 30 px. */
+@media (pointer: coarse) {
+  .crumbOutlined {
+    position: relative;
+    z-index: 1; /* its hit area runs under the place row below */
+    height: 30px;
+    padding: 0 10px;
+    margin: -4px 0;
+  }
+  .crumbOutlined::after {
+    content: '';
+    position: absolute;
+    inset: -8px -1px; /* from inside the 1 px border: 28 + 16 = 44 */
+  }
+}
 /* The pass header's right end: the stepper, and on phones the one-tap search. */
 .headTopEnd {
   display: inline-flex;

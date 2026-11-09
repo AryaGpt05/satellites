@@ -129,7 +129,8 @@ const closeAbout = () => useApp.getState().setAboutOpen(false)
 function writeUrlNow() {
   const st = useApp.getState()
   if (st.place && (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error')) writeUrl(st.place, st.phase === 'results' ? st.selectedPassId : undefined)
-  else if (st.phase === 'idle') history.replaceState(history.state, '', location.pathname)
+  // The landing: a clean address, except a share link still being looked up (?s=: it opens when it answers).
+  else if (st.phase === 'idle' && !/[?&]s=/.test(location.search)) history.replaceState(history.state, '', location.pathname)
 }
 /** Back out of a pass to the list (as the panel's "All passes"): live time, the camera back on the place. */
 function closePass() {
@@ -202,9 +203,21 @@ export default function Main() {
     const get = useApp.getState
     const offResults = watchLayer(sub, get, 'results', (st) => st.phase === 'computing' || st.phase === 'results' || st.phase === 'error', resetToLanding)
     const offPass = watchLayer(sub, get, 'pass', (st) => st.phase === 'results' && !!st.selectedPassId, closePass)
+    // A reload (or a return the back-forward cache didn't keep) restores layers from the address and adopts the entries
+    // it finds; once the results have landed (a pass from ?p= is selected in the same tick), line the history up with
+    // what actually came back.
+    let reconcileTimer = 0
+    const offReconcile = sub((st, prev) => {
+      if (st.phase === 'results' && prev.phase !== 'results') {
+        window.clearTimeout(reconcileTimer)
+        reconcileTimer = window.setTimeout(() => backStack()?.reconcile(), 0)
+      }
+    })
     return () => {
       offResults()
       offPass()
+      offReconcile()
+      window.clearTimeout(reconcileTimer)
     }
   }, [])
 

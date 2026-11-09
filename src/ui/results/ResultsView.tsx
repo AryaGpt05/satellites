@@ -367,9 +367,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   }, [viewKey, mobile])
   // Back to a known overview (PH-03): its snap applies as the pass starts to leave, so the sheet rises in that beat.
   const overviewKnown = mobile && viewKey === 'overview' && sheetMemo.overview?.key === shownReportKey
+  // (Not while the inline search is open: a search started from a pass returns to the overview at the top snap, where
+  // the field and its suggestions sit above the keyboard, as from the overview's own search bar.)
   useEffect(() => {
-    if (mobile && viewKey === 'overview' && (shownKey === 'overview' || overviewKnown)) setSnap(overviewSnap.current)
-  }, [viewKey, shownKey, mobile, overviewKnown])
+    if (mobile && viewKey === 'overview' && (shownKey === 'overview' || overviewKnown)) setSnap(searching ? 2 : overviewSnap.current)
+  }, [viewKey, shownKey, mobile, overviewKnown, searching])
   // A new place opens on the peek again.
   useEffect(() => {
     overviewSnap.current = 0
@@ -1140,7 +1142,7 @@ function holdKeyboard() {
   if (typeof document === 'undefined') return
   const proxy = document.createElement('input')
   proxy.type = 'text'
-  proxy.setAttribute('aria-hidden', 'true')
+  proxy.setAttribute('aria-label', 'Search another place')
   proxy.tabIndex = -1
   proxy.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;pointer-events:none'
   document.body.appendChild(proxy)

@@ -189,8 +189,12 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
     if (el && searchRef.current?.contains(el)) el.blur()
     leaveSearch()
   }
-  // Phones: the back gesture leaves search mode (the field and the keyboard), not the site (src/lib/backStack.ts).
-  useBackLayer('search', searching && liftable, cancelSearch)
+  // Phones: the back gesture leaves search mode (the field and the keyboard), not the site (src/lib/backStack.ts). A
+  // locate started from search mode is dropped with it: the results must not open (and push) after Back.
+  useBackLayer('search', searching && liftable, () => {
+    if (locate.state.kind === 'locating') locate.cancel()
+    cancelSearch()
+  })
   // A layout change mid-search (a tablet rotated): take up the new layout's search mode, or leave it.
   const wasLiftable = useRef(liftable)
   useLayoutEffect(() => {
