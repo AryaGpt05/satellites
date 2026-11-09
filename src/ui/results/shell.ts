@@ -133,6 +133,16 @@ export const headHeight = (body: HTMLElement): number => (body.previousElementSi
  * Measures the mobile sheet: the body's offset (grip + header), the footer, and where the content's
  * marked blocks end. Re-measures on any size change of the header, body content or footer.
  */
+/**
+ * An element's top along its offsetParent chain: its layout position, which transforms (entrance rises, swaps) don't
+ * move. Only differences between two elements of one subtree mean anything (the shared part of the chain cancels).
+ */
+const layoutTop = (el: HTMLElement): number => {
+  let y = 0
+  for (let n: HTMLElement | null = el; n; n = n.offsetParent as HTMLElement | null) y += n.offsetTop
+  return y
+}
+
 /** The last computing snap measured (px), for a computing view whose readout isn't measured yet (R2R8). */
 let computingSnapPx: number | undefined
 export const rememberComputingSnap = (px: number) => void (computingSnapPx = px)
@@ -161,10 +171,13 @@ export function useSheetGeometry(
     const natural = section?.querySelector<HTMLElement>('[data-anim-inner]')
     const top = headHeight(body) + (outer && natural ? natural.offsetHeight - outer.offsetHeight : 0)
     const pad = parseFloat(getComputedStyle(body).paddingTop) || BODY_PAD_TOP
-    const innerTop = inner.getBoundingClientRect().top
+    // Where a marked block ends in LAYOUT (offsets, not client rects): the measure often lands mid-entrance, while the
+    // hero still rises from its 8 px offset, and a transform never re-fires the observer. Measured with transforms the
+    // peek came out 8 px deep and stayed so until the next size change, which then glided the sheet 8 px (U-6).
+    const innerTop = layoutTop(inner)
     const end = (sel: string) => {
       const el = inner.querySelector<HTMLElement>(sel)
-      return el ? el.getBoundingClientRect().bottom - innerTop : undefined
+      return el ? layoutTop(el) + el.offsetHeight - innerTop : undefined
     }
     const next: SheetGeometry = {
       key: keyRef.current,
