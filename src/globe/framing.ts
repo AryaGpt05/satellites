@@ -173,15 +173,42 @@ export function minRangeFor(vp: Viewport, level: TextureLevel): number {
 /** Desktop overview: the disc's minimum distance from the right edge (or whatever covers it), CSS px. */
 export const OVERVIEW_RIGHT_MARGIN = 40
 
-export function overviewPose(vp: Viewport, insets: Insets, lat: number, lon: number): PoseSpec {
+/**
+ * Height changes smaller than this at the same width are browser chrome (a phone's toolbars collapsing or showing
+ * on scroll, in Safari and in-app browsers), not a new layout: the phone overview keeps its framing through them.
+ */
+export const TOOLBAR_SLACK_PX = 120
+
+export interface StableHeight {
+  width: number
+  height: number
+}
+
+/**
+ * The height the phone overview frames for: the smallest seen at this width while the changes stay within
+ * TOOLBAR_SLACK_PX (toolbars shown), reset by a width change or a bigger jump (rotation, a real resize).
+ */
+export function trackStableHeight(prev: StableHeight | null, width: number, height: number): StableHeight {
+  if (!prev || prev.width !== width || Math.abs(height - prev.height) >= TOOLBAR_SLACK_PX) return { width, height }
+  return height < prev.height ? { width, height } : prev
+}
+
+/**
+ * `stableHeight` (phones): frame the globe in the band as it is with the toolbars shown, so their collapsing on
+ * scroll only adds room under the globe instead of zooming it. The phone fov keeps the horizontal angle fixed
+ * (fovFor), so the globe's pixel size depends on the width alone and the range doesn't move either.
+ */
+export function overviewPose(vp: Viewport, insets: Insets, lat: number, lon: number, stableHeight?: number): PoseSpec {
   const W = Math.max(1, vp.width)
   const H = Math.max(1, vp.height)
   if (isPhone(vp)) {
     const f = freeRect(vp, insets)
-    const band = f.y1 - f.y0
+    const slack = stableHeight === undefined ? 0 : clamp(H - stableHeight, 0, TOOLBAR_SLACK_PX)
+    const y1 = Math.max(f.y0 + 1, f.y1 - slack)
+    const band = y1 - f.y0
     const haloD = Math.max(96, Math.min(W - 56, band - 2 * HALO_GAP_PX))
     const dist = distanceForSpherePx(vp, HALO_R, haloD / 2)
-    const cy = (f.y0 + f.y1) / 2
+    const cy = (f.y0 + y1) / 2
     return { lat, lon, headingDeg: 0, range: dist - 1, tilt: 0, shiftX: 0, shiftY: 1 - (2 * cy) / H }
   }
 

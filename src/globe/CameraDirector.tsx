@@ -73,6 +73,9 @@ import {
   coarserLevel,
   fovFor,
   freeRect,
+  TOOLBAR_SLACK_PX,
+  trackStableHeight,
+  type StableHeight,
   isPhone,
   minRangeFor,
   overviewPose,
@@ -195,10 +198,11 @@ function targetFor(
   overviewAt: { lat: number; lon: number },
   acq: AcqState,
   chasing: boolean,
+  stableHeight?: number,
 ): PoseSpec | null {
   switch (intent.kind) {
     case 'overview':
-      return overviewPose(vp, insets, overviewAt.lat, overviewAt.lon)
+      return overviewPose(vp, insets, overviewAt.lat, overviewAt.lon, stableHeight)
     case 'place':
       return placePose(vp, insets, intent.lat, intent.lon, floor)
     case 'pass': {
@@ -303,6 +307,8 @@ export function CameraDirector() {
     armedSeen: -Infinity,
     chasing: false,
     chaseFlight: false,
+    /** The phone overview's toolbar-stable height (framing.trackStableHeight) */
+    stable: null as StableHeight | null,
   })
   const input = useMemo(createControlInput, [])
   const control = useMemo(createControlState, [])
@@ -393,6 +399,9 @@ export function CameraDirector() {
       s.rangeDirty = true
     }
     const vpChanged = vp.width !== s.vpW || vp.height !== s.vpH
+    // Browser chrome (toolbars on scroll): the same width, a small height change. The overview keeps its framing.
+    const chromeOnly = vpChanged && vp.width === s.vpW && Math.abs(vp.height - s.vpH) < TOOLBAR_SLACK_PX
+    s.stable = trackStableHeight(s.stable, vp.width, vp.height)
     // During a flight an inset change re-frames at once: it folds into the landing (no settle wait).
     const settledInsets = s.rangeDirty && (s.flight !== null || now - s.insetsAt >= INSETS_SETTLE_MS)
     const recompute =
@@ -417,7 +426,7 @@ export function CameraDirector() {
         const ll = latLonOfDir(s.pose.d)
         overviewAt = { lat: clamp(ll.lat, -30, 38) * 0.4 + 22 * 0.6, lon: ll.lon }
       }
-      const spec = targetFor(intent, store, vp, insets, floor, rt.simTime, overviewAt, acq, chasing)
+      const spec = targetFor(intent, store, vp, insets, floor, rt.simTime, overviewAt, acq, chasing, phone ? s.stable.height : undefined)
       // Only the texture level changed (no layout change): the slower focus move below.
       const focusOnly = level !== s.level && !settledInsets && !vpChanged && intent === s.intent
       s.intent = intent
@@ -456,6 +465,12 @@ export function CameraDirector() {
         }
         // Overview look-at continuity: only the composition changes, never the look-at.
         s.target.tilt = spec.tilt ?? 0
+      }
+      // Toolbars collapsing or showing: the globe holds its place in CSS px at once (the canvas grew or shrank at the
+      // bottom; easing the lens shift would slide it), and the range above did not move (stable band).
+      if (spec && chromeOnly && intent.kind === 'overview' && s.initialized) {
+        s.shiftX = spec.shiftX ?? 0
+        s.shiftY = spec.shiftY ?? 0
       }
     }
     const spec = s.spec

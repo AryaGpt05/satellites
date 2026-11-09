@@ -15,6 +15,8 @@ import {
   passPose,
   placePose,
   rangeForEarthFraction,
+  TOOLBAR_SLACK_PX,
+  trackStableHeight,
   type Insets,
   type TextureLevel,
   type Viewport,
@@ -159,6 +161,39 @@ describe('overview (decision 4)', () => {
       expect(earth.maxX).toBeLessThanOrEqual(vp.width - OVERVIEW_RIGHT_MARGIN + 0.5)
     })
   }
+
+  // Phones: in-app browsers and Safari collapse / show their toolbars on scroll (~83 px of height). The globe must
+  // keep its size and its place on screen through that, not zoom with every scroll.
+  it('holds the phone overview steady when the toolbars collapse (440×873 → 440×956)', () => {
+    // The landing column measured on a 440-wide phone: the band is what limits the globe (not the width).
+    const i = ins({ top: 64, bottom: 420 })
+    const shown: Viewport = { width: 440, height: 873 }
+    const collapsed: Viewport = { width: 440, height: 956 }
+    let stable = trackStableHeight(null, shown.width, shown.height)
+    const a = overviewPose(shown, i, 20, 0, stable.height)
+    stable = trackStableHeight(stable, collapsed.width, collapsed.height)
+    expect(stable.height).toBe(873)
+    const b = overviewPose(collapsed, i, 20, 0, stable.height)
+    expect(b.range).toBeCloseTo(a.range, 9)
+    const ea = bounds(silhouette(shown, a, 1))
+    const eb = bounds(silhouette(collapsed, b, 1))
+    expect(eb.maxX - eb.minX).toBeCloseTo(ea.maxX - ea.minX, 1)
+    expect((eb.minY + eb.maxY) / 2).toBeCloseTo((ea.minY + ea.maxY) / 2, 1)
+    // Without the stable height the band (and the range) would follow the toolbar.
+    expect(overviewPose(collapsed, i, 20, 0).range).not.toBeCloseTo(a.range, 3)
+  })
+
+  it('tracks the stable height: the smallest within the toolbar slack, reset by a width change or a big jump', () => {
+    let s = trackStableHeight(null, 390, 844)
+    s = trackStableHeight(s, 390, 760) // toolbars shown
+    expect(s.height).toBe(760)
+    s = trackStableHeight(s, 390, 844) // collapsed again: keep the smaller
+    expect(s.height).toBe(760)
+    s = trackStableHeight(s, 390, 760 + TOOLBAR_SLACK_PX) // a real resize
+    expect(s.height).toBe(760 + TOOLBAR_SLACK_PX)
+    s = trackStableHeight(s, 844, 390) // rotation
+    expect(s).toEqual({ width: 844, height: 390 })
+  })
 
   it('keeps the classic right-of-centre composition before the landing measures itself', () => {
     expect(overviewPose(desktop, ins({}), 20, 0).shiftX).toBeCloseTo(0.3, 9)

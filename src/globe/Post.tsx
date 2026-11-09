@@ -41,7 +41,7 @@ export const POST_PRIORITY = 1
  * Sanitise the scene colour before bloom: any NaN/Inf (or runaway HDR value) becomes a finite colour.
  * Bloom's mip chain turns a single non-finite pixel into a flickering black square, and GPUs differ in what
  * they return for undefined maths (Apple GPUs give NaN where others don't), so this is a hard backstop.
- * Comparisons with NaN are false, so `!(x >= 0 && x <= MAX)` catches NaN, ±Inf and negatives.
+ * Comparisons with NaN are false, so `x >= 0 ? min(x, MAX) : 0` maps NaN and negatives to 0 and +Inf to MAX.
  */
 function sanitizePass(): ShaderPass {
   const material = new ShaderMaterial({
@@ -51,12 +51,13 @@ function sanitizePass(): ShaderPass {
       varying vec2 vUv;
       void main() {
         vUv = position.xy * 0.5 + 0.5;
-        gl_Position = vec4(position.xy, 1.0, 1.0);
+        gl_Position = vec4(position.xy, 0.0, 1.0); // mid-depth: never on a clip plane
       }`,
     fragmentShader: /* glsl */ `
       uniform sampler2D inputBuffer;
       varying vec2 vUv;
-      float fin(float x) { return (x >= 0.0 && x <= 64.0) ? x : (x > 64.0 && x < 1e30 ? 64.0 : 0.0); }
+      // NaN fails every comparison → 0; +Inf and runaway HDR clamp to 64; negatives → 0.
+      float fin(float x) { return x >= 0.0 ? min(x, 64.0) : 0.0; }
       void main() {
         vec4 c = texture2D(inputBuffer, vUv);
         gl_FragColor = vec4(fin(c.r), fin(c.g), fin(c.b), (c.a >= 0.0 && c.a <= 1.0) ? c.a : 1.0);
@@ -173,15 +174,17 @@ export function usePost(): EffectComposer {
   const size = useMemo(() => new Vector2(), [])
   const applied = useRef({ composer: null as EffectComposer | null, w: -1, h: -1, dpr: -1 })
   useFrame((_, delta) => {
-    // A frame held for AdaptiveDpr's drain (the canvas keeps showing the last image).
-    if (rt.skipRender > 0) {
-      rt.skipRender--
-      return
-    }
     gl.getSize(size)
     const pr = gl.getPixelRatio()
     const a = applied.current
-    if (a.composer !== composer || size.x !== a.w || size.y !== a.h || pr !== a.dpr) {
+    const resized = a.composer !== composer || size.x !== a.w || size.y !== a.h || pr !== a.dpr
+    // A frame held for AdaptiveDpr's drain or a UI entrance (the canvas keeps showing the last image), unless the
+    // drawing buffer was just resized: a resize clears it, and holding would leave the canvas blank.
+    if (rt.skipRender > 0 && !resized) {
+      rt.skipRender--
+      return
+    }
+    if (resized) {
       composer.setSize(size.x, size.y)
       a.composer = composer
       a.w = size.x

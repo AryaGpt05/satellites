@@ -75,14 +75,24 @@ export const STRIP_ROWS = 256
 export const STRIP_ROWS_MOBILE = 128
 export const stripRowsFor = (tier: Pick<QualityTier, 'mobile'>) => (tier.mobile ? STRIP_ROWS_MOBILE : STRIP_ROWS)
 
-function bitmapsSupported(): boolean {
-  if (typeof createImageBitmap === 'undefined' || typeof navigator === 'undefined') return false
-  const ua = navigator.userAgent
-  const safari = /^((?!chrome|android).)*safari/i.test(ua)
-  const safariVersion = safari ? Number(ua.match(/Version\/(\d+)/)?.[1] ?? 0) : -1
+/**
+ * Whether the sliced (ImageBitmap-decoded) upload path is trusted on this user agent. WebKit before 17 and Firefox
+ * before 98 are not. Every iOS browser is WebKit; in-app WKWebViews (Instagram, Facebook…) carry no Safari or
+ * Version token, so iOS is recognised by device + AppleWebKit and versioned by its OS when Version/ is absent.
+ */
+export function bitmapsSupportedFor(ua: string, hasCreateImageBitmap: boolean): boolean {
+  if (!hasCreateImageBitmap) return false
+  const ios = /iPhone|iPad|iPod/.test(ua) && /AppleWebKit/.test(ua) && !/CriOS|FxiOS/.test(ua)
+  const safari = ios || /^((?!chrome|android).)*safari/i.test(ua)
+  const version = Number(ua.match(/Version\/(\d+)/)?.[1] ?? (ios ? (ua.match(/OS (\d+)_/)?.[1] ?? 0) : 0))
   const firefox = ua.includes('Firefox')
   const firefoxVersion = firefox ? Number(ua.match(/Firefox\/(\d+)/)?.[1] ?? 0) : -1
-  return !((safari && safariVersion < 17) || (firefox && firefoxVersion < 98))
+  return !((safari && version < 17) || (firefox && firefoxVersion < 98))
+}
+
+function bitmapsSupported(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return bitmapsSupportedFor(navigator.userAgent, typeof createImageBitmap !== 'undefined')
 }
 
 function configure(tex: Texture, map: EarthMap, anisotropy: number) {
@@ -355,9 +365,9 @@ export interface DecodedMap {
 }
 
 type WorkerReply =
-  | { op: 'decoded'; req: number; width: number; height: number }
+  | { op: 'decoded'; req: number; width: number; height: number; strips: boolean }
   | { op: 'strip'; req: number; width: number; height: number; data: Uint8Array }
-  | { op: 'error'; req: number; message: string }
+  | { op: 'error'; req: number; message: string; unavailable?: boolean }
 
 class WorkerGone extends Error {
   constructor() {
@@ -370,6 +380,8 @@ let decodeWorker: Worker | null | undefined
 const replies = new Map<number, { resolve: (m: WorkerReply) => void; reject: (e: Error) => void }>()
 let nextReq = 1
 let nextImage = 1
+/** False once the worker has said it can't cut strips: later maps decode on this thread straight away. */
+let workerStrips = true
 
 function worker(): Worker | null {
   if (decodeWorker !== undefined) return decodeWorker
@@ -380,7 +392,8 @@ function worker(): Worker | null {
       const r = replies.get(m.req)
       if (!r) return // an unclaimed strip's bytes are simply dropped
       replies.delete(m.req)
-      if (m.op === 'error') r.reject(new Error(m.message))
+      // A worker that can't cut strips (no OffscreenCanvas 2D) is "gone" for that job: the caller falls back here.
+      if (m.op === 'error') r.reject(m.unavailable ? new WorkerGone() : new Error(m.message))
       else r.resolve(m)
     }
     // The module failed to load or crashed: everything in flight (and everything after) decodes on this thread.
@@ -409,24 +422,41 @@ function ask(w: Worker, msg: Record<string, unknown>): Promise<WorkerReply> {
 
 /** Decode a map file: in the worker when there is one, else here (createImageBitmap, strips cut lazily). */
 async function decodeBlob(blob: Blob): Promise<DecodedMap> {
-  const w = worker()
+  const w = workerStrips ? worker() : null
   if (w) {
     try {
       const id = nextImage++
       const r = await ask(w, { op: 'decode', id, blob })
       if (r.op !== 'decoded') throw new Error('texture decode: unexpected reply')
+      if (!r.strips) {
+        // That worker has no 2D surface to cut strips with (WebKit before 16.4): every map decodes here.
+        workerStrips = false
+        throw new WorkerGone()
+      }
+      // If the worker goes away (or turns out unable to cut) mid-map, the rest of the strips are cut here.
+      let local: Promise<ImageBitmap> | null = null
+      const here = () => (local ??= createImageBitmap(blob, BITMAP_OPTS))
       return {
         width: r.width,
         height: r.height,
         offThread: true,
         strip: async (y, rows, flip = true) => {
           const live = decodeWorker
-          if (!live) throw new WorkerGone()
-          const m = await ask(live, { op: 'strip', id, y, rows, flip })
-          if (m.op !== 'strip') throw new Error('texture strip: unexpected reply')
-          return makeStrip(m.width, m.height, m.data)
+          try {
+            if (!live || local) throw new WorkerGone()
+            const m = await ask(live, { op: 'strip', id, y, rows, flip })
+            if (m.op !== 'strip') throw new Error('texture strip: unexpected reply')
+            return makeStrip(m.width, m.height, m.data)
+          } catch (e) {
+            if (!(e instanceof WorkerGone)) throw e
+            const full = await here()
+            return makeStrip(full.width, rows, stripBytesHere(full, y, rows, flip))
+          }
         },
-        close: () => decodeWorker?.postMessage({ op: 'close', id }),
+        close: () => {
+          decodeWorker?.postMessage({ op: 'close', id })
+          local?.then((b) => b.close(), () => undefined)
+        },
       }
     } catch (e) {
       if (!(e instanceof WorkerGone)) throw e

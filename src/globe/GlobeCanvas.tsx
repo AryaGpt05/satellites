@@ -10,7 +10,7 @@
  */
 import { Canvas } from '@react-three/fiber'
 import { Component, lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Color } from 'three'
+import { Color, WebGLRenderer } from 'three'
 import { STACKED_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import { useMediaQuery } from '@/ui/system/media'
@@ -35,6 +35,26 @@ function initialDpr(mobile: boolean): number {
   return dprLevels(mobile, typeof window === 'undefined' ? 1 : window.devicePixelRatio).start
 }
 
+/** The context the globe needs. Everything renders through the composer, which owns its depth and MSAA. */
+const CONTEXT: WebGLContextAttributes = {
+  alpha: false, // opaque canvas: cheaper to composite, and no premultiplied edge against the page
+  antialias: false, // MSAA happens in the post-processing target
+  depth: false, // the composer owns its depth buffer
+  stencil: false,
+  premultipliedAlpha: true,
+  preserveDrawingBuffer: false,
+  powerPreference: 'high-performance',
+}
+
+/**
+ * The renderer, on a WebGL 2 context created HERE: three r187 always asks for `alpha: true` when it creates the
+ * context itself, so the `alpha: false` above only holds if the context is ours.
+ */
+function createRenderer({ canvas }: { canvas: unknown }): WebGLRenderer {
+  const context = (canvas as HTMLCanvasElement).getContext('webgl2', CONTEXT) ?? undefined
+  return new WebGLRenderer({ canvas: canvas as HTMLCanvasElement, context, ...CONTEXT })
+}
+
 function webgl2Available(): boolean {
   try {
     const c = document.createElement('canvas')
@@ -50,7 +70,13 @@ export function GlobeCanvas({ className }: { className?: string }) {
   const unavailable = !supported || failed
   // Per-canvas runtime, shared by the scene (inside the R3F tree) and the DOM overlay (outside it). The tier is
   // refined from the GL context's capabilities when the scene mounts.
-  const [runtime] = useState(() => createRuntime(provisionalTier(detectMobile()), prefersReducedMotion(), Date.now()))
+  const [runtime] = useState(() => {
+    const rt = createRuntime(provisionalTier(detectMobile()), prefersReducedMotion(), Date.now())
+    // One stable [d, d] tuple for the Canvas' dpr prop (see runtime.dprProp): AdaptiveDpr updates it in place.
+    const d = initialDpr(rt.tier.mobile)
+    rt.dprProp = [d, d]
+    return rt
+  })
 
   useEffect(() => {
     // No WebGL: no globe is coming, and no sharp day map either (INT-01 / PH-13: deep and share links held the logo
@@ -81,14 +107,8 @@ export function GlobeCanvas({ className }: { className?: string }) {
         <SceneBoundary onError={() => setFailed(true)}>
           <Canvas
             // DPR is managed by the scene (Scene.tsx AdaptiveDpr): phones start at 1.5, desktops at min(2, device).
-            dpr={initialDpr(runtime.tier.mobile)}
-            gl={{
-              antialias: false, // MSAA happens in the post-processing target
-              alpha: false,
-              stencil: false,
-              depth: false, // everything renders through the composer, which owns its depth buffer
-              powerPreference: 'high-performance',
-            }}
+            dpr={runtime.dprProp}
+            gl={createRenderer}
             camera={{ fov: 30, near: 0.01, far: 400, position: [0, 0, 6] }}
             // Tone mapping happens in the post chain (Post.tsx); the renderer itself stays linear.
             flat
