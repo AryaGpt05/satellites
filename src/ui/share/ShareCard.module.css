@@ -170,7 +170,8 @@
   position: absolute;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  /* centred in its band (PANEL.headTop … headBottom), as the server card and the PNG */
+  justify-content: center;
 }
 .lead {
   font-family: var(--font-sans);

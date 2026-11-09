@@ -75,7 +75,9 @@ export const TRACK = { label: 0.08, lockup: 0.26, readout: -0.01 } as const
 
 /**
  * The right panel's fixed rows (card px). Boxes are [top, height]; text is centred in its box.
- * The headline block is bottom-aligned at `headBottom`.
+ * The headline block is centred in [headTop, headBottom]: the band between the top rule and the readouts' rule,
+ * lifted HEAD_LIFT so the block reads as centred (its line boxes carry more empty room below, under the serif
+ * place, than above the condensed caps).
  */
 export const PANEL = {
   x: PLATE + 52,
@@ -83,9 +85,9 @@ export const PANEL = {
   w: CARD_W - PLATE - 104,
   top: [42, 22] as const,
   rule1: 82,
-  /** The headline block's top (it sits bottom-aligned at headBottom; no row between rule1 and it: owner) */
-  headTop: 112,
-  headBottom: 440,
+  /** rule1 + 1 … rule2 − 2·HEAD_LIFT: the headline block is centred in this band (no row above it: owner) */
+  headTop: 83,
+  headBottom: 454,
   rule2: 466,
   roLabel: [486, 16] as const,
   roValue: [512, 32] as const,

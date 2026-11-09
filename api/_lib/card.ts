@@ -181,12 +181,12 @@ function plate(p: Plate, dataUri: string | null): ReactElement {
 
 // ── The panel ───────────────────────────────────────────────────────────────────────────────
 
-/** The headline block, bottom-aligned in its region: condensed lead, serif place, optional sub-line. */
+/** The headline block, centred in its band (PANEL.headTop … headBottom): condensed lead, serif place, optional sub-line. */
 function headline(spec: Pick<CardSpec, 'lead' | 'place' | 'tail' | 'sub' | 'size'>): ReactElement {
   const S = spec.size
   const P = S * HEAD.placeScale
   return abs(
-    { left: PANEL.x, top: PANEL.headTop, width: PANEL.w, height: PANEL.headBottom - PANEL.headTop, flexDirection: 'column', justifyContent: 'flex-end' },
+    { left: PANEL.x, top: PANEL.headTop, width: PANEL.w, height: PANEL.headBottom - PANEL.headTop, flexDirection: 'column', justifyContent: 'center' },
     h(
       'div',
       { style: { display: 'flex', fontFamily: FONT.display, fontWeight: 600, fontSize: S, lineHeight: HEAD.leadLH, letterSpacing: -0.02 * S, color: C.bone } },
@@ -360,8 +360,8 @@ export function defaultCard({ host, plateDataUri }: { host: string; plateDataUri
     abs({ left: PLATE, top: 0, width: 1, height: CARD_H, background: C.lineStrong }),
     row(PANEL.top, lockup(), mono('Last 7 days', CARD_FS.row, C.bone2)),
     rule(PANEL.rule1),
-    // The hero sits bottom-aligned above the footer rule, with the top rule's air above it (no row between: owner).
-    abs({ left: PANEL.x, top: PANEL.headTop, width: PANEL.w, height: 512 - PANEL.headTop, flexDirection: 'column', justifyContent: 'flex-end' }, heroLines(88)),
+    // The hero is centred between the top rule and the footer rule, lifted as the pass headline is (owner: even spacing).
+    abs({ left: PANEL.x, top: PANEL.headTop, width: PANEL.w, height: PANEL.rule3 - 12 - PANEL.headTop, flexDirection: 'column', justifyContent: 'center' }, heroLines(88)),
     rule(PANEL.rule3),
     row(PANEL.foot, mono('Enter any place on Earth', 15, C.bone), host ? mono(host, CARD_FS.row, C.bone2, { textTransform: 'none', letterSpacing: 0.5 }) : undefined),
   )

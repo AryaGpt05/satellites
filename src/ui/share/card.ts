@@ -505,7 +505,7 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   ctx.fillStyle = C.line
   ctx.fillRect(X, PANEL.rule1, PANEL.w, 1)
 
-  // headline, bottom-aligned: condensed lead lines, serif place, optional sub-line
+  // headline, centred in its band (PANEL.headTop … headBottom): condensed lead lines, serif place, optional sub-line
   const S = spec.size
   const P = S * HEAD.placeScale
   const lead: Face = { family: SANS, size: S, weight: 560, stretch: 'condensed', tracking: -0.02 * S }
@@ -521,7 +521,7 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   const placeLH = P * HEAD.placeLH
   const subLH = CARD_FS.sub * HEAD.subLH
   const total = leadLines.length * leadLH + P * HEAD.placeGap + placeLines.length * placeLH + (subLines.length ? HEAD.subGap + subLines.length * subLH : 0)
-  let y = PANEL.headBottom - total
+  let y = PANEL.headTop + (PANEL.headBottom - PANEL.headTop - total) / 2
   ctx.fillStyle = C.bone
   setFace(ctx, lead)
   for (const l of leadLines) {
