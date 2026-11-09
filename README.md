@@ -19,7 +19,7 @@ actual pictures they took. It runs on a live 3D globe lit by the real sun, with 
    predicted pass and cropped around the place.
 3. **Replays each pass.** The satellite flies its true ground track and its swath sweeps across your spot. The image
    then reveals line by line in the direction the satellite moved, the way a pushbroom sensor actually builds it.
-4. **Stays honest.** "Photographed" only appears when a real image exists. Commercial satellites that *could* have
+4. **Stays honest.** "Watched" only appears when a real image exists. Commercial satellites that *could* have
    pointed at you are labelled as such: their tasking is private, so the app can't know whether they did.
 
 ## Technical notes
