@@ -12,7 +12,7 @@
  *             on an empty frame while the chunk downloads (R2K4)
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
-import { backStack, watchLayer } from '@/lib/backStack'
+import { backStack, onBackSettled, watchLayer } from '@/lib/backStack'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import type { ResultsViewProps } from '@/ui/results'
@@ -125,6 +125,12 @@ const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<Re
   return <View onBack={resetToLanding} onRetry={retryReport} onSearch={searchFromPanel} />
 })
 const closeAbout = () => useApp.getState().setAboutOpen(false)
+/** The address bar for what is on screen now (the back stack calls it when its own history move lands). */
+function writeUrlNow() {
+  const st = useApp.getState()
+  if (st.place && (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error')) writeUrl(st.place, st.phase === 'results' ? st.selectedPassId : undefined)
+  else if (st.phase === 'idle') history.replaceState(history.state, '', location.pathname)
+}
 /** Back out of a pass to the list (as the panel's "All passes"): live time, the camera back on the place. */
 function closePass() {
   const st = useApp.getState()
@@ -184,6 +190,24 @@ export default function Main() {
     return () => document.removeEventListener('focusin', onFocus)
   }, [])
 
+  // The back gesture / browser Back closes the top layer (src/lib/backStack.ts): the results of a search (back to the
+  // landing) and an open pass (back to the list) are store layers; the photo viewer, the share sheet, About and the
+  // phone's search mode register themselves.
+  // Subscribed before the ?p= writer below (zustand calls listeners in subscription order). When one of the stack's own
+  // history moves lands (a close from the UI), the address bar is rewritten for what is on screen.
+  useEffect(() => {
+    if (!backStack()) return
+    onBackSettled(writeUrlNow)
+    const sub = useApp.subscribe
+    const get = useApp.getState
+    const offResults = watchLayer(sub, get, 'results', (st) => st.phase === 'computing' || st.phase === 'results' || st.phase === 'error', resetToLanding)
+    const offPass = watchLayer(sub, get, 'pass', (st) => st.phase === 'results' && !!st.selectedPassId, closePass)
+    return () => {
+      offResults()
+      offPass()
+    }
+  }, [])
+
   // Keep ?p=<passId> in sync with the selection so links are always shareable (including a pass preselected by
   // a share or deep link, which is selected in the same tick as the phase turns to results).
   useEffect(
@@ -194,21 +218,6 @@ export default function Main() {
       }),
     [],
   )
-
-  // The back gesture / browser Back closes the top layer (src/lib/backStack.ts): the results of a search (back to the
-  // landing) and an open pass (back to the list) are store layers; the photo viewer, the share sheet, About and the
-  // phone's search mode register themselves.
-  useEffect(() => {
-    if (!backStack()) return
-    const sub = useApp.subscribe
-    const get = useApp.getState
-    const offResults = watchLayer(sub, get, 'results', (st) => st.phase === 'computing' || st.phase === 'results' || st.phase === 'error', resetToLanding)
-    const offPass = watchLayer(sub, get, 'pass', (st) => st.phase === 'results' && !!st.selectedPassId, closePass)
-    return () => {
-      offResults()
-      offPass()
-    }
-  }, [])
 
   // Global keys: Esc backs out, "?" opens About.
   useEffect(() => {

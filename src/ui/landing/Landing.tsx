@@ -342,16 +342,22 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
               statusOverride={locate.state.kind === 'locating' ? <LocatingStatus state={locate.state} /> : undefined}
               idleTrailing={
                 searching && liftable && !locating ? (
-                  // Phones, search mode with nothing typed: an obvious way back out (the back gesture works too).
-                  <button
-                    type="button"
-                    className={s.locateInline}
-                    onPointerDown={(e) => e.preventDefault()}
-                    onClick={cancelSearch}
-                    aria-label="Cancel search"
-                  >
-                    Cancel
-                  </button>
+                  // Phones, search mode with nothing typed: an obvious way back out (the back gesture works too), and
+                  // the location button kept as its glyph where the field offers one (hidden ≤ 400 px, as ever).
+                  <>
+                    <button
+                      type="button"
+                      className={cx(s.locateInline, s.locateGlyphOnly)}
+                      onPointerDown={(e) => e.preventDefault()}
+                      onClick={locate.start}
+                      aria-label="Use my location"
+                    >
+                      <Glyph name="locate" size={14} />
+                    </button>
+                    <button type="button" className={s.searchCancel} onPointerDown={(e) => e.preventDefault()} onClick={cancelSearch}>
+                      Cancel
+                    </button>
+                  </>
                 ) : locating ? (
                   <button
                     type="button"

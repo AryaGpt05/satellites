@@ -1009,9 +1009,10 @@ function DetailFooter({
           <Glyph name="share" size={14} />
           {/* "Share this pass" where it fits; "Share" on narrow phones (≤ 400 px: it was cut to "SHARE THIS PAS"). */}
           {compact ? 'Share' : (
-            <>
+            // One inline run: as separate flex items "Share" and " this pass" got the button's gap between them.
+            <span>
               Share<span className={s.ctaTail}> this pass</span>
-            </>
+            </span>
           )}
         </Button>
       )}
