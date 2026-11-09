@@ -993,9 +993,12 @@ function DetailFooter({
       ) : null}
       {sharedPass && onCheckPlace ? (
         <>
-          <Button variant="primary" onClick={onCheckPlace} className={s.primary}>
+          <Button variant="primary" onClick={onCheckPlace} className={s.primary} aria-label="Check your place">
             <Glyph name="search" size={13} />
-            Check your place
+            {/* "Your place" on narrow phones (V2: "Check your place" ran into the padding at 376 px). */}
+            <span>
+              <span className={s.ctaLead}>Check </span>your place
+            </span>
           </Button>
           {shareIcon}
         </>
