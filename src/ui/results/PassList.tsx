@@ -19,6 +19,8 @@ import { isClouded } from './lib/bestLook'
 import { captureFor, isDailyMosaic } from './lib/captures'
 import { thumbUrl } from './lib/photos'
 import { useGallery } from './gallery'
+import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
+import { Img } from './Img'
 import { int } from './lib/copy'
 import { visibleCount, type ListItem, type PassGroup, type PassItem, type SatItem } from './lib/groups'
 import { glyphForPass, markColorVar, VERDICT_GLYPH, VERDICT_META, VERDICT_TITLE, verdictUnit, type Verdict } from './lib/meta'
@@ -334,9 +336,11 @@ const shownThumbs = new Set<string>()
 /** Thumbnail of the real crop: eager for the first rows, else loads when scrolled near. */
 function Thumb({ url, eager, clouded }: { url: string; eager: boolean; clouded: boolean }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const known = shownThumbs.has(url)
+  const known = shownThumbs.has(url) || hasPhotoElement('list', url)
   const [visible, setVisible] = useState(eager || known)
-  const [state, setState] = useState<'idle' | 'ok' | 'err'>(known ? 'ok' : 'idle')
+  const [state, setState] = useState<'idle' | 'ok' | 'err'>(known || decodedPhoto(url) ? 'ok' : 'idle')
+  // The first showing this session fades in once; a remount (back from a pass) shows the same element at once (A2).
+  const [fade] = useState(() => !known)
   useEffect(() => {
     if (visible) return
     const el = ref.current
@@ -346,21 +350,20 @@ function Thumb({ url, eager, clouded }: { url: string; eager: boolean; clouded: 
     io.observe(el)
     return () => io.disconnect()
   }, [visible])
+  // Through the shared loader (one request per URL, R3-1); the lightbox filmstrip asks for the same 112 px crop.
+  useEffect(() => {
+    if (!visible || state !== 'idle') return
+    let alive = true
+    loadPhoto(url)
+      .then(() => alive && setState('ok'))
+      .catch(() => alive && setState('err'))
+    return () => {
+      alive = false
+    }
+  }, [visible, state, url])
   return (
-    <span ref={ref} className={cx(s.thumb, state === 'ok' && s.thumbOk, known && s.thumbInstant, clouded && s.thumbClouded)} aria-hidden>
-      {visible && state !== 'err' ? (
-        <img
-          src={url}
-          alt=""
-          crossOrigin="anonymous"
-          decoding="async"
-          onLoad={() => {
-            shownThumbs.add(url)
-            setState('ok')
-          }}
-          onError={() => setState('err')}
-        />
-      ) : null}
+    <span ref={ref} className={cx(s.thumb, clouded && s.thumbClouded)} aria-hidden>
+      {state === 'ok' ? <Img view="list" url={url} alt="" fadeClass={fade ? s.thumbFade : undefined} onReady={() => shownThumbs.add(url)} /> : null}
       {clouded ? <span className={s.hatch} /> : null}
       <span className={s.thumbMark} />
       {/* The word only: the row's tag carries the number, and "CLOUD 100%" does not fit a 56 px thumb. */}

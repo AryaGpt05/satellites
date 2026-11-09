@@ -19,7 +19,7 @@ import type { Share } from '@/lib/backend'
 import { useApp } from '@/state/store'
 import type { ProgressEvent } from '@/types'
 import { shareCropUrl } from '@/ui/share'
-import { cropSpec, displayUrl } from './lib/captures'
+import { CROP_PX, cropSpec, displayUrl } from './lib/captures'
 import { cx, fmtUtc } from '@/ui/system'
 import { PushbroomReveal } from './PushbroomReveal'
 import { markSeen } from './once'
@@ -196,7 +196,9 @@ function SharedPicture({ tz }: { tz?: string }) {
     if (itemId) markSeen(`capture:${itemId}`)
   }, [itemId])
   if (!shared?.capture) return null
-  const url = sharedImageUrl(shared, 640)
+  // The pass view's own crop (R3-1: one URL per capture and size): when the recipient's report lands, the pass view
+  // shows this very image, decoded already, from the one request.
+  const url = sharedImageUrl(shared, CROP_PX)
   if (!url) return null
   const name = shared.satName ?? 'A satellite'
   const t = shared.tClosest
@@ -206,7 +208,7 @@ function SharedPicture({ tz }: { tz?: string }) {
       <PushbroomReveal
         src={url}
         headingDeg={shared.pass?.headingDeg ?? 180}
-        lines={640}
+        lines={CROP_PX}
         alt={`${name} image of ${shared.placeLabel}, shared with you.`}
         startAt="now"
         frameClassName={s.sharedFrame}

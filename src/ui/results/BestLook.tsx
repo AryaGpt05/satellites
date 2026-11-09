@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { cx } from '@/ui/system'
 import { Ago } from './Ago'
+import { Img } from './Img'
 import { shownGeoFrames, useGeoFrame } from './GeoWatchers'
 import { Reticle } from './Reticle'
 import type { BestLook as Best } from './lib/bestLook'
@@ -24,18 +25,19 @@ export function GeoLook({ model, best }: { model: ResultsModel; best: Extract<Be
   const [failed, setFailed] = useState(false)
   const state = failed ? ({ kind: 'none', reason: 'The latest frame did not load' } as const) : probed
   const [loaded, setLoaded] = useState(() => state.kind === 'ok' && shownGeoFrames.has(state.url))
+  const [fade] = useState(() => !loaded)
   const coll = w.gibs?.collection ?? ''
   return (
     <div className={s.hero}>
       <div className={cx(s.frame, s.geoFrame, state.kind !== 'ok' && s.waiting)}>
         {state.kind === 'ok' ? (
-          <img
-            src={state.url}
+          <Img
+            view="geo-look"
+            url={state.url}
             alt={`${w.name}: latest frame around ${model.report.place.label}. The place is at the centre.`}
-            crossOrigin="anonymous"
-            decoding="async"
-            className={cx(s.geoImg, loaded && s.geoImgOn)}
-            onLoad={() => {
+            className={s.geoImg}
+            fadeClass={fade ? s.geoImgFade : undefined}
+            onReady={() => {
               if (state.kind === 'ok') shownGeoFrames.add(state.url)
               setLoaded(true)
             }}

@@ -173,3 +173,7 @@
   padding: 5px 8px;
   color: var(--bone-2);
 }
+/* R3-3: neutral (no countdown) while the replay clock is not on this pass. */
+.awaitChip b:empty {
+  display: none;
+}

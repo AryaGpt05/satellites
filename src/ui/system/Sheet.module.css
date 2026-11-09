@@ -122,6 +122,24 @@
 }
 
 /* ── shared structure ─────────────────────────────────────────── */
+/*
+ * The header (with the grip on phones) overlays the top of the sheet: it is out of flow, so a change in
+ * its height never moves the body in layout (R3-9). Sheet.tsx draws the body below it with a transform
+ * and shortens it by the same amount. Above the body, so anything that drops out of the header (a search's
+ * suggestion list) lies over the content.
+ */
+.top {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--ink-1);
+}
+.bottom > .top {
+  left: env(safe-area-inset-left, 0px);
+  right: env(safe-area-inset-right, 0px);
+}
 .head {
   flex: none;
   display: flex;
@@ -202,9 +220,13 @@
 }
 
 .foot {
+  /* Above the body: in the one frame before a taller header has shortened it, its end stays under here. */
+  position: relative;
+  z-index: 1;
   flex: none;
   padding: 14px var(--sheet-pad);
   border-top: 1px solid var(--line);
+  background: var(--ink-1);
 }
 
 @media (prefers-reduced-motion: reduce) {

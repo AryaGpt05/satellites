@@ -6,7 +6,8 @@
 import { useEffect, useState } from 'react'
 import { geoImageUrl, isGibsCollection, latestGeoImage } from '@/imagery'
 import type { GeoWatcher, LatLon, Place } from '@/types'
-import { Glyph, LiveDot, cx, fmtLon } from '@/ui/system'
+import { Glyph, LiveDot, fmtLon } from '@/ui/system'
+import { Img } from './Img'
 import { Paragraph } from './Text'
 import { geoSentence, int } from './lib/copy'
 import { fmtRelative } from './lib/time'
@@ -90,21 +91,19 @@ function Frame({ watcher, place }: { watcher: GeoWatcher; place: Place }) {
   const frame = useGeoFrame(watcher, place, FRAME)
   const [failed, setFailed] = useState(false)
   const state: GeoFrameState = failed ? { kind: 'none', reason: 'Frame unavailable' } : frame
-  const [loaded, setLoaded] = useState(() => state.kind === 'ok' && shownGeoFrames.has(state.url))
+  // The first showing this session fades in once; a remount re-attaches the same element at once (R3-1, A2).
+  const [fade] = useState(() => !(state.kind === 'ok' && shownGeoFrames.has(state.url)))
 
   return (
     <div className={s.frameCol}>
-      <div className={cx(s.frame, state.kind === 'ok' && loaded && s.frameOk)}>
+      <div className={s.frame}>
         {state.kind === 'ok' ? (
-          <img
-            src={state.url}
+          <Img
+            view="geo"
+            url={state.url}
             alt={`${watcher.name}: latest frame around the place`}
-            crossOrigin="anonymous"
-            decoding="async"
-            onLoad={() => {
-              shownGeoFrames.add(state.url)
-              setLoaded(true)
-            }}
+            fadeClass={fade ? s.frameFade : undefined}
+            onReady={() => shownGeoFrames.add(state.url)}
             onError={() => setFailed(true)}
           />
         ) : (

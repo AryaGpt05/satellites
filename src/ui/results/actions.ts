@@ -10,19 +10,22 @@
  *  clearPass   back to the overview: live time, camera on the place
  *  play/pause  replay ↔ scrub (scrub holds the exact frame; see globe/clock.ts)
  */
-import { preloadImage } from '@/imagery'
 import { useApp } from '@/state/store'
 import { prefersReducedMotion } from '@/ui/system'
 import type { Pass, Report } from '@/types'
-import { captureFor, cropSpec, displayUrl } from './lib/captures'
+import { warmPhoto } from './images'
+import { captureFor } from './lib/captures'
+import { cardUrl } from './lib/photos'
 import { DEFAULT_REPLAY_RATE, replayWindow } from './lib/replay'
 
-/** Start decoding a pass's image early (PC renders take 1–3 s). Fire-and-forget. */
+/**
+ * Start decoding a pass's image early (PC renders take 1–3 s). Fire-and-forget. Through the results' own loader, so
+ * the pass view's first frame finds it decoded (no ACQUIRING frame, no fade) from the one request (R3-1).
+ */
 export function prefetchPassImage(report: Report | undefined, pass: Pass | undefined) {
   if (!report || !pass) return
   const c = captureFor(report, pass)
-  if (!c) return
-  preloadImage(displayUrl(c, cropSpec(c.collection))).catch(() => undefined)
+  if (c) warmPhoto(cardUrl(c))
 }
 
 /**

@@ -16,7 +16,8 @@
  *   'hero'     the summary best look: max(decoded, mount + 480 ms, camera eta − 200 ms)
  *   'capture'  the pass view (owner C4): the globe's capture moment, i.e. replay sim time crossing the pass's
  *              closest approach `tc`, the frame the globe's scan line crosses the place. Until then the frame
- *              waits as raster with a countdown ("AWAITING PASS · T−00:00:41"). A quiet selection (no replay
+ *              waits as raster with a countdown ("AWAITING PASS · T−00:00:41", read after the globe's frame, the HUD's
+ *              value; neutral "AWAITING PASS" while the replay clock is not on this pass, R3-3). A quiet selection (no replay
  *              within 400 ms), a paused replay or 14 s without a crossing reveal it at once.
  * `instant` draws the finished picture at once (already revealed this session).
  *
@@ -26,12 +27,12 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { DUR } from '@/lib/ease'
-import { preloadImage } from '@/imagery'
 import { useApp } from '@/state/store'
 import { Button, LiveDot, cx, palette, useReducedMotion } from '@/ui/system'
 import { sceneClock } from '@/state/sceneClock'
-import { countdown, useCaptureMoment } from './capture'
+import { awaitCountdown, useCaptureMoment } from './capture'
 import { frontLine, lineLabel, motionVector, revealProgress, REVEAL_MS, scannedPolygon, sweepRange } from './lib/pushbroom'
+import { loadPhoto } from './images'
 import { markSeen } from './once'
 import s from './PushbroomReveal.module.css'
 
@@ -139,7 +140,9 @@ export function PushbroomReveal({
         if (mode === 'replay') replaySeenAt.current = performance.now()
         const el = countRef.current
         if (el && tc !== undefined && (phaseRef.current === 'waiting' || phaseRef.current === 'loading')) {
-          const text = countdown(t, tc)
+          // Neutral unless the replay clock is on this pass's approach (R3-3).
+          const c = awaitCountdown(t, mode, tc)
+          const text = c ? ` · ${c}` : ''
           if (el.textContent !== text) el.textContent = text
         }
       },
@@ -354,7 +357,8 @@ export function PushbroomReveal({
       poll = window.setTimeout(schedule, at !== undefined && at > now ? Math.min(100, at - now) : 50)
     }
 
-    preloadImage(src, { signal: ctl.signal })
+    // The results' shared loader: the same request (and decoded element) every other view of this photo uses.
+    loadPhoto(src, ctl.signal)
       .then((img) => {
         if (!alive) return
         window.clearTimeout(slowTimer)
@@ -416,13 +420,20 @@ export function PushbroomReveal({
         </span>
         {startAt === 'capture' && tc !== undefined ? (
           <span className={cx(s.awaitChip, phase === 'waiting' && s.scanChipOn)} aria-hidden>
-            Awaiting pass · <b ref={countRef}>{countdown(sceneClock.simTime, tc)}</b>
+            Awaiting pass
+            <b ref={countRef}>{awaitText(tc)}</b>
           </span>
         ) : null}
       </div>
       {caption ? <figcaption className={s.caption}>{caption}</figcaption> : null}
     </figure>
   )
+}
+
+/** The chip's first words, before the first frame writes them: the same neutral rule. */
+function awaitText(tc: number): string {
+  const c = awaitCountdown(sceneClock.simTime, sceneClock.mode, tc)
+  return c ? ` · ${c}` : ''
 }
 
 function tracePoly(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]) {

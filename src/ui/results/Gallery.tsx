@@ -26,6 +26,7 @@ import { isOldWindow } from './Summary'
 import { selectQuietly } from './actions'
 import { useGallery } from './gallery'
 import { warmPhoto } from './images'
+import { snapshot } from './snapshot'
 import { filterCounts, filterPhotos, cardUrl, cropWidthKm, type Photo, type PhotoFilter } from './lib/photos'
 import { productLabel } from './lib/captures'
 import { dec1, int } from './lib/copy'
@@ -73,6 +74,13 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   const [idx, setIdx] = useState(wantIdx)
   const idxRef = useRef(idx)
   idxRef.current = idx
+  /**
+   * The photo on screen, or the one a glide is heading to: the gallery's identity (R3-2). When the list changes under
+   * it (partial → final report, a filter, the clear cover arriving) the gallery stays on this photo, wherever it now
+   * sits in the list; only the counter changes, in place.
+   */
+  const curKey = useRef<string | undefined>(items[wantIdx]?.key)
+  const itemsRef = useRef(items)
 
   const trackRef = useRef<HTMLDivElement>(null)
   const counterRef = useRef<HTMLSpanElement>(null)
@@ -154,6 +162,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
       if (user) userAt.current = performance.now()
       targetUser.current = user
       target.current = k
+      curKey.current = itemsRef.current[k]?.key
       const left = k * geo.current.stride
       if (Math.abs(track.scrollLeft - left) < 1) return settleRef.current()
       track.scrollTo({ left, behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto' })
@@ -178,6 +187,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     paintChrome(i)
     const p = items[i]
     if (!p) return
+    curKey.current = p.key
     committed.current = p.key
     useGallery.getState().setKey(p.key, user)
     window.clearTimeout(selectTimer.current)
@@ -208,7 +218,11 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
           const pos = track.scrollLeft / g.stride
           paintChrome(pos)
           const i = Math.round(pos)
-          if (i !== idxRef.current && i >= 0 && i < n) setIdx(i)
+          if (i !== idxRef.current && i >= 0 && i < n) {
+            // A user's swipe moves the identity with it; a programmatic glide keeps its target's.
+            if (target.current === null) curKey.current = itemsRef.current[i]?.key
+            setIdx(i)
+          }
         })
       window.clearTimeout(timer)
       timer = window.setTimeout(() => settleRef.current(), SETTLE_MS)
@@ -239,22 +253,53 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     }
   }, [n, paintChrome])
 
-  // The selection (or the filter) moved elsewhere (timeline, list, header, the lightbox): follow it. A new
-  // filter jumps (the list changed under the photo); a nearby photo glides there.
-  const lastFilter = useRef(filter)
+  // The list changed under the gallery (R3-2): stay on the same photo. Its new index is taken at once (before the
+  // paint: the track jumps by whole slides, so the picture on screen does not move) and the counter is rewritten in
+  // place. A photo that left the list (filtered out, dropped by the final report): the next one in order still listed.
+  useLayoutEffect(() => {
+    const prev = itemsRef.current
+    itemsRef.current = items
+    if (prev === items) return
+    const key = curKey.current
+    let i = key ? items.findIndex((p) => p.key === key) : -1
+    if (i < 0) i = nearestListed(prev, items, key)
+    const next = items[i]?.key
+    if (i !== idxRef.current || target.current !== null) {
+      target.current = null
+      idxRef.current = i
+      setIdx(i)
+      const track = trackRef.current
+      if (track && geo.current.stride && Math.abs(track.scrollLeft - i * geo.current.stride) > 1) track.scrollLeft = i * geo.current.stride
+    }
+    paintChrome(i)
+    if (next && next !== key) {
+      curKey.current = next
+      committed.current = next
+      useGallery.getState().setKey(next, false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items])
+
+  // The selection moved elsewhere (timeline, list, header, the lightbox): follow it. A nearby photo glides there,
+  // a far one jumps.
   useEffect(() => {
-    const filterChanged = lastFilter.current !== filter
-    lastFilter.current = filter
-    if (!filterChanged && wantIdx === idxRef.current && target.current === null) return
-    if (!filterChanged && target.current === wantIdx) return
+    if (!wantKey || wantKey === curKey.current) return
     // The store echoing this gallery's own settle back (its render can land after the next ← → already started a
     // new glide): following it would pull the track back to the photo it is leaving.
-    if (!filterChanged && items[wantIdx]?.key === committed.current) return
-    setIdx(wantIdx)
-    if (!geo.current.ready) return
-    goTo(wantIdx, !filterChanged && Math.abs(wantIdx - idxRef.current) <= 3, filterChanged)
+    if (wantKey === committed.current) return
+    const i = items.findIndex((p) => p.key === wantKey)
+    if (i < 0) return
+    curKey.current = wantKey
+    if (!geo.current.ready) {
+      idxRef.current = i
+      setIdx(i)
+      return
+    }
+    const near = Math.abs(i - idxRef.current) <= 3
+    setIdx(i)
+    goTo(i, near, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantIdx, filter])
+  }, [wantKey, items])
 
   // The cover changed under an untouched summary gallery (the last clear look arrived after the first paint,
   // owner D): cross-fade to it in place: the old picture fades out over the new one; nothing scrolls.
@@ -269,7 +314,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     const old = track.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(prev)}"]`)
     const first = track.children[0] as HTMLElement | undefined
     if (viewport && old && first && typeof old.animate === 'function' && !prefersReducedMotion()) {
-      const ghost = old.cloneNode(true) as HTMLElement
+      // Painted from the decoded picture (no new <img>: no request, no load event, R3-1).
+      const ghost = snapshot(old).node
       ghost.setAttribute('aria-hidden', 'true')
       ghost.inert = true
       Object.assign(ghost.style, { position: 'absolute', left: '0px', top: `${first.offsetTop}px`, width: `${old.offsetWidth}px`, height: `${old.offsetHeight}px`, pointerEvents: 'none', zIndex: '1' })
@@ -282,6 +328,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     idxRef.current = 0
     setIdx(0)
     paintChrome(0)
+    curKey.current = coverKey
     committed.current = coverKey
     useGallery.getState().setKey(coverKey, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -315,6 +362,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
         if (i < 0 || !track || !geo.current.stride) return false
         target.current = null
         track.scrollLeft = i * geo.current.stride
+        curKey.current = key
+        idxRef.current = i
         setIdx(i)
         paintChrome(i)
         return true
@@ -397,6 +446,22 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
 
     </div>
   )
+}
+
+/** Where a photo that left the list was: the first photo after it (in the old order) that is still listed, else before it. */
+function nearestListed(prev: Photo[], items: Photo[], key: string | undefined): number {
+  const at = key ? prev.findIndex((p) => p.key === key) : -1
+  if (at < 0 || !items.length) return 0
+  const where = new Map(items.map((p, i) => [p.key, i]))
+  for (let j = at + 1; j < prev.length; j++) {
+    const i = where.get(prev[j].key)
+    if (i !== undefined) return i
+  }
+  for (let j = at - 1; j >= 0; j--) {
+    const i = where.get(prev[j].key)
+    if (i !== undefined) return i
+  }
+  return 0
 }
 
 /** All · Detailed · Weather: a hairline segmented control (owner B2). */
@@ -540,6 +605,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
         <PhotoFrame
           photo={photo}
           model={model}
+          view={detail ? 'detail' : 'hero'}
           load={near}
           current={current}
           reveal={detail ? (selected ? 'capture' : undefined) : index === 0 && cover ? 'hero' : undefined}

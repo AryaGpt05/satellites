@@ -12,7 +12,7 @@
  * stylesheet), so opening costs the intro, not the whole page. A jump from the index re-aims once the
  * scroll settles, since sections it passed may have grown or shrunk from their placeholder height.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { DUR, EASE } from '@/lib/ease'
 import { useApp } from '@/state/store'
 import { Bezel, Glyph, Kbd, Reveal, cx, fmtInt, useExitClone, Wordmark } from '@/ui/system'
@@ -181,6 +181,20 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
   // The curtain's entrance holds heavy GPU work back until it has played.
   useEffect(() => {
     useApp.getState().holdMotion(400)
+  }, [])
+
+  // The overlay contract (R3-16): `document.documentElement.dataset.overlay = 'about'` while the page covers
+  // the globe, so the globe can rest; gone as the curtain starts lifting (the globe draws a fresh frame for
+  // it). An overlay that was already up (the lightbox) gets its value back.
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const prev = root.dataset.overlay
+    root.dataset.overlay = 'about'
+    return () => {
+      if (root.dataset.overlay !== 'about') return
+      if (prev) root.dataset.overlay = prev
+      else delete root.dataset.overlay
+    }
   }, [])
 
   // Close: the text clears first (120 ms), then the curtain lifts away downward (480 ms).
@@ -385,7 +399,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 <Key k={['←', '→']}>Step through passes</Key>
                 <Key k={['←', '→']}>Previous / next photo</Key>
                 <Key k={['F']}>Expand the photo</Key>
-                <Key k={['+', '−']}>Zoom (when expanded)</Key>
+                <Key k={['+', '−', '0']}>Zoom (when expanded)</Key>
                 <Key k={['Space']}>Play or pause the replay</Key>
                 <Key k={['Esc']}>Back, or close</Key>
                 <Key k={['?']}>This page</Key>

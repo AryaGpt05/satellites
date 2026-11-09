@@ -30,7 +30,8 @@ import { Reticle } from './Reticle'
 import { coordsOf, seenKeyOf } from './PhotoFrame'
 import { selectQuietly } from './actions'
 import { useGallery } from './gallery'
-import { decodedPhoto, loadPhoto } from './images'
+import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
+import { Img } from './Img'
 import { cardSpec, cardUrl, cropWidthKm, filterPhotos, hiResUrl, thumbUrl, type Photo } from './lib/photos'
 import { productLabel, scaleBarKm, sensorName } from './lib/captures'
 import { dec1, int } from './lib/copy'
@@ -216,11 +217,19 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── R3-16: the globe under the ink layer throttles its rendering while the viewer covers it ──
+  useLayoutEffect(() => {
+    setOverlay(true)
+    return () => setOverlay(false)
+  }, [])
+
   // ── close: shrink back to whichever photo is current ────────────────────────────────────
   const closingRef = useRef(false)
   const close = useCallback(() => {
     if (closingRef.current) return
     closingRef.current = true
+    // The globe renders a fresh frame before the scrim starts fading (no stale frame shows through it).
+    setOverlay(false)
     setClosing(true)
     cancelAnimationFrame(anim.current)
     const p = items[indexRef.current]
@@ -661,8 +670,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
 function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: ResultsModel; hires: boolean; reveal: boolean }) {
   const base = cardUrl(photo.capture)
   const hi = hiResUrl(photo.capture)
-  const [baseOk, setBaseOk] = useState(() => !!decodedPhoto(base))
-  const [hiOk, setHiOk] = useState(() => !!(hi && decodedPhoto(hi)))
+  const [baseOk, setBaseOk] = useState(() => !!decodedPhoto(base) || hasPhotoElement('lightbox', base))
+  const [hiOk, setHiOk] = useState(() => !!(hi && (decodedPhoto(hi) || hasPhotoElement('lightbox-hi', hi))))
   const [hiFade, setHiFade] = useState(false)
   useEffect(() => {
     if (baseOk) return
@@ -701,8 +710,8 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
     )
   return (
     <>
-      {baseOk ? <img src={base} alt={alt} crossOrigin="anonymous" decoding="async" draggable={false} className={cx(s.img, dim)} /> : <span className={s.acquiring}>Acquiring</span>}
-      {hiOk && hi ? <img src={hi} alt="" aria-hidden crossOrigin="anonymous" decoding="async" draggable={false} className={cx(s.img, dim, hiFade && s.hiFade)} /> : null}
+      {baseOk ? <Img view="lightbox" url={base} alt={alt} className={cx(s.img, dim)} /> : <span className={s.acquiring}>Acquiring</span>}
+      {hiOk && hi ? <Img view="lightbox-hi" url={hi} alt="" ariaHidden className={cx(s.img, dim)} fadeClass={hiFade ? s.hiFade : undefined} /> : null}
     </>
   )
 }
@@ -767,7 +776,7 @@ function Filmstrip({ items, index, onPick }: { items: Photo[]; index: number; on
 
 /** A filmstrip thumbnail: loads when near the current photo, then stays. */
 function Thumb({ url, near }: { url: string; near: boolean }) {
-  const [ok, setOk] = useState(() => !!decodedPhoto(url))
+  const [ok, setOk] = useState(() => !!decodedPhoto(url) || hasPhotoElement('film', url))
   useEffect(() => {
     if (ok || !near) return
     let alive = true
@@ -778,7 +787,17 @@ function Thumb({ url, near }: { url: string; near: boolean }) {
       alive = false
     }
   }, [url, near, ok])
-  return ok ? <img src={url} alt="" crossOrigin="anonymous" decoding="async" draggable={false} /> : null
+  return ok ? <Img view="film" url={url} alt="" /> : null
+}
+
+/**
+ * The overlay contract (R3-16): `document.documentElement.dataset.overlay = 'lightbox'` while the viewer covers the
+ * globe; deleted as it starts closing (or unmounts). The globe owns the reader.
+ */
+function setOverlay(on: boolean) {
+  const root = document.documentElement
+  if (on) root.dataset.overlay = 'lightbox'
+  else if (root.dataset.overlay === 'lightbox') delete root.dataset.overlay
 }
 
 /** At least half of `el` is visible: inside the window and inside every clipping ancestor (a carousel, the panel). */

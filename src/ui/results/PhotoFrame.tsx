@@ -14,7 +14,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { cx, fmtLat, fmtLon, useReducedMotion } from '@/ui/system'
 import { useCaptureMoment } from './capture'
-import { decodedPhoto, loadPhoto } from './images'
+import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
+import { Img } from './Img'
 import { Mark } from './Mark'
 import { PushbroomReveal } from './PushbroomReveal'
 import { Reticle } from './Reticle'
@@ -29,6 +30,8 @@ import s from './Gallery.module.css'
 export interface PhotoFrameProps {
   photo: Photo
   model: ResultsModel
+  /** Which view shows it (each keeps one <img> element per photo for the session, R3-1) */
+  view: 'hero' | 'detail'
   /** Start loading (the current photo and its neighbours) */
   load: boolean
   /** This is the photo on screen now: it counts as seen once its pixels are up */
@@ -54,7 +57,7 @@ export interface PhotoFrameProps {
 /** The useOnce key a capture's first showing is recorded under (shared with the shared-link picture). */
 export const seenKeyOf = (p: Photo) => `capture:${p.capture.itemId}`
 
-export function PhotoFrame({ photo, model, load, current, reveal, chips, echo, reticle, gateOnVisible, onExpand, className, tag, note }: PhotoFrameProps) {
+export function PhotoFrame({ photo, model, view, load, current, reveal, chips, echo, reticle, gateOnVisible, onExpand, className, tag, note }: PhotoFrameProps) {
   const reduced = useReducedMotion()
   const { capture, pass } = photo
   const url = cardUrl(capture)
@@ -62,7 +65,7 @@ export function PhotoFrame({ photo, model, load, current, reveal, chips, echo, r
   const frameRef = useRef<HTMLDivElement>(null)
   // Decided once per mount: a first showing may reveal; anything else is simply there.
   const [mode] = useState<'reveal' | 'img'>(() => (reveal && current && pass && !wasSeen(seenKey) ? 'reveal' : 'img'))
-  const [img, setImg] = useState<'idle' | 'loading' | 'ready' | 'error'>(() => (decodedPhoto(url) ? 'ready' : 'idle'))
+  const [img, setImg] = useState<'idle' | 'loading' | 'ready' | 'error'>(() => (decodedPhoto(url) || hasPhotoElement(view, url) ? 'ready' : 'idle'))
   const [fadeIn, setFadeIn] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [locked, setLocked] = useState(mode === 'img')
@@ -136,14 +139,7 @@ export function PhotoFrame({ photo, model, load, current, reveal, chips, echo, r
       ) : (
         <>
           {img === 'ready' ? (
-            <img
-              src={url}
-              alt={alt}
-              crossOrigin="anonymous"
-              decoding="async"
-              draggable={false}
-              className={cx(s.img, dim, fadeIn && !reduced && s.imgFade)}
-            />
+            <Img view={view} url={url} alt={alt} className={cx(s.img, dim)} fadeClass={fadeIn && !reduced ? s.imgFade : undefined} />
           ) : (
             <div className={s.waiting} role={img === 'loading' || img === 'error' ? 'status' : undefined}>
               {img === 'loading' ? (

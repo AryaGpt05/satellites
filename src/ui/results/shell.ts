@@ -14,6 +14,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useRef, useSt
 import { DUR, EASE } from '@/lib/ease'
 import { useApp } from '@/state/store'
 import { prefersReducedMotion } from '@/ui/system'
+import { snapshot } from './snapshot'
 
 /**
  * Laptops up to 860 px tall (1280×800): the summary drops its own notch and the pass header sets the name and the
@@ -304,51 +305,20 @@ export function exitTimeline(node: HTMLElement | null | undefined) {
   exitClone(node, reduced ? [{ opacity: 1 }, { opacity: 0 }] : [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: 'inset(0 0 0 100%)' }], reduced ? 200 : 280)
 }
 
+/**
+ * The leaving panel / strip as a ghost (R3-4): only what is on screen is copied (./snapshot.ts: the visible rows and
+ * slides, photos as canvases painted from their decoded images, scrolled-past blocks as sized placeholders), so the
+ * exit frame lays out a few hundred nodes instead of the whole ~1,300-node sheet, and no photo is re-created (R3-1).
+ */
 function exitClone(node: HTMLElement | null | undefined, keyframes: Keyframe[], duration: number) {
   const parent = node?.parentNode
   if (!node || !parent || !node.isConnected || typeof node.animate !== 'function') return
-  const clone = node.cloneNode(true) as HTMLElement
+  const { node: clone, restore } = snapshot(node, { clip: true })
   clone.setAttribute('aria-hidden', 'true')
-  clone.removeAttribute('id')
   clone.inert = true
   clone.style.pointerEvents = 'none'
-  clone.style.animation = 'none'
-  clone.querySelectorAll<HTMLElement>('*').forEach((el) => {
-    el.style.animation = 'none'
-    el.removeAttribute('id')
-  })
-  // Canvases clone blank: carry their pixels over.
-  const src = node.querySelectorAll('canvas')
-  clone.querySelectorAll('canvas').forEach((c, i) => {
-    const from = src[i]
-    if (!from || !from.width || !from.height) return
-    try {
-      c.width = from.width
-      c.height = from.height
-      c.getContext('2d')?.drawImage(from, 0, 0)
-    } catch {
-      /* tainted or lost context: the clone shows the frame without pixels */
-    }
-  })
-  // Keep scrolled content where it was (R2R9): read the offsets BEFORE inserting (no layout of the clone
-  // in between), then write only the non-zero ones.
-  const a = node.querySelectorAll<HTMLElement>('*')
-  const scrolled: [number, number, number][] = []
-  a.forEach((el, i) => {
-    const t = el.scrollTop
-    const l = el.scrollLeft
-    if (t || l) scrolled.push([i, t, l])
-  })
   parent.insertBefore(clone, node.nextSibling)
-  if (scrolled.length) {
-    const b = clone.querySelectorAll<HTMLElement>('*')
-    for (const [i, t, l] of scrolled) {
-      const el = b[i]
-      if (!el) continue
-      if (t) el.scrollTop = t
-      if (l) el.scrollLeft = l
-    }
-  }
+  restore()
   const anim = clone.animate(keyframes, { duration, easing: EASE.inOut, fill: 'forwards' })
   const remove = () => clone.remove()
   anim.onfinish = remove

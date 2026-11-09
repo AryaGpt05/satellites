@@ -12,6 +12,13 @@
  *
  * Layout inside: [grip (stacked)] → header (fixed) → body (scrolls) → footer (fixed).
  *
+ * The header never moves the body in layout (R3-9: no layout shift when it grows or shrinks): the header
+ * (with the grip on phones) overlays the top of the sheet, and the body is laid out from the sheet's top,
+ * drawn below the header with a transform and shortened by the same amount, written in the frame the
+ * header's height changes. So a header that changes height costs a transform (compositor), never a
+ * shift of the content under it. For callers that measure, `bodyEl.offsetTop` still reports where the
+ * body starts (the header's height), as it did when the header was in flow.
+ *
  * Usage:
  *   <Sheet label="Passes" header={<h2>…</h2>} snaps={[0.3, 0.62, 0.92]} defaultSnap={1}>
  *     …long content…
@@ -30,7 +37,7 @@
  * on the footer, so both moves stay on the compositor and never lay out);
  * React only renders the height and the snap variables.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react'
 import { easeOut } from '@/lib/ease'
 import { Glyph } from './Glyph'
 import { useIsMobile } from './media'
@@ -83,8 +90,8 @@ const DRAG_SLOP_PX = 5
 /** At the top snap, a pull this far down at scrollTop 0 hands the gesture from the body to the sheet. */
 const HANDOFF_PX = 6
 const DISMISS_PX = 72
-/** Elements a drag never starts from: they handle their own pointer input. */
-const NO_DRAG = '[data-sheet-nodrag], input, textarea, select, [contenteditable="true"]'
+/** Elements a drag never starts from: they handle their own pointer input (a search's suggestion list scrolls). */
+const NO_DRAG = '[data-sheet-nodrag], [data-suggestions], input, textarea, select, [contenteditable="true"]'
 /** A tap on these is theirs, not a request to raise the sheet. */
 const INTERACTIVE = 'button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [tabindex]:not([tabindex="-1"])'
 
@@ -115,6 +122,7 @@ export function Sheet({
 }: SheetProps) {
   const mobile = useIsMobile()
   const rootRef = useRef<HTMLElement>(null)
+  const headRef = useRef<HTMLDivElement>(null)
   const footRef = useRef<HTMLDivElement>(null)
   const bodyEl = useRef<HTMLDivElement | null>(null)
   const setBodyRef = useCallback(
@@ -456,14 +464,32 @@ export function Sheet({
   }, [closeOnEscape, onClose])
 
   // Mobile: the footer rides at the bottom of the *visible* part, so the body needs its height as padding.
+  // Written in the next frame, before its layout (R3-12): a size write inside an observer's delivery would
+  // resize the body under any observer of it and end the frame on a ResizeObserver loop error.
   useEffect(() => {
     const foot = footRef.current
     const root = rootRef.current
     if (!foot || !root || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => root.style.setProperty('--sheet-foot', `${foot.offsetHeight}px`))
+    let raf = 0
+    let px = -1
+    const ro = new ResizeObserver((entries) => {
+      const h = Math.round(entries[0]?.borderBoxSize?.[0]?.blockSize ?? foot.offsetHeight)
+      if (h === px) return
+      px = h
+      if (!raf)
+        raf = requestAnimationFrame(() => {
+          raf = 0
+          root.style.setProperty('--sheet-foot', `${px}px`)
+        })
+    })
     ro.observe(foot)
-    return () => ro.disconnect()
+    return () => {
+      ro.disconnect()
+      cancelAnimationFrame(raf)
+    }
   }, [footer != null])
+
+  useHeadOffset(headRef, bodyEl, mobile, mobile || header != null || onClose != null)
 
   const sheetProps = mobile
     ? {
@@ -497,7 +523,7 @@ export function Sheet({
       {...sheetProps}
     >
       {mobile ? (
-        <div className={s.dragZone} onClick={onHeadClick}>
+        <div ref={headRef} className={cx(s.top, s.dragZone)} onClick={onHeadClick}>
           <button
             type="button"
             className={s.grip}
@@ -515,7 +541,7 @@ export function Sheet({
           ) : null}
         </div>
       ) : header || onClose ? (
-        <div className={s.head}>
+        <div ref={headRef} className={cx(s.top, s.head)}>
           <div className={s.headMain}>{header}</div>
           {onClose ? <CloseButton label={closeLabel} onClose={onClose} /> : null}
         </div>
@@ -538,6 +564,55 @@ function CloseButton({ label, onClose }: { label: string; onClose: () => void })
       <Glyph name="close" size={14} />
     </button>
   )
+}
+
+/**
+ * The body below an overlaid header (R3-9). The body is laid out from the sheet's top, so the header's
+ * height never moves it in layout; it is drawn below the header with `translateY(header)` and shortened by
+ * the same `margin-bottom`, so it ends where it did (above the footer). Both are measured once when the
+ * header mounts (the first frame is placed); after that the header's ResizeObserver writes the transform
+ * in the frame the height changed (paint only, before that frame is painted) and the margin in the next
+ * frame, before its layout, so no observer of the body sees it resized inside its own delivery.
+ * `body.offsetTop` reports the header's height, where the body starts, as it did with the header in flow.
+ */
+function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefObject<HTMLDivElement | null>, mobile: boolean, present: boolean) {
+  useLayoutEffect(() => {
+    const head = headRef.current
+    const body = bodyRef.current
+    if (!head || !body || !present) return
+    const dpr = window.devicePixelRatio || 1
+    const measure = () => Math.round(head.getBoundingClientRect().height * dpr) / dpr
+    const place = (px: number) => void (body.style.transform = px ? `translateY(${px}px)` : '')
+    const size = (px: number) => void (body.style.marginBottom = px ? `${px}px` : '')
+    let h = measure()
+    place(h)
+    size(h)
+    Object.defineProperty(body, 'offsetTop', { configurable: true, get: () => head.offsetHeight })
+    let raf = 0
+    const ro =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            // Read live, not from the entry: an earlier observer in this delivery may have changed it again.
+            const next = measure()
+            if (Math.abs(next - h) < 0.01) return
+            h = next
+            place(h)
+            if (!raf)
+              raf = requestAnimationFrame(() => {
+                raf = 0
+                size(h)
+              })
+          })
+    ro?.observe(head)
+    return () => {
+      ro?.disconnect()
+      cancelAnimationFrame(raf)
+      delete (body as { offsetTop?: number }).offsetTop
+      place(0)
+      size(0)
+    }
+  }, [headRef, bodyRef, mobile, present])
 }
 
 /** window.innerHeight, live (address-bar collapse on mobile changes it). */
