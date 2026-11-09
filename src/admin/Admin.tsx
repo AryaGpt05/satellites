@@ -1,0 +1,395 @@
+/**
+ * /admin: what people do in Watched, at a glance. Sign-in is a Supabase email magic link; the stats come from
+ * the admin_stats RPC, which only answers for the admin's email (checked in the database).
+ * DEV only: /admin?mock=1 renders a fixture without signing in (src/admin/fixture.ts).
+ */
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { Wordmark } from '@/ui/system/Wordmark'
+import { RANGES, currentSession, fetchStats, sendMagicLink, signOut, supabase, type AdminStats, type Range } from './api'
+import { ActivityChart, Funnel, RankList, Split, WorldMap } from './charts'
+import { ACTION_NAMES, DEVICE_NAMES, SOURCE_NAMES, VERDICT_NAMES, countryName, fmtAgo, fmtInt, fmtPct, fmtSec, fmtStamp } from './format'
+
+type View =
+  | { kind: 'loading' }
+  | { kind: 'signed-out'; sent?: string; error?: string }
+  | { kind: 'denied'; email?: string; message: string }
+  | { kind: 'ready'; email?: string; mock?: boolean }
+
+const MOCK = import.meta.env.DEV ? new URLSearchParams(location.search).has('mock') : false
+const RANGE_KEY = 'watched-admin.range'
+
+function initialRange(): Range {
+  try {
+    const r = localStorage.getItem(RANGE_KEY) as Range | null
+    if (r && RANGES.includes(r)) return r
+  } catch {
+    /* default */
+  }
+  return '7d'
+}
+
+export function Admin() {
+  const [view, setView] = useState<View>({ kind: 'loading' })
+  const [range, setRange] = useState<Range>(initialRange)
+  const [stats, setStats] = useState<AdminStats | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  // Session (or the fixture)
+  useEffect(() => {
+    if (import.meta.env.DEV && MOCK) {
+      setView({ kind: 'ready', email: 'a585gupt@uwaterloo.ca', mock: true })
+      return
+    }
+    const sb = supabase()
+    if (!sb) {
+      setView({ kind: 'signed-out', error: 'Supabase is not configured for this build.' })
+      return
+    }
+    void currentSession().then((s) => setView(s ? { kind: 'ready', email: s.user.email } : { kind: 'signed-out' }))
+    const { data } = sb.auth.onAuthStateChange((_e, s) => {
+      setView((v) => (s ? (v.kind === 'ready' || v.kind === 'denied' ? v : { kind: 'ready', email: s.user.email }) : { kind: 'signed-out' }))
+    })
+    return () => data.subscription.unsubscribe()
+  }, [])
+
+  const load = useCallback(
+    async (r: Range) => {
+      setBusy(true)
+      setErr(null)
+      if (import.meta.env.DEV && MOCK) {
+        const { mockStats } = await import('./fixture')
+        setStats(mockStats(r))
+        setBusy(false)
+        return
+      }
+      const res = await fetchStats(r)
+      setBusy(false)
+      if (res.ok) setStats(res.stats)
+      else if (res.denied) setView((v) => ({ kind: 'denied', email: v.kind === 'ready' ? v.email : undefined, message: res.message }))
+      else setErr(res.message)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (view.kind !== 'ready') return
+    void load(range)
+    try {
+      localStorage.setItem(RANGE_KEY, range)
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }, [view.kind, range, load])
+
+  if (view.kind === 'loading') return <Shell />
+  if (view.kind === 'signed-out') return <SignIn sent={view.sent} error={view.error} onSent={(email) => setView({ kind: 'signed-out', sent: email })} />
+  if (view.kind === 'denied')
+    return (
+      <Shell>
+        <section className="a-gate">
+          <p className="a-label">ACCESS</p>
+          <h1 className="a-gate-h">This account can’t see the stats.</h1>
+          <p className="a-gate-p">
+            Signed in as <span className="a-mono">{view.email ?? 'unknown'}</span>. Only the owner’s address is on the admin list.
+          </p>
+          <button type="button" className="a-btn" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </section>
+      </Shell>
+    )
+
+  return (
+    <Shell
+      right={
+        <>
+          <RangePicker value={range} onChange={setRange} />
+          <span className="a-who">
+            {view.mock ? 'MOCK DATA' : view.email}
+            {!view.mock && (
+              <button type="button" className="a-link" onClick={() => void signOut()}>
+                Sign out
+              </button>
+            )}
+          </span>
+        </>
+      }
+    >
+      {err && <p className="a-error">Couldn’t load the stats: {err}</p>}
+      {stats ? <Dashboard s={stats} busy={busy} onRefresh={() => void load(range)} /> : <p className="a-empty a-pad">Loading…</p>}
+    </Shell>
+  )
+}
+
+// ── Chrome ──────────────────────────────────────────────────────────────────────────────────
+
+function Shell({ children, right }: { children?: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="a-page">
+      <header className="a-head">
+        <a href="/" className="a-brand" aria-label="Watched">
+          <Wordmark height={22} />
+          <span className="a-label">ADMIN</span>
+        </a>
+        <div className="a-head-right">{right}</div>
+      </header>
+      <main className="a-main">{children}</main>
+    </div>
+  )
+}
+
+function RangePicker({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+  return (
+    <div className="a-range" role="radiogroup" aria-label="Range">
+      {RANGES.map((r) => (
+        <button key={r} type="button" role="radio" aria-checked={r === value} className={r === value ? 'on' : undefined} onClick={() => onChange(r)}>
+          {r === 'all' ? 'ALL' : r.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function SignIn({ sent, error, onSent }: { sent?: string; error?: string; onSent: (email: string) => void }) {
+  const [email, setEmail] = useState('')
+  const [pending, setPending] = useState(false)
+  const [msg, setMsg] = useState<string | null>(error ?? null)
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    const v = email.trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return setMsg('Enter an email address.')
+    setPending(true)
+    const problem = await sendMagicLink(v)
+    setPending(false)
+    if (problem) setMsg(problem)
+    else onSent(v)
+  }
+  return (
+    <Shell>
+      <section className="a-gate">
+        <p className="a-label">SIGN IN</p>
+        {sent ? (
+          <>
+            <h1 className="a-gate-h">Check your inbox.</h1>
+            <p className="a-gate-p">
+              A sign-in link is on its way to <span className="a-mono">{sent}</span>. Open it on this device; it brings you back here.
+            </p>
+          </>
+        ) : (
+          <form onSubmit={submit} className="a-form">
+            <h1 className="a-gate-h">Stats are for the owner.</h1>
+            <label className="a-label" htmlFor="a-email">
+              EMAIL
+            </label>
+            <input id="a-email" type="email" autoComplete="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} className="a-input" placeholder="you@example.com" required />
+            <button type="submit" className="a-btn a-btn-primary" disabled={pending}>
+              {pending ? 'Sending…' : 'Send sign-in link'}
+            </button>
+            {msg && <p className="a-error">{msg}</p>}
+          </form>
+        )}
+      </section>
+    </Shell>
+  )
+}
+
+function Section({ n, title, children, className }: { n: number; title: string; children: ReactNode; className?: string }) {
+  return (
+    <section className={`a-sec ${className ?? ''}`}>
+      <h2 className="a-rule">
+        <span>
+          {String(n).padStart(2, '0')} / {title}
+        </span>
+      </h2>
+      {children}
+    </section>
+  )
+}
+
+function Panel({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
+  return (
+    <div className="a-panel">
+      <h3 className="a-label">{title}</h3>
+      {children}
+      {note && <p className="a-note">{note}</p>}
+    </div>
+  )
+}
+
+function Kpi({ label, value, sub, signal }: { label: string; value: string; sub?: string; signal?: boolean }) {
+  return (
+    <div className="a-kpi">
+      <span className="a-label">{label}</span>
+      <span className={signal ? 'a-kpi-v a-signal-text' : 'a-kpi-v'}>{value}</span>
+      <span className="a-kpi-sub">{sub ?? ' '}</span>
+    </div>
+  )
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────────────────────────
+
+const RANGE_WORDS: Record<Range, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', all: 'all time' }
+
+function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRefresh: () => void }) {
+  const t = s.totals
+  const f = s.funnel
+  const sessions = t.session ?? 0
+  const searches = t.search ?? 0
+  const shares = t.share_action ?? 0
+  const conv = f.search ? (f.share_action ?? 0) / f.search : null
+  const stages = [
+    { key: 'search', label: 'Searched', n: f.search ?? 0 },
+    { key: 'results', label: 'Saw results', n: f.results ?? 0 },
+    { key: 'pass_open', label: 'Opened a pass', n: f.pass_open ?? 0 },
+    { key: 'lightbox_open', label: 'Expanded a photo', n: f.lightbox_open ?? 0 },
+    { key: 'share_open', label: 'Opened share', n: f.share_open ?? 0 },
+    { key: 'share_action', label: 'Shared', n: f.share_action ?? 0 },
+  ]
+  const r = s.results
+  const v = s.vitals
+
+  return (
+    <div className={busy ? 'a-dash a-busy' : 'a-dash'}>
+      <p className="a-status">
+        <span>{RANGE_WORDS[s.range].toUpperCase()}</span>
+        <span className="a-dim">GENERATED {fmtStamp(s.generatedAt)}</span>
+        <button type="button" className="a-link" onClick={onRefresh} disabled={busy}>
+          {busy ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </p>
+
+      <Section n={1} title="OVERVIEW">
+        <div className="a-kpis">
+          <Kpi label="SESSIONS" value={fmtInt(sessions)} sub={t.view ? `${fmtInt(t.view)} page loads` : undefined} />
+          <Kpi label="SEARCHES" value={fmtInt(searches)} sub={sessions ? `${(searches / sessions).toFixed(2)} per session` : undefined} />
+          <Kpi label="RESULTS" value={fmtInt(t.results)} sub={searches ? `${fmtPct((t.results ?? 0) / searches)} of searches` : undefined} />
+          <Kpi label="PASS OPENS" value={fmtInt(t.pass_open)} sub={t.lightbox_open ? `${fmtInt(t.lightbox_open)} photo expands` : undefined} />
+          <Kpi label="SHARES" value={fmtInt(shares)} sub={t.share_open ? `${fmtInt(t.share_open)} sheet opens` : undefined} signal />
+          <Kpi label="SEARCH → SHARE" value={fmtPct(conv)} sub="of searching sessions" signal />
+        </div>
+      </Section>
+
+      <Section n={2} title={s.bucket === 'hour' ? 'ACTIVITY · HOURLY UTC' : 'ACTIVITY · DAILY UTC'}>
+        <ActivityChart series={s.series} bucket={s.bucket} />
+      </Section>
+
+      <div className="a-cols">
+        <Section n={3} title="FUNNEL · SESSIONS">
+          <Funnel stages={stages} />
+          <p className="a-note">Sessions that reached each step. The last column is the share of the step before.</p>
+        </Section>
+        <Section n={4} title="HOW PEOPLE SEARCH">
+          <RankList rows={s.top['search.source']} label={(x) => SOURCE_NAMES[x] ?? x} />
+        </Section>
+      </div>
+
+      <Section n={5} title="PLACES">
+        <div className="a-places">
+          <WorldMap cells={s.top['search.cell']} />
+          <div className="a-places-lists">
+            <Panel title="TOP PLACES">
+              <RankList rows={s.top['search.label']} max={10} accent />
+            </Panel>
+            <Panel title="TOP COUNTRIES SEARCHED">
+              <RankList rows={s.top['search.country']} max={8} label={countryName} />
+            </Panel>
+          </div>
+        </div>
+      </Section>
+
+      <Section n={6} title="SATELLITES">
+        <div className="a-grid3">
+          <Panel title="MOST OPENED">
+            <RankList rows={s.top['pass_open.sat']} />
+          </Panel>
+          <Panel title="MOST SHARED">
+            <RankList rows={s.top['share_action.sat']} accent />
+          </Panel>
+          <Panel title="PASS OPENS BY VERDICT">
+            <Split rows={s.top['pass_open.verdict']} names={VERDICT_NAMES} />
+          </Panel>
+        </div>
+      </Section>
+
+      <Section n={7} title="SHARING & AUDIENCE">
+        <div className="a-grid3">
+          <Panel title="SHARE ACTIONS">
+            <Split rows={s.top['share_action.action']} names={ACTION_NAMES} />
+          </Panel>
+          <Panel title="DEVICES">
+            <Split rows={s.top['session.device']} names={DEVICE_NAMES} />
+          </Panel>
+          <Panel title="VISITOR COUNTRIES" note="From Vercel's edge; the IP itself is never stored.">
+            <RankList rows={s.top['session.country']} max={6} label={countryName} />
+          </Panel>
+          <Panel title="REFERRERS">
+            <RankList rows={s.top['session.ref']} max={6} empty="No referrers yet" />
+          </Panel>
+          <Panel title="UTM · SOURCE / MEDIUM / CAMPAIGN">
+            <RankList rows={s.top['session.utm']} max={6} empty="No tagged links yet" />
+          </Panel>
+          <Panel title="SPEED">
+            <dl className="a-facts">
+              <dt>FIRST RESULTS P50</dt>
+              <dd>
+                {fmtSec(r.p50Ms)} <small>S</small>
+              </dd>
+              <dt>FIRST RESULTS P90</dt>
+              <dd>
+                {fmtSec(r.p90Ms)} <small>S</small>
+              </dd>
+              <dt>PARTIAL AT FIRST PAINT</dt>
+              <dd>{r.n ? fmtPct(r.partial / r.n) : '—'}</dd>
+              <dt>ARCHIVES DOWN</dt>
+              <dd>{r.n ? fmtPct(r.archiveFailed / r.n) : '—'}</dd>
+              <dt>LCP · INP · CLS (P75)</dt>
+              <dd>
+                {fmtSec(v.lcp)} <small>S</small> · {fmtInt(v.inp)} <small>MS</small> · {v.cls == null ? '—' : v.cls.toFixed(3)}
+              </dd>
+            </dl>
+          </Panel>
+        </div>
+      </Section>
+
+      <div className="a-cols">
+        <Section n={8} title="RECENT SEARCHES">
+          {s.recentSearches.length ? (
+            <ul className="a-feed">
+              {s.recentSearches.map((x, i) => (
+                <li key={`${x.t}-${i}`}>
+                  <span className="a-feed-t">{fmtAgo(x.t, s.generatedAt)}</span>
+                  <span className="a-feed-main">{x.label ?? (x.cell ? `Cell ${x.cell}` : '—')}</span>
+                  <span className="a-feed-meta">
+                    {[x.country?.toUpperCase(), SOURCE_NAMES[x.source ?? ''] ?? x.source, x.device].filter(Boolean).join(' · ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="a-empty">No searches in this range.</p>
+          )}
+        </Section>
+        <Section n={9} title="RECENT ERRORS">
+          {s.recentErrors.length ? (
+            <ul className="a-feed">
+              {s.recentErrors.map((x, i) => (
+                <li key={`${x.t}-${i}`}>
+                  <span className="a-feed-t">{fmtAgo(x.t, s.generatedAt)}</span>
+                  <span className="a-feed-main a-mono-s">{x.msg}</span>
+                  <span className="a-feed-meta">{x.where?.toUpperCase()}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="a-empty">No errors in this range.</p>
+          )}
+        </Section>
+      </div>
+
+      <p className="a-foot">
+        Counted per browser tab: no cookies, no IPs, places at city level and 0.1° cells. Raw events are kept 90 days; daily totals after that. Times are UTC.
+      </p>
+    </div>
+  )
+}

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build -c vite.admin.config.ts",
     "typecheck": "tsc -b --pretty",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",

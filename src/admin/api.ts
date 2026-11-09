@@ -1,0 +1,100 @@
+/**
+ * The admin page's data: Supabase Auth (email magic link) and the `admin_stats` RPC.
+ * supabase-js lives only in this chunk (the app talks to PostgREST with fetch, src/lib/backend.ts).
+ *
+ * The page is not the security boundary: admin_stats checks the signed-in email against a private
+ * admins table inside the database and refuses everyone else (anon has no grant at all).
+ */
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
+
+export type Range = '24h' | '7d' | '30d' | 'all'
+export const RANGES: Range[] = ['24h', '7d', '30d', 'all']
+
+export type Ranked = [string, number][]
+
+export interface AdminStats {
+  range: Range
+  generatedAt: number
+  bucket: 'hour' | 'day'
+  /** Event counts by type, plus `session` (tabs) */
+  totals: Record<string, number>
+  /** Distinct tabs (per day, summed) that reached each stage */
+  funnel: Record<string, number>
+  /** [bucket start ms, searches, shares, sessions] */
+  series: [number, number, number, number][]
+  /** 'search.label', 'search.country', 'search.source', 'search.cell', 'session.device', 'session.country',
+   *  'session.ref', 'session.utm', 'pass_open.sat', 'pass_open.verdict', 'share_action.sat', 'share_action.action' */
+  top: Record<string, Ranked>
+  results: { n: number; p50Ms: number | null; p90Ms: number | null; partial: number; archiveFailed: number }
+  vitals: { n: number; lcp: number | null; inp: number | null; cls: number | null }
+  recentSearches: { t: number; label?: string; country?: string; source?: string; cell?: string; device?: string }[]
+  recentErrors: { t: number; where?: string; msg?: string }[]
+}
+
+let client: SupabaseClient | null | undefined
+
+export function supabase(): SupabaseClient | null {
+  if (client !== undefined) return client
+  const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()
+  const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim()
+  client = url && key ? createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'watched-admin' } }) : null
+  return client
+}
+
+export async function currentSession(): Promise<Session | null> {
+  const sb = supabase()
+  if (!sb) return null
+  const { data } = await sb.auth.getSession()
+  return data.session
+}
+
+export async function sendMagicLink(email: string): Promise<string | null> {
+  const sb = supabase()
+  if (!sb) return 'Supabase is not configured for this build.'
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/admin` } })
+  return error ? error.message : null
+}
+
+export async function signOut(): Promise<void> {
+  await supabase()?.auth.signOut()
+}
+
+export type StatsResult = { ok: true; stats: AdminStats } | { ok: false; denied: boolean; message: string }
+
+export async function fetchStats(range: Range): Promise<StatsResult> {
+  const sb = supabase()
+  if (!sb) return { ok: false, denied: false, message: 'Supabase is not configured for this build.' }
+  const { data, error } = await sb.rpc('admin_stats', { p_range: range })
+  if (error) return { ok: false, denied: error.code === '42501' || /not allowed|permission/i.test(error.message), message: error.message }
+  const stats = parseStats(data)
+  return stats ? { ok: true, stats } : { ok: false, denied: false, message: 'Unexpected response.' }
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/** Defensive parse of the RPC's JSON (exported for tests). */
+export function parseStats(v: unknown): AdminStats | null {
+  if (!isObj(v) || !RANGES.includes(v.range as Range)) return null
+  const rec = (o: unknown): Record<string, number> => (isObj(o) ? Object.fromEntries(Object.entries(o).map(([k, x]) => [k, num(x)])) : {})
+  const top: Record<string, Ranked> = {}
+  if (isObj(v.top))
+    for (const [k, rows] of Object.entries(v.top))
+      if (Array.isArray(rows)) top[k] = rows.filter((r): r is [string, number] => Array.isArray(r) && typeof r[0] === 'string').map((r) => [r[0], num(r[1])])
+  const r = isObj(v.results) ? v.results : {}
+  const vi = isObj(v.vitals) ? v.vitals : {}
+  return {
+    range: v.range as Range,
+    generatedAt: num(v.generatedAt),
+    bucket: v.bucket === 'day' ? 'day' : 'hour',
+    totals: rec(v.totals),
+    funnel: rec(v.funnel),
+    series: Array.isArray(v.series) ? v.series.filter(Array.isArray).map((s) => [num(s[0]), num(s[1]), num(s[2]), num(s[3])] as [number, number, number, number]) : [],
+    top,
+    results: { n: num(r.n), p50Ms: numOrNull(r.p50Ms), p90Ms: numOrNull(r.p90Ms), partial: num(r.partial), archiveFailed: num(r.archiveFailed) },
+    vitals: { n: num(vi.n), lcp: numOrNull(vi.lcp), inp: numOrNull(vi.inp), cls: numOrNull(vi.cls) },
+    recentSearches: Array.isArray(v.recentSearches) ? (v.recentSearches.filter(isObj) as AdminStats['recentSearches']) : [],
+    recentErrors: Array.isArray(v.recentErrors) ? (v.recentErrors.filter(isObj) as AdminStats['recentErrors']) : [],
+  }
+}
