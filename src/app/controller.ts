@@ -213,11 +213,11 @@ function shareRun(share: Share): { place: Place; opts: RunOpts; share: Share } {
  * the visitor hasn't started anything (still on the landing, About closed, no field focused, the search field
  * empty, the address bar still the share link), open it exactly as the on-time path would. Otherwise drop it:
  * a search replaces ?s= in the address bar (writeUrl). This path never cleans the address bar itself (a late null
- * can't tell "unknown" from "timed out"); the landing keeps ?s= only while the lookup is pending (lateShare, below),
- * so a landing the visitor comes back to after a search of their own is clean (src/app/lateShare.ts).
+ * can't tell "unknown" from "timed out"); the landing keeps ?s= until the visitor starts a search of their own
+ * (lateShare, below), so a landing they come back to after it is clean (src/app/lateShare.ts).
  */
 const lateShare = createLateShareGate()
-export const isSharePending = () => lateShare.pending()
+export const isShareUnresolved = () => lateShare.unresolved()
 
 function adoptLateShare(shareP: Promise<Share | null>, bootStart: number) {
   lateShare.start(bootStart + LATE_SHARE_MS)

@@ -5,21 +5,38 @@ import { createBackStack, resolveTabId, stampOf, type BackStack, type HistoryLik
  * A session history for one tab, asynchronous like a browser's: a traversal (`go`, or the user's Back / Forward) is
  * queued, and resolved RELATIVE TO THE ENTRY CURRENT WHEN IT IS PROCESSED (`deliver()`, a later task), landing with a
  * popstate carrying that entry's state. One the user queued earlier is processed first (`jumpFirst`); an app move can
- * be lost (`dropApp`); with `chromium`, an app move requested while a user traversal is pending is dropped. Moving below the first entry leaves the site: counted when the APP's move does it
- * (`leftSite`); a user Back there does nothing (first entry in the tab). Out of range above: nothing happens.
+ * be lost (`dropApp`); with `chromium`, an app move requested while a user traversal is pending is dropped. Moving
+ * below the first entry leaves the site: counted when the APP's move does it (`leftSite`); a user Back there does
+ * nothing (first entry in the tab). Out of range above: nothing happens.
+ *
+ * Three models of when a traversal's target is fixed, none of them verified in every browser (CR-3):
+ *  - 'delivery' (default): relative to the entry current when it is processed;
+ *  - 'callTime': the target entry is picked when go() / Back is called (gone if truncated meanwhile);
+ *  - 'queuedPush': like 'delivery', but a pushState made while a traversal is pending is applied after it.
  */
-function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
+type HistoryModel = 'delivery' | 'callTime' | 'queuedPush'
+const MODELS: HistoryModel[] = ['delivery', 'callTime', 'queuedPush']
+function fakeHistory(first = '/', opts: { chromium?: boolean; model?: HistoryModel } = {}) {
+  const model = opts.model ?? 'delivery'
   type Entry = { state: unknown; url: string }
   const entries: Entry[] = [{ state: null, url: first }]
   let index = 0
   let onPop: ((state: unknown) => void) | null = null
-  const pending: { delta: number; byApp: boolean; held?: boolean }[] = []
+  type Op = { delta: number; byApp: boolean; held?: boolean; target?: Entry | 'off'; push?: Entry }
+  const pending: Op[] = []
   let slowApp = false
   const log = { leftSite: 0, gos: [] as number[], pops: 0 }
   const traverse = (delta: number, byApp: boolean, first = false) => {
     if (delta === 0) return
-    if (first) pending.unshift({ delta, byApp })
-    else pending.push({ delta, byApp })
+    const op: Op = { delta, byApp }
+    if (model === 'callTime') op.target = index + delta < 0 ? 'off' : entries[index + delta]
+    if (first) pending.unshift(op)
+    else pending.push(op)
+  }
+  const doPush = (e: Entry) => {
+    entries.splice(index + 1)
+    entries.push(e)
+    index++
   }
   const h = {
     get state() {
@@ -27,9 +44,9 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
     },
     url: () => entries[index].url,
     pushState(state: unknown, _u: string, url?: string | null) {
-      entries.splice(index + 1)
-      entries.push({ state, url: url ?? entries[index].url })
-      index++
+      const e = { state, url: url ?? entries[index].url }
+      if (model === 'queuedPush' && pending.some((t) => !t.push)) pending.push({ delta: 0, byApp: true, push: e })
+      else doPush(e)
     },
     replaceState(state: unknown, _u: string, url?: string | null) {
       entries[index] = { state, url: url ?? entries[index].url }
@@ -37,9 +54,9 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
     go(delta: number) {
       log.gos.push(delta)
       // Chromium: an app history.go requested while a user traversal is pending is dropped.
-      if (opts.chromium && pending.some((t) => !t.byApp)) return
+      if (opts.chromium && pending.some((t) => !t.byApp && !t.push)) return
       traverse(delta, true)
-      if (slowApp) pending[pending.length - 1].held = true
+      if (slowApp && delta !== 0) pending[pending.length - 1].held = true
     },
     /** The user's Back / Forward / long-press jump */
     jump: (delta: number) => traverse(delta, false),
@@ -47,14 +64,14 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
     jumpFirst: (delta: number) => traverse(delta, false, true),
     /** The browser drops the app's queued move */
     dropApp() {
-      const i = pending.findIndex((t) => t.byApp)
+      const i = pending.findIndex((t) => t.byApp && !t.push)
       if (i >= 0) pending.splice(i, 1)
     },
     queued: () => pending.length,
     /** The app's queued moves are slow (a long task, a backgrounded tab): not processed until `releaseApp` */
     holdApp() {
       slowApp = true
-      pending.forEach((t) => t.byApp && (t.held = true))
+      pending.forEach((t) => t.byApp && !t.push && (t.held = true))
     },
     releaseApp() {
       slowApp = false
@@ -67,12 +84,22 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
       let moved = false
       while (pending.length && !pending[0].held) {
         const t = pending.shift()!
-        const i = index + t.delta
+        if (t.push) {
+          doPush(t.push)
+          continue
+        }
+        let i = index + t.delta
+        if (t.target === 'off') i = -1
+        else if (t.target) {
+          i = entries.indexOf(t.target)
+          if (i < 0) continue // its entry was truncated: nothing happens
+        }
         if (i < 0) {
           if (t.byApp) log.leftSite++
           continue
         }
         if (i >= entries.length) continue
+        if (i === index && t.target) continue // already there: no traversal, no popstate
         index = i
         log.pops++
         onPop?.(entries[index].state)
@@ -513,6 +540,24 @@ describe('back stack: layers stack in their drawn order', () => {
     expect(h.log.leftSite).toBe(0)
   })
 
+  it('About is drawn over the photo viewer (both on <body>, CR-7): Back closes About first, whichever opened first', () => {
+    const h = fakeHistory()
+    const { s, open, settle } = load(h)
+    open('results')
+    open('pass')
+    open('lightbox')
+    open('about') // "?" over the viewer
+    settle()
+    expect(s.names()).toEqual(['results', 'pass', 'lightbox', 'about'])
+    const h2 = fakeHistory()
+    const b = load(h2)
+    b.open('results')
+    b.open('about')
+    b.open('lightbox') // never from the UI today; if it were, it would sit under About
+    b.settle()
+    expect(b.s.names()).toEqual(['results', 'lightbox', 'about'])
+  })
+
   it('same rank, or an unknown name, goes on top', () => {
     const h = fakeHistory()
     const { s, open, settle } = load(h)
@@ -564,6 +609,7 @@ describe('tab id (F4: storage blocked)', () => {
     const win = { name: '' }
     const a = resolveTabId(st, null, win, mint)
     expect(resolveTabId(st, null, { name: '' }, mint)).toBe(a)
+    expect(win.name).toBe('') // storage works: nothing in window.name (CR-5)
   })
 
   it('storage blocked: the stamp on the entry in view, then window.name, before minting', () => {
@@ -819,3 +865,123 @@ describe('back stack: user traversals racing the app’s own moves (history.go r
   })
 })
 
+describe.each(MODELS)('races under the %s history model (CR-3)', (model) => {
+  const setup = () => {
+    const h = fakeHistory('/', { model })
+    return { ...load(h), h }
+  }
+
+  it('a slow "All passes" closes one layer, issued once', () => {
+    const { s, open, uiClose, settle, endTick, elapse, h } = setup()
+    open('results')
+    open('pass')
+    settle()
+    uiClose('pass')
+    endTick()
+    h.holdApp()
+    elapse(1500)
+    h.releaseApp()
+    settle()
+    expect(h.log.gos).toEqual([-1])
+    expect(s.names()).toEqual(['results'])
+    expect(h.url()).toBe('/?q=paris')
+    expect(h.log.leftSite).toBe(0)
+  })
+
+  it('Esc, Esc with a slow first move: one move per close, never off the site', () => {
+    const { s, open, uiClose, settle, endTick, elapse, h } = setup()
+    open('results')
+    open('pass')
+    settle()
+    h.holdApp()
+    uiClose('pass')
+    endTick()
+    uiClose('results')
+    settle()
+    elapse(1000)
+    h.releaseApp()
+    settle()
+    elapse(1000)
+    expect(h.log.gos).toEqual([-1, -1])
+    expect(s.names()).toEqual([])
+    expect(h.log.leftSite).toBe(0)
+    expect(h.length()).toBe(3)
+    // 'callTime': the second move was aimed from the depth the stack believed (the first had not landed), at the same
+    // entry; the browser stays one entry up: one dead Back at worst, never a close too many
+    if (model !== 'callTime') expect(h.index()).toBe(0)
+  })
+
+  it('a user Back processed before the app’s go(-2): one round of entries at most, no second go(-2)', () => {
+    const { s, open, uiClose, settle, appTasks, h } = setup()
+    open('results')
+    open('pass')
+    settle()
+    uiClose('pass')
+    uiClose('results')
+    appTasks()
+    h.jumpFirst(-1)
+    settle()
+    expect(h.log.gos.filter((g) => g === -2)).toEqual([-2])
+    expect(h.length()).toBeLessThanOrEqual(4)
+    expect(s.names()).toEqual([])
+    // 'queuedPush': the entries put above the user's apply after the app's move, which leaves from depth 1. Nothing
+    // the app does after the user's Back can stop a move already queued; in the other two models it never leaves.
+    if (model === 'queuedPush') expect(h.log.leftSite).toBe(1)
+    else {
+      expect(h.log.leftSite).toBe(0)
+      expect(h.index()).toBe(0)
+      expect(h.url()).toBe('/')
+    }
+  })
+
+  it('a user Back first, then the app’s move dropped: the timeout reads the user’s depth and issues nothing (CR-2)', () => {
+    const { s, open, uiClose, settle, appTasks, elapse, h } = setup()
+    open('results')
+    open('pass')
+    settle()
+    uiClose('pass')
+    uiClose('results')
+    appTasks()
+    h.jumpFirst(-1)
+    h.dropApp()
+    settle()
+    elapse(1500)
+    expect(h.log.gos).toEqual([-2])
+    expect(s.names()).toEqual([])
+    expect(h.log.leftSite).toBe(0)
+    expect(h.url()).toBe('/')
+  })
+
+  it('Forward into a dead entry then Back, before the undo: never off the site', () => {
+    const { s, open, settle, endTick, h } = setup()
+    open('results')
+    settle()
+    h.back()
+    settle()
+    h.forward()
+    h.back()
+    h.deliver()
+    endTick()
+    h.deliver()
+    settle()
+    expect(h.log.leftSite).toBe(0)
+    expect(h.index()).toBe(0)
+    expect(s.names()).toEqual([])
+  })
+
+  it('× then Back right after: the Back closes the pass', () => {
+    const { s, open, uiClose, settle, endTick, h } = setup()
+    open('results')
+    open('pass')
+    open('lightbox')
+    settle()
+    uiClose('lightbox')
+    endTick()
+    h.back()
+    settle()
+    expect(h.log.leftSite).toBe(0)
+    // 'callTime': the user's Back was aimed at the entry the app's move was already going to, so it does nothing
+    // (Chromium is not this model: probe (b) on a production build lands [2,1])
+    expect(s.names()).toEqual(model === 'callTime' ? ['results', 'pass'] : ['results'])
+  })
+})

@@ -25,6 +25,7 @@ describe('late share gate (the landing keeps ?s= only while a late share may sti
     c.set(7_000)
     g.cancel() // runReport for a place they searched
     expect(g.pending()).toBe(false)
+    expect(g.unresolved()).toBe(false)
     c.set(9_000)
     expect(g.answered()).toBe(false)
   })
@@ -38,16 +39,20 @@ describe('late share gate (the landing keeps ?s= only while a late share may sti
     expect(g.answered()).toBe(false)
   })
 
-  it('a late null (unknown share, or the lookup timing out at 12 s) ends it too: the next landing write cleans ?s= (PF-R2)', () => {
+  it('a late null (unknown share, or the lookup timing out at 12 s) can no longer open anything, but ?s= stays (CR-4)', () => {
     const c = at()
     const g = createLateShareGate(c.clock)
     g.start(15_000)
+    expect(g.unresolved()).toBe(true)
     c.set(12_000) // get_share gives up: null
     g.answered() // the controller asks before it looks at the answer
     expect(g.pending()).toBe(false)
+    expect(g.unresolved()).toBe(true) // a reload may still find it
+    g.cancel() // the visitor's own search
+    expect(g.unresolved()).toBe(false)
   })
 
-  it('no answer at all: pending ends with the window', () => {
+  it('no answer at all: pending ends with the window, ?s= stays until the visitor’s own search', () => {
     const c = at()
     const g = createLateShareGate(c.clock)
     g.start(15_000)
@@ -55,5 +60,8 @@ describe('late share gate (the landing keeps ?s= only while a late share may sti
     expect(g.pending()).toBe(true)
     c.set(15_001)
     expect(g.pending()).toBe(false)
+    expect(g.unresolved()).toBe(true)
+    g.cancel()
+    expect(g.unresolved()).toBe(false)
   })
 })

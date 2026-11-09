@@ -12,6 +12,7 @@
  *             on an empty frame while the chunk downloads (R2K4)
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { createPortal } from 'react-dom'
 import { backStack, onBackSettled, watchLayer } from '@/lib/backStack'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
@@ -20,7 +21,7 @@ import { Hud } from '@/ui/hud'
 import { Landing } from '@/ui/landing'
 import { prefersReducedMotion } from '@/ui/system'
 import { exitBootCurtain } from './bootCurtain'
-import { afterLandingEntrance, boot, isSharePending, loadEngine, resetToLanding, retryReport, runReport, writeUrl } from './controller'
+import { afterLandingEntrance, boot, isShareUnresolved, loadEngine, resetToLanding, retryReport, runReport, writeUrl } from './controller'
 import { ErrorNotice } from './ErrorNotice'
 import s from './App.module.css'
 
@@ -129,9 +130,9 @@ const closeAbout = () => useApp.getState().setAboutOpen(false)
 function writeUrlNow() {
   const st = useApp.getState()
   if (st.place && (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error')) writeUrl(st.place, st.phase === 'results' ? st.selectedPassId : undefined)
-  // The landing: a clean address, except a share link still being looked up (?s=: it opens when it answers). From the
-  // controller's state, not the address: a landing the visitor comes back to after their own search is clean.
-  else if (st.phase === 'idle' && !isSharePending()) history.replaceState(history.state, '', location.pathname)
+  // The landing: a clean address, except a share link the visitor hasn't moved on from (?s=: it may still open, or a
+  // reload may find it). From the controller's state, not the address: after their own search the landing is clean.
+  else if (st.phase === 'idle' && !isShareUnresolved()) history.replaceState(history.state, '', location.pathname)
 }
 /** Back out of a pass to the list (as the panel's "All passes"): live time, the camera back on the place. */
 function closePass() {
@@ -283,7 +284,9 @@ export default function Main() {
         {phase === 'error' && <ErrorNotice message={error} onRetry={retryReport} onBack={resetToLanding} />}
       </div>
       <Hud onAbout={openAbout} />
-      {about && AboutPage ? <AboutPage onClose={closeAbout} /> : null}
+      {/* On <body>, beside the photo viewer: About ("?") opened over the viewer paints over it (CR-7). The root is
+          position: fixed, a stacking context of its own, so a z-index inside it never reaches above the viewer. */}
+      {about && AboutPage ? createPortal(<AboutPage onClose={closeAbout} />, document.body) : null}
     </div>
   )
 }

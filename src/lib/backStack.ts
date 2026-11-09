@@ -113,11 +113,11 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
     const t = setTimeout(fn, ms)
     return () => clearTimeout(t)
   })
-  /** App moves (history.go) not landed yet, the delta they still carry, and the depth they land on */
-  let outstanding = 0
-  let outstandingDelta = 0
+  /** The app's move (history.go) on its way, if any (one at a time): its delta and the depth it lands on */
+  let moving = false
+  let movingDelta = 0
   let expected = 0
-  /** A user traversal landed while an app move was outstanding: read it once that has landed */
+  /** A user traversal landed while the app's move was on its way: read it once that has landed */
   let userMoved = false
   let cancelTimeout: (() => void) | null = null
   /** Moves the timeout stopped waiting for, still on their way (a popstate from one is the app's, not the user's) */
@@ -138,10 +138,10 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
   const owned = () => stack.reduce((n, e) => n + (e.own ? 1 : 0), 0)
   const depthOf = (state: unknown) => stampOf(state, o.sid)?.d ?? 0
 
-  /** Issue the move down to what is open, from a fresh task: by then a traversal the user queued has landed. */
+  /** Issue the move down to what is open. */
   const move = () => {
     movePending = false
-    if (outstanding > 0) {
+    if (moving) {
       dirty = true
       return
     }
@@ -149,8 +149,8 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
     if (target >= cur) return
     // Never below the base (target ≥ 0): the app never navigates off the site itself.
     const delta = target - cur
-    outstanding++
-    outstandingDelta += delta
+    moving = true
+    movingDelta = delta
     expected = target
     cur = target
     cancelTimeout?.()
@@ -164,17 +164,30 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
    */
   const onTimeout = () => {
     cancelTimeout = null
-    if (outstanding === 0) return
-    late += outstanding
+    if (!moving) return
+    late++
     // One a browser really dropped never lands: after a while, stop expecting it.
     cancelLate?.()
     cancelLate = later(() => {
       late = 0
       cancelLate = null
     }, LATE_FORGET_MS)
-    outstanding = 0
-    outstandingDelta = 0
-    userMoved = false
+    moving = false
+    movingDelta = 0
+    if (userMoved) {
+      // The user's move was waiting for ours: read it now, at the user's depth (CR-2; not the entries put above it).
+      // Close what is above it, but issue no move: ours may still land (it is late, and read by its depth then).
+      userMoved = false
+      dirty = false
+      cur = expected
+      while (owned() > expected) {
+        const top = stack.pop()!
+        top.token.popped = true
+        top.close()
+      }
+      o.schedule(() => o.onSettled?.())
+      return
+    }
     if (dirty) {
       dirty = false
       change()
@@ -183,7 +196,7 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
 
   const flush = () => {
     scheduled = false
-    if (outstanding > 0) {
+    if (moving) {
       dirty = true
       return
     }
@@ -261,47 +274,45 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
     },
     onPop(state) {
       const d = depthOf(state)
-      if (outstanding > 0 && late > 0 && d !== expected) {
+      if (moving && late > 0 && d !== expected) {
         // A move the timeout stopped waiting for has landed; the current one is still on its way.
         late--
         return []
       }
-      if (outstanding === 0 && late > 0) late--
-      if (outstanding > 0) {
-        if (d === expected && !userMoved) {
-          // Ours landed.
-          outstanding--
-          outstandingDelta = 0
-          if (outstanding > 0) return []
-          cancelTimeout?.()
-          cancelTimeout = null
-          settle()
-          if (dirty) {
-            dirty = false
-            change()
-          }
-          return []
-        }
-        if (d === expected && userMoved) {
-          // Ours landed back on the user's entry: now read their move.
-          outstanding = 0
-          outstandingDelta = 0
-          userMoved = false
-          cancelTimeout?.()
-          cancelTimeout = null
+      if (!moving && late > 0) late--
+      if (!moving) return traverse(d)
+      const landed = () => {
+        moving = false
+        movingDelta = 0
+        cancelTimeout?.()
+        cancelTimeout = null
+      }
+      if (!userMoved && d === expected) {
+        // Ours landed.
+        landed()
+        settle()
+        if (dirty) {
           dirty = false
-          return traverse(d)
+          change()
         }
-        // The user's traversal landed first; ours is still queued and will resolve from here. Put entries above so
-        // it lands back on this one (instead of below it, or off the site), and read the user's move then.
-        const k = -outstandingDelta
-        for (let i = 1; i <= k; i++) h.pushState(stamped(null, o.sid, d + i), '')
-        expected = d
-        cur = d
-        userMoved = true
         return []
       }
-      return traverse(d)
+      if (userMoved && d <= expected) {
+        // Ours landed: back on the user's entry, or below it (where the browser picked its target when go() was
+        // called, or applied the entries put above after it, CR-3). Read the browser's depth now.
+        landed()
+        userMoved = false
+        dirty = false
+        return traverse(d)
+      }
+      if (userMoved) return [] // the user moved again, up: ours is still on its way; nothing more is put above
+      // The user's traversal landed first; ours is still queued and will resolve from here. Put entries above so it
+      // lands back on this one (instead of below it, or off the site), once per move, and read the user's move then.
+      for (let i = 1; i <= -movingDelta; i++) h.pushState(stamped(null, o.sid, d + i), '')
+      expected = d
+      cur = d
+      userMoved = true
+      return []
     },
     reconcile() {
       if (owned() !== cur) change()
@@ -321,9 +332,10 @@ const NAME_PREFIX = 'watched-tab:'
 const TAB_ID_RE = /^[0-9a-z]{4,16}$/
 
 /**
- * This tab's id, kept for the tab's life so a reload knows the entries it pushed before: sessionStorage, else (storage
- * blocked: Safari's "Block All Cookies", some in-app browsers) the stamp on the entry in view, else window.name. Only
- * a tab with none of them mints a new one (F4). window.name is written only when empty or already ours.
+ * This tab's id, kept for the tab's life so a reload knows the entries it pushed before: sessionStorage, else the stamp
+ * on the entry in view. Only where sessionStorage is blocked (Safari's "Block All Cookies", some in-app browsers) does
+ * window.name carry it, written only when empty or already ours (CR-5: no id in window.name for anyone else). Only a
+ * tab with none of them mints a new one (F4).
  */
 export function resolveTabId(
   storage: Pick<Storage, 'getItem' | 'setItem'> | null,
@@ -331,27 +343,37 @@ export function resolveTabId(
   win: { name: string },
   mint: () => string = () => Math.random().toString(36).slice(2, 10),
 ): string {
-  const read = (fn: () => string | null | undefined) => {
+  const valid = (v: unknown) => (typeof v === 'string' && TAB_ID_RE.test(v) ? v : undefined)
+  let storageOk = !!storage
+  let fromStorage: string | undefined
+  try {
+    fromStorage = valid(storage?.getItem(TAB_KEY))
+  } catch {
+    storageOk = false
+  }
+  const fromState = valid(((state as Record<string, unknown> | null)?.[MARK] as Stamp | undefined)?.s)
+  let fromName: string | undefined
+  if (!storageOk) {
     try {
-      const v = fn()
-      return typeof v === 'string' && TAB_ID_RE.test(v) ? v : undefined
+      fromName = valid(win.name.startsWith(NAME_PREFIX) ? win.name.slice(NAME_PREFIX.length) : undefined)
     } catch {
-      return undefined
+      // ignore
     }
   }
-  const fromStorage = read(() => storage?.getItem(TAB_KEY))
-  const fromState = read(() => ((state as Record<string, unknown> | null)?.[MARK] as Stamp | undefined)?.s)
-  const fromName = read(() => (win.name.startsWith(NAME_PREFIX) ? win.name.slice(NAME_PREFIX.length) : undefined))
   const id = fromStorage ?? fromState ?? fromName ?? mint()
-  try {
-    if (fromStorage !== id) storage?.setItem(TAB_KEY, id)
-  } catch {
-    // blocked: the stamp and window.name carry it
+  if (storageOk && fromStorage !== id) {
+    try {
+      storage!.setItem(TAB_KEY, id)
+    } catch {
+      storageOk = false
+    }
   }
-  try {
-    if (!win.name || win.name.startsWith(NAME_PREFIX)) win.name = NAME_PREFIX + id
-  } catch {
-    // ignore
+  if (!storageOk) {
+    try {
+      if (!win.name || win.name.startsWith(NAME_PREFIX)) win.name = NAME_PREFIX + id
+    } catch {
+      // ignore
+    }
   }
   return id
 }
