@@ -92,6 +92,12 @@ export interface GlobeRuntime {
    * drawing-buffer resize, which otherwise blocks the main thread until every queued frame has been drawn.
    */
   skipRender: number
+  /**
+   * The Canvas' `dpr` prop, one stable [d, d] tuple mutated in place. R3F's Canvas re-runs configure() on every
+   * render (each toolbar / visualViewport resize) and snaps the DPR back to the prop unless the prop resolves to the
+   * DPR in effect: AdaptiveDpr writes its level here before setDpr, so configure() is a no-op.
+   */
+  dprProp: [number, number]
   /** Resolution of the day map on the GPU right now (drives the zoom floor, decision 6) */
   textureLevel: TextureLevel
   /** Resolution of the night map (the floor on the night side follows the coarser of the two) */
@@ -194,6 +200,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     throttled: false,
     resumedAt: -Infinity,
     skipRender: 0,
+    dprProp: [1, 1],
     textureLevel: '1k',
     nightLevel: '1k',
     phase: 'boot',

@@ -33,6 +33,7 @@ import { Imagery } from './Imagery'
 import { PassOverlay } from './PassOverlay'
 import { PlaceMarker } from './PlaceMarker'
 import { usePost } from './Post'
+import { GL_DEBUG, glFixedDpr, glProbe, glx } from './debugGl'
 import { declineLevel, detectTier, dprLevels } from './quality'
 import { FRAME, RuntimeContext, useRuntime, type GlobeRuntime } from './runtime'
 import { SatelliteField } from './SatelliteField'
@@ -57,6 +58,12 @@ export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
     if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
     ;(window as unknown as { __globe?: unknown }).__globe = { rt: runtime, gl, scene, camera, useApp }
   }, [gl, runtime, scene, camera])
+  useEffect(() => {
+    if (!GL_DEBUG) return
+    glProbe.gl = gl
+    glProbe.camera = camera
+    glProbe.rt = runtime
+  }, [gl, runtime, camera])
 
   return (
     <RuntimeContext.Provider value={runtime}>
@@ -64,17 +71,17 @@ export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
       <CameraDirector />
       <AdaptiveDpr />
       <FrameloopControl />
-      <Stars />
+      {!glx('nostars') && <Stars />}
       {textures.state === 'ready' && (
         <>
           <Earth textures={textures.textures} geometry={sphere} />
-          <Clouds textures={textures.textures} geometry={sphere} />
+          {!glx('noclouds') && <Clouds textures={textures.textures} geometry={sphere} />}
         </>
       )}
       {textures.state === 'error' && <EarthFallback />}
-      {textures.state !== 'loading' && <Atmosphere />}
-      {textures.state === 'ready' && <Imagery />}
-      {catalog.state === 'ready' && <SatelliteField data={catalog.data} />}
+      {textures.state !== 'loading' && !glx('noatmo') && <Atmosphere />}
+      {textures.state === 'ready' && !glx('noimagery') && <Imagery />}
+      {catalog.state === 'ready' && !glx('nosats') && <SatelliteField data={catalog.data} />}
       <PlaceMarker />
       {catalog.state === 'ready' && <PassOverlay />}
       <ReadySignal ready={textures.state !== 'loading'} />
@@ -342,6 +349,7 @@ function FrameloopControl() {
     const st = useApp.getState()
     const now = performance.now()
     const idle =
+      !glx('nohalf') &&
       st.phase === 'idle' &&
       !rt.camera.flying &&
       st.timeMode !== 'replay' &&
@@ -406,11 +414,18 @@ function AdaptiveDpr() {
       drain: -1,
       drainAt: 0,
       fence: null as WebGLSync | null,
+      /** Canvas CSS size last seen (a change ends a drain) */
+      sizeW: -1,
+      sizeH: -1,
     }
   }, [rt])
 
+  const fixedDpr = glFixedDpr()
   useEffect(() => {
-    setDpr(ctl.levels[ctl.index])
+    const d0 = fixedDpr ?? ctl.levels[ctl.index]
+    rt.dprProp[0] = rt.dprProp[1] = d0
+    setDpr(d0)
+    if (fixedDpr) ctl.flips = Infinity // `?debug=gl` fixed DPR: the adaptive policy never moves it
     // Probe hook (dev / inspect builds only): queue a DPR step through the real policy, as a frame-rate change would.
     if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
     ;(window as unknown as { __forceDpr?: (dpr: number) => void }).__forceDpr = (dpr: number) => {
@@ -421,11 +436,23 @@ function AdaptiveDpr() {
       ctl.want = best
       ctl.flips = 0
     }
-  }, [ctl, setDpr])
+  }, [ctl, setDpr, fixedDpr, rt])
 
-  useFrame(() => {
+  useFrame((state) => {
     const now = performance.now()
     const c = ctl
+    // The canvas was resized (a toolbar, the keyboard, a rotation): the drawing buffer was just reallocated and
+    // cleared, so a drain holding frames would leave it blank. End the hold; a queued change waits for the next quiet.
+    if (state.size.width !== c.sizeW || state.size.height !== c.sizeH) {
+      c.sizeW = state.size.width
+      c.sizeH = state.size.height
+      if (c.drain >= 0) {
+        if (c.fence) (gl.getContext() as WebGL2RenderingContext).deleteSync(c.fence)
+        c.fence = null
+        c.drain = -1
+        rt.skipRender = 0
+      }
+    }
     // Half-rate idle frames say nothing about the device, nor does the gap of a pause: restart the window.
     if (rt.throttled || rt.resumedAt !== c.resumeSeen) {
       c.resumeSeen = rt.resumedAt
@@ -521,6 +548,7 @@ function AdaptiveDpr() {
         c.index = c.want
         c.want = -1
         c.drain = -1
+        rt.dprProp[0] = rt.dprProp[1] = c.levels[c.index]
         setDpr(c.levels[c.index])
         if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
           const w = window as unknown as { __dprLog?: unknown[] }

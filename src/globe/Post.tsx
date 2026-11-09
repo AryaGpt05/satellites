@@ -11,11 +11,12 @@
  * shaders anyway); phones run a lighter bloom (3 mip levels from a half-resolution luminance pass).
  */
 import { useFrame, useThree } from '@react-three/fiber'
-import { BlendFunction, BloomEffect, EffectComposer, EffectPass, NoiseEffect, RenderPass, ShaderPass, VignetteEffect } from 'postprocessing'
-import { ShaderMaterial } from 'three'
+import { BlendFunction, BloomEffect, EffectComposer, EffectPass, NoiseEffect, Pass, RenderPass, ShaderPass, VignetteEffect, type Effect } from 'postprocessing'
+import { ShaderMaterial, UnsignedByteType, type WebGLRenderTarget, type WebGLRenderer } from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import { UI_ENTRANCE_EVENT } from '@/lib/uiEvents'
 import { HalfFloatType, Vector2 } from 'three'
+import { GL_DEBUG, glProbe, glx } from './debugGl'
 import { msaaFor } from './quality'
 import { useRuntime } from './runtime'
 import { ToneShoulderEffect } from './toneShoulder'
@@ -40,7 +41,7 @@ export const POST_PRIORITY = 1
  * Sanitise the scene colour before bloom: any NaN/Inf (or runaway HDR value) becomes a finite colour.
  * Bloom's mip chain turns a single non-finite pixel into a flickering black square, and GPUs differ in what
  * they return for undefined maths (Apple GPUs give NaN where others don't), so this is a hard backstop.
- * Comparisons with NaN are false, so `!(x >= 0 && x <= MAX)` catches NaN, ±Inf and negatives.
+ * Comparisons with NaN are false, so `x >= 0 ? min(x, MAX) : 0` maps NaN and negatives to 0 and +Inf to MAX.
  */
 function sanitizePass(): ShaderPass {
   const material = new ShaderMaterial({
@@ -50,12 +51,13 @@ function sanitizePass(): ShaderPass {
       varying vec2 vUv;
       void main() {
         vUv = position.xy * 0.5 + 0.5;
-        gl_Position = vec4(position.xy, 1.0, 1.0);
+        gl_Position = vec4(position.xy, 0.0, 1.0); // mid-depth: never on a clip plane
       }`,
     fragmentShader: /* glsl */ `
       uniform sampler2D inputBuffer;
       varying vec2 vUv;
-      float fin(float x) { return (x >= 0.0 && x <= 64.0) ? x : (x > 64.0 && x < 1e30 ? 64.0 : 0.0); }
+      // NaN fails every comparison → 0; +Inf and runaway HDR clamp to 64; negatives → 0.
+      float fin(float x) { return x >= 0.0 ? min(x, 64.0) : 0.0; }
       void main() {
         vec4 c = texture2D(inputBuffer, vUv);
         gl_FragColor = vec4(fin(c.r), fin(c.g), fin(c.b), (c.a >= 0.0 && c.a <= 1.0) ? c.a : 1.0);
@@ -66,6 +68,66 @@ function sanitizePass(): ShaderPass {
   return new ShaderPass(material, 'inputBuffer')
 }
 
+/** Every this many frames the `?debug=gl` NaN scan reads the raw scene colour back (a full GPU sync: debug only). */
+const NAN_SCAN_EVERY = 45
+
+/** Half-float bits → non-finite? (exponent all ones) */
+const halfNonFinite = (h: number) => (h & 0x7c00) === 0x7c00
+
+/**
+ * `?debug=gl` only: counts non-finite pixels in the raw scene colour (between the render pass and the sanitize pass),
+ * so the panel can say whether a glitch is NaN-born. Reads the whole buffer back every NAN_SCAN_EVERY frames.
+ */
+class NanScanPass extends Pass {
+  private n = 0
+  private f32: Float32Array | null = null
+  private u16: Uint16Array | null = null
+  constructor() {
+    super('NanScanPass')
+    this.needsSwap = false
+  }
+  render(renderer: WebGLRenderer, inputBuffer: WebGLRenderTarget | null) {
+    if (!inputBuffer || ++this.n % NAN_SCAN_EVERY !== 0) return
+    const g = renderer.getContext() as WebGL2RenderingContext
+    const w = inputBuffer.width
+    const h = inputBuffer.height
+    const prev = renderer.getRenderTarget()
+    renderer.setRenderTarget(inputBuffer)
+    try {
+      const type = g.getParameter(g.IMPLEMENTATION_COLOR_READ_TYPE) as number
+      let bad = 0
+      let huge = 0
+      if (type === g.HALF_FLOAT) {
+        if (!this.u16 || this.u16.length !== w * h * 4) this.u16 = new Uint16Array(w * h * 4)
+        g.readPixels(0, 0, w, h, g.RGBA, g.HALF_FLOAT, this.u16)
+        const a = this.u16
+        for (let i = 0; i < a.length; i += 4) if (halfNonFinite(a[i]) || halfNonFinite(a[i + 1]) || halfNonFinite(a[i + 2])) bad++
+      } else {
+        if (!this.f32 || this.f32.length !== w * h * 4) this.f32 = new Float32Array(w * h * 4)
+        g.readPixels(0, 0, w, h, g.RGBA, g.FLOAT, this.f32)
+        const a = this.f32
+        for (let i = 0; i < a.length; i += 4) {
+          const m = a[i] + a[i + 1] + a[i + 2]
+          if (!Number.isFinite(m)) bad++
+          else if (m > 192) huge++
+        }
+      }
+      const err = g.getError()
+      const nan = glProbe.nan
+      nan.scans++
+      nan.error = err ? `readPixels 0x${err.toString(16)}` : ''
+      nan.lastBad = bad
+      nan.lastHuge = huge
+      nan.maxBad = Math.max(nan.maxBad, bad)
+      if (bad) nan.framesWithBad++
+    } catch (e) {
+      glProbe.nan.error = String(e).slice(0, 80)
+    } finally {
+      renderer.setRenderTarget(prev)
+    }
+  }
+}
+
 /** Build the composer for this canvas and render it every frame. Returns it (for the shader warm-up). */
 export function usePost(): EffectComposer {
   const rt = useRuntime()
@@ -74,12 +136,14 @@ export function usePost(): EffectComposer {
   const camera = useThree((s) => s.camera)
   const dpr = useThree((s) => s.viewport.dpr)
   const { mobile } = rt.tier
-  const msaa = msaaFor(rt.tier, dpr)
+  const msaa = GL_DEBUG && glx('msaa') ? 4 : msaaFor(rt.tier, dpr)
 
   const composer = useMemo(() => {
-    const c = new EffectComposer(gl, { multisampling: msaa, frameBufferType: HalfFloatType, stencilBuffer: false })
+    const frameBufferType = GL_DEBUG && glx('u8') ? UnsignedByteType : HalfFloatType
+    const c = new EffectComposer(gl, { multisampling: msaa, frameBufferType, stencilBuffer: false })
     c.addPass(new RenderPass(scene, camera))
-    c.addPass(sanitizePass())
+    if (GL_DEBUG) c.addPass(new NanScanPass())
+    if (!glx('nosanitize')) c.addPass(sanitizePass())
     const bloom = new ScaledBloomEffect(mobile ? 0.5 : 1, {
       mipmapBlur: true,
       luminanceThreshold: 1.0,
@@ -92,7 +156,9 @@ export function usePost(): EffectComposer {
     const noise = new NoiseEffect({ premultiply: true, blendFunction: BlendFunction.NORMAL })
     noise.blendMode.opacity.value = 0.055
     const vignette = new VignetteEffect({ offset: 0.3, darkness: 0.42, eskil: false })
-    c.addPass(new EffectPass(camera, bloom, new ToneShoulderEffect(), noise, vignette))
+    const effects: Effect[] = glx('nobloom') ? [] : [bloom]
+    c.addPass(new EffectPass(camera, ...effects, new ToneShoulderEffect(), noise, vignette))
+    if (GL_DEBUG) glProbe.composer = c
     return c
   }, [gl, scene, camera, msaa, mobile])
   useEffect(() => () => composer.dispose(), [composer])
@@ -108,15 +174,17 @@ export function usePost(): EffectComposer {
   const size = useMemo(() => new Vector2(), [])
   const applied = useRef({ composer: null as EffectComposer | null, w: -1, h: -1, dpr: -1 })
   useFrame((_, delta) => {
-    // A frame held for AdaptiveDpr's drain (the canvas keeps showing the last image).
-    if (rt.skipRender > 0) {
-      rt.skipRender--
-      return
-    }
     gl.getSize(size)
     const pr = gl.getPixelRatio()
     const a = applied.current
-    if (a.composer !== composer || size.x !== a.w || size.y !== a.h || pr !== a.dpr) {
+    const resized = a.composer !== composer || size.x !== a.w || size.y !== a.h || pr !== a.dpr
+    // A frame held for AdaptiveDpr's drain or a UI entrance (the canvas keeps showing the last image), unless the
+    // drawing buffer was just resized: a resize clears it, and holding would leave the canvas blank.
+    if (rt.skipRender > 0 && !resized) {
+      rt.skipRender--
+      return
+    }
+    if (resized) {
       composer.setSize(size.x, size.y)
       a.composer = composer
       a.w = size.x
@@ -128,7 +196,12 @@ export function usePost(): EffectComposer {
     // clear pass reuses the sRGB-converted colour from the last on-screen render and space turns grey.
     const autoClear = gl.autoClear
     gl.autoClear = true
-    composer.render(delta)
+    if (GL_DEBUG) glProbe.frames++
+    if (GL_DEBUG && glx('nopost')) {
+      // Straight to the canvas: three tone maps (none: the canvas is `flat`) and encodes sRGB itself.
+      gl.setRenderTarget(null)
+      gl.render(scene, camera)
+    } else composer.render(delta)
     gl.autoClear = autoClear
   }, POST_PRIORITY)
 

@@ -29,7 +29,7 @@ import type { CaptureCollection } from '@/types'
 import { captureOf, coverPass, decalSpecFor, decalUrl } from './acquisition'
 import { kmPerTexel } from './framing'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
-import { canUpload, decodeImageBlob, decodeImageUrl, uploadStrip } from './textures'
+import { canUpload, decodeImageBlob, decodeImageUrl, uploadStrip, type TexStrip } from './textures'
 
 /** The context basemap: half size (km) and the GIBS layer (static; any TIME answers the same composite). */
 const CTX_HALF_KM = 360
@@ -71,7 +71,7 @@ interface Entry {
   /** loading → decoded (strips cut, off the main thread) → uploading (strip by strip) → ready */
   state: 'loading' | 'decoded' | 'uploading' | 'ready' | 'error'
   /** Rows of the image, north first, in upload order (row 0 = north: the shader samples accordingly) */
-  strips?: ImageBitmap[]
+  strips?: TexStrip[]
   rows?: number
   next: number
   tex?: Texture

@@ -12,6 +12,7 @@ import { palette } from '@/ui/system/palette'
 import { atmosphereFragment, atmosphereVertex } from './shaders/atmosphere'
 import { cloudsFragment, cloudsVertex } from './shaders/clouds'
 import { earthFallbackFragment, earthFragment, earthVertex } from './shaders/earth'
+import { glx } from './debugGl'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
 import type { EarthTextures } from './textures'
 
@@ -62,7 +63,7 @@ function paintUniforms(rt: GlobeRuntime) {
 }
 
 /** Shader defines for the device tier. */
-const tierDefines = (mobile: boolean): Record<string, string> => (mobile ? { LITE: '' } : {})
+const tierDefines = (mobile: boolean): Record<string, string> => (mobile && !glx('nolite') ? { LITE: '' } : {})
 
 export function Earth({ textures, geometry }: { textures: EarthTextures; geometry: BufferGeometry }) {
   const rt = useRuntime()

@@ -4,6 +4,7 @@ import { provisionalTier } from './quality'
 import { createRuntime } from './runtime'
 import { declineLevel, dprLevels } from './quality'
 import {
+  bitmapsSupportedFor,
   canUpload,
   CLOUD_ZOOM_REST_MS,
   cloudZoomWanted,
@@ -264,5 +265,32 @@ describe('DPR levels (G-M2: never above 2)', () => {
     expect(dprLevels(false, 2)).toEqual({ levels: [1, 1.25, 1.5, 1.75, 2], start: 2 })
     expect(dprLevels(false, 1)).toEqual({ levels: [1], start: 1 })
     expect(Math.max(...dprLevels(false, 4).levels)).toBe(2)
+  })
+})
+
+describe('bitmapsSupportedFor (which browsers take the sliced, bitmap-decoded upload)', () => {
+  const ua = {
+    safari18: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1',
+    safari16: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+    // In-app WKWebViews carry no Safari or Version token: versioned by the OS.
+    instagram18: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22A3354 Instagram 350.0.0.0',
+    instagram16: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20E247 Instagram 300.0.0.0',
+    chromeDesktop: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    firefox90: 'Mozilla/5.0 (Windows NT 10.0; rv:90.0) Gecko/20100101 Firefox/90.0',
+  }
+  it('takes Safari 17+ and desktop Chrome', () => {
+    expect(bitmapsSupportedFor(ua.safari18, true)).toBe(true)
+    expect(bitmapsSupportedFor(ua.chromeDesktop, true)).toBe(true)
+  })
+  it('keeps old WebKit (Safari or an in-app WKWebView on iOS < 17) and old Firefox on the whole-image path', () => {
+    expect(bitmapsSupportedFor(ua.safari16, true)).toBe(false)
+    expect(bitmapsSupportedFor(ua.instagram16, true)).toBe(false)
+    expect(bitmapsSupportedFor(ua.firefox90, true)).toBe(false)
+  })
+  it('recognises an in-app WKWebView on iOS 17+ by its OS version', () => {
+    expect(bitmapsSupportedFor(ua.instagram18, true)).toBe(true)
+  })
+  it('never without createImageBitmap', () => {
+    expect(bitmapsSupportedFor(ua.safari18, false)).toBe(false)
   })
 })
