@@ -23,7 +23,7 @@ import { SHORT_LANDSCAPE_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
-import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion } from '@/ui/system'
+import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion, useViewportHeight } from '@/ui/system'
 import { GeoLook } from './BestLook'
 import { ComputingBody } from './ComputingBody'
 import { Gallery, galleryCtl } from './Gallery'
@@ -238,8 +238,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
 
   // ── phone sheet: content-measured snaps and the two-beat pass choreography ─────────────
   const geo = useSheetGeometry(bodyRef, innerRef, mobile, shownKey, [shownKey, full])
-  if (geo && geo.key === 'computing') rememberComputingSnap(Math.min(window.innerHeight * 0.8, geo.top + geo.pad + geo.content + 18))
-  const vh = typeof window === 'undefined' ? 800 : window.innerHeight
+  // The cached viewport height: reading window.innerHeight in a render forced a synchronous layout of whatever the
+  // last commit mounted (114 ms at 4× CPU on a phone, right after the results landed: U-1).
+  const vh = useViewportHeight()
+  if (geo && geo.key === 'computing') rememberComputingSnap(Math.min(vh * 0.8, geo.top + geo.pad + geo.content + 18))
   // The snaps (and index) the sheet was last given: a view whose content is not measured yet holds the sheet there.
   const lastShown = useRef<{ snaps: number[]; index: number } | null>(null)
   let heldIndex: number | undefined

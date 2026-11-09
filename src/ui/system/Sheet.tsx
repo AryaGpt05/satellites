@@ -44,6 +44,7 @@ import { useIsMobile } from './media'
 import { prefersReducedMotion } from './motion'
 import { cx } from './primitives'
 import { clampIndex, resolveSnap, rubberband, settleMs, snapHeightsPx, topOvershoot } from './sheetMath'
+import { useViewportHeight } from './viewport'
 import s from './Sheet.module.css'
 
 export interface SheetProps {
@@ -639,24 +640,4 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
       size(0)
     }
   }, [headRef, bodyRef, mobile, present])
-}
-
-/** window.innerHeight, live (address-bar collapse on mobile changes it). */
-function useViewportHeight(): number {
-  const [h, setH] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight))
-  useEffect(() => {
-    let raf = 0
-    const onResize = () => {
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => setH(window.innerHeight))
-    }
-    window.addEventListener('resize', onResize)
-    window.visualViewport?.addEventListener('resize', onResize)
-    return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('resize', onResize)
-      window.visualViewport?.removeEventListener('resize', onResize)
-    }
-  }, [])
-  return h
 }

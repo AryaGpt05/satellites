@@ -11,7 +11,7 @@
 import { Canvas } from '@react-three/fiber'
 import { Component, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Color } from 'three'
-import { SHORT_LANDSCAPE_QUERY, STACKED_QUERY } from '@/lib/layout'
+import { STACKED_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import { useMediaQuery } from '@/ui/system/media'
 import { palette } from '@/ui/system/palette'
@@ -119,14 +119,14 @@ class SceneBoundary extends Component<{ children: ReactNode; onError: () => void
 /** The fallback note: centred lines that never run past a phone's edges (GL-1). */
 const NOTE: CSSProperties = { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.7, maxWidth: 'calc(100% - 32px)' }
 /**
- * Phones and short landscape screens: the bottom of the screen belongs to the sheet / landing column, which covered
- * the note entirely. There it sits in the clear band under the HUD's top lines instead.
+ * Stacked layouts (phones): the bottom of the screen belongs to the sheet / landing column, which covered the note
+ * entirely. There it sits in the clear band under the HUD's top lines instead.
  */
 const NOTE_TOP: CSSProperties = { ...NOTE, top: 'calc(var(--bezel-inset) + 64px)', bottom: 'auto' }
 const NOTE_LINE: CSSProperties = { display: 'block', whiteSpace: 'nowrap' }
 
 function GlobeFallback() {
-  const top = useMediaQuery(`${STACKED_QUERY}, ${SHORT_LANDSCAPE_QUERY}`)
+  const top = useMediaQuery(STACKED_QUERY)
   // Meridians at 0°, ±30°, ±60° from the central one project to a line and two ellipses.
   const meridians = [30, 60]
   const parallels = [-60, -30, 0, 30, 60]

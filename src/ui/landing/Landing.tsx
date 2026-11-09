@@ -518,7 +518,8 @@ function LocatingStatus({ state }: { state: Extract<LocateState, { kind: 'locati
 function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; disabled?: boolean; locate: ReturnType<typeof useLocate> }) {
   const locating = locate.state.kind === 'locating'
   const [hover, setHover] = useState<ExamplePlace | null>(null)
-  // Swipeable row (stacked): the edge fade that says "more" lifts once the row is scrolled to its end.
+  // Swipeable row (stacked): the edge fade that says "more" lifts once the row is scrolled to its end, and the
+  // leading edge fades too once the row has scrolled (a chip is never hard-cut at either edge).
   const listRef = useRef<HTMLUListElement>(null)
   const markEnd = () => {
     const ul = listRef.current
@@ -526,6 +527,8 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
     const end = ul.scrollWidth - ul.clientWidth - ul.scrollLeft <= 2
     if (end) ul.dataset.end = ''
     else delete ul.dataset.end
+    if (ul.scrollLeft > 2) ul.dataset.scrolled = ''
+    else delete ul.dataset.scrolled
   }
   useLayoutEffect(() => {
     const ul = listRef.current

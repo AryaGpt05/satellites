@@ -136,10 +136,12 @@
   transition-duration: 0ms;
 }
 @media (pointer: coarse) {
-  /* a ≥ 44 px tall hit box (U-6; it may overlap the wordmark line above: that one isn't interactive) */
+  /* a ≥ 44 px tall hit box (U-6), reaching mostly UP: it may overlap the wordmark line above (that one isn't
+     interactive), and it must end above the results sheet at its top snap (64–69 px from the top on phones), which
+     took the lower 7 px of a centred box. */
   .about {
-    padding: 15px 0;
-    margin: -15px 0;
+    padding: 22px 0 8px;
+    margin: -22px 0 -8px;
   }
 }
 /* A box ring would collide with the wordmark line 3px above; a signal underline marks focus instead

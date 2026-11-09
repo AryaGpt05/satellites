@@ -929,13 +929,13 @@
     height: 44px;
   }
 }
-/* Touch, swipeable chip row: the 40 px chips take 44 px taps. The row gains 2 px of padding above and
+/* Touch, swipeable chip row: the 40 px chips take 44 px taps. The row gains 4 px of padding above and
    below (and gives it back in margin, so nothing moves) for the hit box to extend into: a scroller
-   clips what overflows its padding box. */
+   clips what overflows its padding box (2 px exactly lost a pixel each side to sub-pixel placement at 375 px). */
 @media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px), (pointer: coarse) and (orientation: landscape) and (max-height: 540px) {
   .chips {
-    margin-block: -2px;
-    padding-block: 2px;
+    margin-block: -4px;
+    padding-block: 4px;
   }
   .chip {
     position: relative;
@@ -965,4 +965,15 @@
   from {
     opacity: 0;
   }
+}
+
+/* A scrolled chip row (the stacked and short-wide layouts, where it is a scroller): the leading edge fades as the
+   trailing one does, so the chip leaving on the left is never hard-cut at the bezel (U-5). */
+.chips[data-scrolled] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+.chips[data-scrolled][data-end] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+  mask-image: linear-gradient(to right, transparent, #000 28px);
 }

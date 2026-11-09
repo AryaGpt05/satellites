@@ -97,8 +97,13 @@
 .dragging .dragZone {
   cursor: grabbing;
 }
+/* Positioned for its hit area (::before), but BELOW the header's own row (z-index -1 inside the header's stacking
+   context, still over its background): the header's first-row buttons (New search, All passes, a dialog's Close)
+   reach up into the grip's 28 px with negative margins for their 44 px, and as a positioned box painted over them
+   the grip took 9–12 px of those taps. */
 .grip {
   position: relative;
+  z-index: -1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -106,13 +111,14 @@
   height: 28px;
   cursor: inherit;
 }
-/* A 44 px touch target with the same 28 px look (U-3): the hit area reaches 16 px above the sheet's top edge, the
-   way a native sheet's grabber does; nothing in the header loses its own taps. */
+/* A 44 px touch target with the same 28 px look (U-3): over the grip mark (88 px wide, centred) the hit area reaches
+   16 px above the sheet's top edge, the way a native sheet's grabber does. Centred and narrow, so at the top snap it
+   never reaches the HUD's 'How this works' in the band above (full width, it took 19 px of that link's taps). */
 .grip::before {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
+  left: calc(50% - 44px);
+  right: calc(50% - 44px);
   top: -16px;
   bottom: 0;
 }
