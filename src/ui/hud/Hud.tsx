@@ -249,7 +249,11 @@ function useTopInset(topLeft: RefObject<HTMLDivElement | null>, topRight: RefObj
       publish()
       return
     }
-    // The observer's first callback publishes (after layout, before paint): no forced layout at mount.
+    // Seeded here, in the layout effect (one layout read at mount): the observer's first delivery is then a no-op.
+    // Published from that first delivery instead, the store write moved other observed UI inside the observer's own
+    // loop on a loaded phone ("ResizeObserver loop completed with undelivered notifications" in WebKit, at frames 2–3
+    // of a deep-link load). Later corner changes still publish from the observer.
+    publish()
     const ro = new ResizeObserver(publish)
     if (tl) ro.observe(tl)
     if (tr) ro.observe(tr)

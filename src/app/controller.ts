@@ -30,6 +30,7 @@ import type { EngineReport } from '@/engine/report'
 import { currentCatalog, loadCatalog, loadCatalogNames } from '@/engine/catalog'
 import { ensureTz } from '@/imagery'
 import { getShare, recordLookup, type Share } from '@/lib/backend'
+import { createLateShareGate } from './lateShare'
 import { passLinkOpts, pickPreselect, readUrlTarget, type RunOpts } from './links'
 import { isSettled, raceTimeout, settleWaitMs, sleep } from './timing'
 
@@ -211,12 +212,18 @@ function shareRun(share: Share): { place: Place; opts: RunOpts; share: Share } {
  * R2K1 (c): the share lookup outlived boot's cap and the landing is up. If it answers within 15 s of boot and
  * the visitor hasn't started anything (still on the landing, About closed, no field focused, the search field
  * empty, the address bar still the share link), open it exactly as the on-time path would. Otherwise drop it:
- * a search replaces ?s= in the address bar (writeUrl). The address bar is never cleaned on this path: a late
- * null can't tell "unknown" from "timed out".
+ * a search replaces ?s= in the address bar (writeUrl). This path never cleans the address bar itself (a late null
+ * can't tell "unknown" from "timed out"); the landing keeps ?s= until the visitor starts a search of their own
+ * (lateShare, below), so a landing they come back to after it is clean (src/app/lateShare.ts).
  */
+const lateShare = createLateShareGate()
+export const isShareUnresolved = () => lateShare.unresolved()
+
 function adoptLateShare(shareP: Promise<Share | null>, bootStart: number) {
+  lateShare.start(bootStart + LATE_SHARE_MS)
   void shareP.then((share) => {
-    if (performance.now() - bootStart > LATE_SHARE_MS) return
+    // Too late, or the visitor has started their own search.
+    if (!lateShare.answered()) return
     const st = useApp.getState()
     // A late null is unknown OR a lookup that timed out: either way ?s= stays (a reload may still find it).
     if (!share) return
@@ -321,6 +328,8 @@ function retryCatalog(): Promise<void> {
 
 export async function runReport(place: Place, opts: RunOpts = {}) {
   mark('run-report')
+  // The visitor's own search (or the late share itself, already answered): a pending share no longer opens.
+  lateShare.cancel()
   // S4: the lead photo's crop goes out the moment its scene is known (onArchive, ~1–2 s from now): its URL builders and
   // loader (the results chunk) load now, alongside the archive search, not after it (measured: up to 0.8 s later).
   void loadHeroTools().catch(() => undefined)
