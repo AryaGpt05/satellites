@@ -305,8 +305,10 @@
   transition-duration: 0ms;
 }
 @media (pointer: coarse) {
-  /* RS-M2: a ≥ 44 px touch target; the negative margins keep the row where it was */
+  /* RS-M2: a ≥ 44 px touch target; the negative margins keep the row where it was. Positioned, so where its box
+     reaches into the rows around it (the pass title below, 4 px) the crumb keeps the tap, not the words. */
   .crumb {
+    position: relative;
     padding: 14px 4px;
     margin: -14px -4px -14px -6px;
   }
