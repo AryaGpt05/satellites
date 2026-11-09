@@ -254,10 +254,10 @@ export const VERDICT_WORDS: Record<Verdict, { title: string; verb: string }> = {
   overhead: { title: 'Passed overhead', verb: 'passed over' },
 }
 
-export const FOOT_LEFT = 'See what photographed you'
+export const FOOT_LEFT = 'See what watched you'
 /** og:image:alt for the default (root link) card: index.html uses the same words (core K9). */
 export const DEFAULT_CARD_ALT =
-  'A real Sentinel-2 satellite photograph of Palm Jumeirah, Dubai, beside the line: Something photographed you this week. Enter any place on Earth.'
+  'A real Sentinel-2 satellite photograph of Palm Jumeirah, Dubai, beside the line: Something watched you this week. Enter any place on Earth.'
 /** The card's sub-line when the scene is ≥ OVERCAST_PCT cloud (cloudWords' strongest case). */
 export const CLOUDED_LINE = 'Clouded over. It saw only cloud.'
 /** Scene cloud cover at or above which the card calls the picture clouded (as results' isClouded). */

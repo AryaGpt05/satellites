@@ -22,7 +22,7 @@ import { timeZoneAt, tzReady } from '@/imagery'
 import { subsolarPoint } from '@/lib/geo'
 import { sceneClock, useSceneFrame } from '@/state/sceneClock'
 import { useApp } from '@/state/store'
-import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync } from '@/ui/system'
+import { Bezel, CornerReadout, Kbd, Reveal, ScrambleOnce, cx, fmtUtc, useWallSecondSync, Wordmark } from '@/ui/system'
 // The pure time module, never the lazy '@/ui/results' index (that would pull the results chunk in).
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from '@/ui/results/lib/time'
 import { useCatalogStatus } from './catalogStatus'
@@ -151,9 +151,9 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
     <div ref={rootRef} className={s.hud} data-scene={scene}>
       <Bezel />
 
-      <CornerReadout corner="tl" label="Overflight" ref={topLeft}>
+      <CornerReadout corner="tl" label="Watched" ref={topLeft}>
         <Reveal axis="x" duration={480} as="div" className={s.line}>
-          <span className={s.wordmark}>Overflight</span>
+          <Wordmark height={17} className={s.wordmark} />
           <span className={s.version}>{VERSION}</span>
         </Reveal>
         {onAbout ? (

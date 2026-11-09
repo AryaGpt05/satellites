@@ -42,6 +42,7 @@ import {
   type Tone,
 } from './cardSpec.js'
 import { FONT } from './fonts.js'
+import { WORDMARK_ASPECT, wordmarkSvg } from './wordmark.js'
 import { box, h, type Child } from './h.js'
 
 export { CARD_H, CARD_W, PLATE, niceLength }
@@ -69,9 +70,11 @@ function mono(text: string, size: number, color: string, style: CSSProperties = 
   )
 }
 
-/** OVERFLIGHT, +0.26em, weight 500: the HUD wordmark, the one lockup everywhere. */
+/** The serif wordmark ("Watched." with the signal full stop): the one lockup everywhere. 22 px tall fills the header row. */
+const LOCKUP_SRC = `data:image/svg+xml;base64,${Buffer.from(wordmarkSvg(C.bone, C.signal)).toString('base64')}`
 function lockup(): ReactElement {
-  return mono('Overflight', CARD_FS.lockup, C.bone, { fontWeight: 500, letterSpacing: CARD_FS.lockup * TRACK.lockup })
+  const hgt = 22
+  return h('img', { src: LOCKUP_SRC, width: Math.round(hgt * WORDMARK_ASPECT), height: hgt, style: { display: 'flex' } })
 }
 
 const abs = (style: CSSProperties, ...children: (Child | Child[])[]) => box({ position: 'absolute', ...style }, ...children)
@@ -330,13 +333,14 @@ function heroLines(size: number): ReactElement {
           letterSpacing: serif ? 0 : -0.02 * size,
           lineHeight: 0.94,
           whiteSpace: 'nowrap',
-          color: C.bone,
+          // "you" (the serif accent) in signal, as on the landing hero.
+          color: serif ? C.signal : C.bone,
         },
       },
       s,
     )
   const line = (...words: ReactElement[]) => box({ alignItems: 'baseline', gap: size * 0.2, flexWrap: 'nowrap' }, ...words)
-  return box({ flexDirection: 'column', width: '100%' }, line(w('Something')), line(w('photographed')), line(w('you', true), w('this week.')))
+  return box({ flexDirection: 'column', width: '100%' }, line(w('Something')), line(w('watched'), w('you', true)), line(w('this week.')))
 }
 
 /** The homepage card: a real photograph on the left, the hero line on the right. */

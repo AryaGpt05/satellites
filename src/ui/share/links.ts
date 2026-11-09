@@ -100,7 +100,7 @@ export const POST_MAX = 230
 
 /** The line that turns a reader into the next person to look (share SH4). */
 const HOOK = {
-  photographed: 'Something photographed you this week too.',
+  photographed: 'Something watched you this week too.',
   passed: 'What passed over you this week?',
 } as const
 

@@ -140,7 +140,7 @@ export const earthFragment = glsl`
     // the current one over the previous one.
     vec3 photo = mix(decal2.rgb, decal.rgb, sat01(decal.a / max(painted, 1e-4)));
     dayTex = mix(dayTex, photo, painted);
-    albedo = mix(albedo, pow(photo, vec3(1.12)), painted);
+    albedo = mix(albedo, pow(max(photo, vec3(0.0)), vec3(1.12)), painted);
     // Soft terminator: the sun is a disc and the atmosphere scatters past the geometric line.
     float dayMix = smoothstep(-0.05, 0.09, NdL);
     // The photo already carries its scene's light and shadows: the globe's sun shades it lightly, so it reads as the

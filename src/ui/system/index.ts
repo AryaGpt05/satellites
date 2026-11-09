@@ -13,3 +13,4 @@ export { MOBILE_QUERY, REDUCED_MOTION_QUERY, useMediaQuery, useIsMobile, useRedu
 export { useExitClone, insertFrozenClone, recordedScrolls, animateOut, type ExitOptions } from './exit'
 export { Swap } from './Swap'
 export { syncToWallSecond, useWallSecondSync } from './phase'
+export { Wordmark, WORDMARK_ASPECT } from './Wordmark'

@@ -313,16 +313,16 @@ export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>)
 export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel'>): string {
   const passes = s.counts.likely + s.counts.could + s.counts.overhead
   const best = s.best ? ` The clearest picture is from ${s.best.satName}.` : ''
-  return `${s.counts.imaged} real images and ${passes.toLocaleString('en-US')} more passes over ${s.placeLabel} in the last 7 days.${best} What photographed you this week?`
+  return `${s.counts.imaged} real images and ${passes.toLocaleString('en-US')} more passes over ${s.placeLabel} in the last 7 days.${best} What watched you this week?`
 }
 
-/** "What photographed Waterloo this week" */
+/** "What watched Waterloo this week" */
 export function placeTitle(p: SharedPlace): string {
-  return `What photographed ${p.label} this week`
+  return `What watched ${p.label} this week`
 }
 
 export function placeDescription(p: SharedPlace): string {
-  return `Every satellite that passed over ${p.label} in the last 7 days, and the actual pictures they took. What photographed you this week?`
+  return `Every satellite that passed over ${p.label} in the last 7 days, and the actual pictures they took. What watched you this week?`
 }
 
 // ── Fetch ───────────────────────────────────────────────────────────────────────────────────
@@ -426,7 +426,7 @@ function localWhen(ms: number, timeZone: string): string {
  * og:description in the product voice (DESIGN §7), using only known numbers, ending on the
  * question that brings the reader in:
  * "Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south.
- *  It was looking 5.3° off nadir. Cloud cover: 26%. What photographed you this week?"
+ *  It was looking 5.3° off nadir. Cloud cover: 26%. What watched you this week?"
  */
 export function description(s: ShareRecord): string {
   const sat = satLabel(s)
@@ -448,7 +448,7 @@ export function description(s: ShareRecord): string {
     else if (s.verdict === 'imaged' && pct !== undefined) parts.push(`Cloud cover: ${Math.round(pct)}%.`)
     if (s.verdict === 'likely') parts.push(`${s.placeLabel} was inside its swath.`)
   }
-  parts.push('What photographed you this week?')
+  parts.push('What watched you this week?')
   return parts.join(' ')
 }
 

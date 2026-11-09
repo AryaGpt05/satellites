@@ -187,14 +187,14 @@ const CASES: Case[] = [
     days: 2,
   },
   {
-    name: 'WorldView-3 over Waterloo, 2 days (true off-nadir ≤ 40°, sun ≥ 5°)',
+    name: 'WorldView-3 over Waterloo, 4 days (true off-nadir ≤ 40°, sun ≥ 5°)',
     norad: 40115,
     key: 'offNadirDeg',
     inside: (v) => v <= 40,
     borderline: (v) => Math.abs(v - 40) < 0.35,
     daylight: true,
     dtMs: 10_000,
-    days: 2,
+    days: 4,
   },
   {
     name: 'NOAA-20 over Waterloo, 2 days (swath 3,040 km)',

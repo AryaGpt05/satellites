@@ -1,4 +1,4 @@
-/* Overflight design tokens — see docs/DESIGN.md. Never hard-code these values in components. */
+/* Watched design tokens — see docs/DESIGN.md. Never hard-code these values in components. */
 :root {
   color-scheme: dark;
 

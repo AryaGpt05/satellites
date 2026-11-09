@@ -520,3 +520,11 @@
     opacity: 0;
   }
 }
+
+/* Serif wordmark (SVG) in the header and footer: sits on the text baseline. */
+.wordmark {
+  display: inline-block;
+  color: var(--bone);
+  vertical-align: -2px;
+  margin-right: 0.35em;
+}

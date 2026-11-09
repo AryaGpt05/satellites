@@ -124,12 +124,12 @@ describe('copy', () => {
     const s = shareFromRpc(ROW)!
     expect(headline(s)).toBe('Sentinel-2C photographed Waterloo.')
     expect(description(s)).toBe(
-      'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What photographed you this week?',
+      'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What watched you this week?',
     )
     expect(headline({ ...s, verdict: 'could', satName: 'SkySat-C3' })).toBe('SkySat-C3 passed within view of Waterloo.')
     expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 photographed Waterloo.')
     expect(description({ ...s, verdict: 'could', satName: 'SkySat-C3', pass: { ...s.pass, headingDeg: 192 } })).toContain(
-      "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What photographed you this week?",
+      "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What watched you this week?",
     )
   })
 })
@@ -140,7 +140,7 @@ describe('card spec', () => {
     const spec = buildCardSpec(cardInputFromShare(s, 'overflight.app'))
     expect(spec.stamp).toBe('Sun 1 Nov 2026 · 11:21 EST')
     expect(spec.verdictLabel).toBe('Photographed')
-    expect(spec.footLeft).toBe('See what photographed you')
+    expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind === 'image' && spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
     expect(spec.readouts.map((r) => `${r.label} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)).toEqual(['Altitude 795 km', 'Off-nadir 5.3°', 'Pixel 10 m'])
     const cloudy = buildCardSpec(cardInputFromShare({ ...s, capture: { ...s.capture!, cloudCoverPct: 86 } }, ''))
@@ -149,7 +149,7 @@ describe('card spec', () => {
     const overcast = buildCardSpec(cardInputFromShare({ ...s, capture: { ...s.capture!, cloudCoverPct: 93 } }, ''))
     expect(overcast.sub).toBe('Clouded over. It saw only cloud.')
     expect(overcast.plate.kind === 'image' && overcast.plate.clouded?.segs[0].text).toBe('Clouded over · 93%')
-    expect(description({ ...s, capture: { ...s.capture!, cloudCoverPct: 81 } })).toContain('It saw mostly cloud (81%). What photographed you this week?')
+    expect(description({ ...s, capture: { ...s.capture!, cloudCoverPct: 81 } })).toContain('It saw mostly cloud (81%). What watched you this week?')
     expect(description({ ...s, capture: { ...s.capture!, cloudCoverPct: 93 } })).toContain('It saw only cloud (93%).')
     const landsat = buildCardSpec(cardInputFromShare({ ...s, capture: { collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_018030_20261031_02_T1' } }, ''))
     expect(landsat.plate.kind === 'image' && landsat.plate.credit.segs[0].text).toBe('Landsat: USGS / NASA')
@@ -251,7 +251,7 @@ describe('share page', () => {
     const res = await handleSharePage(new Request('https://overflight.app/api/s?q=43.4723,-80.5449&n=Waterloo'))
     const body = await res.text()
     expect(res.status).toBe(200)
-    expect(body).toContain('<meta property="og:title" content="What photographed Waterloo this week">')
+    expect(body).toContain('<meta property="og:title" content="What watched Waterloo this week">')
     expect(body).toContain('kind=place&#38;place=Waterloo&#38;lat=43.47&#38;lon=-80.54')
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
     expect(body).toContain(String.raw`location.replace("/?q=43.47%2C-80.54\u0026n=Waterloo")`)
@@ -259,7 +259,7 @@ describe('share page', () => {
     expect(fetch).not.toHaveBeenCalled()
     // A street address is never printed: the coordinates stand in.
     const addr = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.4723,-80.5449&n=123%20King%20St'))).text()
-    expect(addr).toContain('What photographed 43.47°N 80.54°W this week')
+    expect(addr).toContain('What watched 43.47°N 80.54°W this week')
   })
 
   it('unfurls a fallback pass link as that pass, with its own card (R2SH2)', async () => {
@@ -303,7 +303,7 @@ describe('share page', () => {
     expect(fetch).not.toHaveBeenCalled()
     // A bare place link still gets the default card; summary links are unchanged.
     const bare = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.47,-80.54&n=Waterloo&p=60989-29892501'))).text()
-    expect(bare).toContain('<meta property="og:title" content="What photographed Waterloo this week">')
+    expect(bare).toContain('<meta property="og:title" content="What watched Waterloo this week">')
     expect(bare).toContain('kind=place&#38;place=Waterloo')
     const sum = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.47,-80.54&n=Waterloo&sv=4&sc=31,220,1544,66&sw=1793678400000'))).text()
     expect(sum).toContain('<meta property="og:title" content="4 satellites photographed Waterloo in detail this week">')

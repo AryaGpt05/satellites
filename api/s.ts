@@ -44,7 +44,7 @@ import {
 export const CARD_VERSION = '3'
 
 const GENERIC = {
-  title: 'Something photographed you this week.',
+  title: 'Something watched you this week.',
   description: 'Enter any place on Earth. See every satellite that passed over it in the last 7 days, and the actual pictures they took.',
 }
 

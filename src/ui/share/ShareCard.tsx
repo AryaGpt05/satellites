@@ -11,7 +11,7 @@
  */
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { isImageCached } from '@/imagery'
-import { cx } from '@/ui/system'
+import { cx, Wordmark } from '@/ui/system'
 import {
   CARD_COLOR,
   CARD_FS,
@@ -54,7 +54,7 @@ export function ShareCard({ spec }: { spec: CardSpec }) {
         <div className={s.divider} style={{ left: PLATE }} />
 
         <Row box={PANEL.top}>
-          <span className={s.lockup}>Overflight</span>
+          <Wordmark height={20} className={s.lockupMark} />
           {spec.stamp ? <span className={s.row} style={{ color: CARD_COLOR.bone2 }}>{spec.stamp}</span> : null}
         </Row>
         <Hair y={PANEL.rule1} />

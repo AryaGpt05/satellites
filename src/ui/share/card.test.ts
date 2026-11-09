@@ -133,7 +133,7 @@ describe('clouded words match the picture (R2SH3)', () => {
       expect(spec.sub).toBe(c.sub)
       expect(spec.plate.kind === 'image' && spec.plate.clouded?.segs[0].text).toBe(c.chip)
       const share = shareFromRpc({ ...ROW, capture: { collection: 'sentinel-2-l2a', itemId: 'S2B_MSIL2A_20261030T162419_R040_T17TNJ_20261030T200303', cloudCoverPct: c.pct, spot: c.spot } })
-      expect(description(share)).toContain(` ${c.desc} What photographed you this week?`)
+      expect(description(share)).toContain(` ${c.desc} What watched you this week?`)
       expect(post(c.pct, c.spot)).toContain(`from 795 km up on Fri 30 Oct at 12:24 local. ${c.post}\n\n`)
       expect(cloudWords(c.pct, c.spot)).toEqual({ sub: c.sub, chip: c.chip, post: c.post, desc: c.desc })
     }
