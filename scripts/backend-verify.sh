@@ -6,6 +6,9 @@
 #   scripts/backend-verify.sh            # read-only + one real lookup + one real share
 set -uo pipefail
 cd "$(dirname "$0")/.."
+REF="${SUPABASE_PROJECT_REF:-}"
+if [[ -z "$REF" ]]; then echo "error: set SUPABASE_PROJECT_REF to your Supabase project ref (no default, so this never targets someone else's project)" >&2; exit 2; fi
+if [[ ! -f .env.local ]]; then echo "error: .env.local not found (copy .env.example)" >&2; exit 2; fi
 set -a; source .env.local; set +a
 URL="${VITE_SUPABASE_URL:?missing VITE_SUPABASE_URL}"
 KEY="${VITE_SUPABASE_PUBLISHABLE_KEY:?missing VITE_SUPABASE_PUBLISHABLE_KEY}"
@@ -107,7 +110,6 @@ delete from public.lookup_days where label = 'Overflight verify';
 delete from public.stats_cache;"
 AUTH=()
 if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]]; then AUTH=(-H "authorization: Bearer ${SUPABASE_ACCESS_TOKEN}"); fi
-REF="${SUPABASE_PROJECT_REF:-etiebfmgepkcewkkbxwi}"
 python3 -c 'import json,sys; sys.stdout.write(json.dumps({"query": sys.argv[1]}))' "$CLEAN" |
   curl -sS -X POST "https://api.supabase.com/v1/projects/${REF}/database/query" -H 'content-type: application/json' \
     "${AUTH[@]}" --data-binary @- >/dev/null && echo "  cleaned" || echo "  cleanup skipped (no management access)"

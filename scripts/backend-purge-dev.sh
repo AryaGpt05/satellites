@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-# ⚠️  WARNING: this database holds REAL data (people's lookups and shares, in-app events). Do not run this script,
-# and never with --all, unless the owner asks for it. Tests and checks delete only the rows they created themselves,
-# by exact id or a unique test marker (see backend-verify.sh, scripts/backend-sql-test.sh: rolled back).
-# Remove development rows from the Overflight database (Management API; see backend-migrate.sh).
+# ⚠️  DESTRUCTIVE: this script DELETES DATA from the database it points at. It cannot be undone.
+# Never run it against a production database holding real people's lookups, shares and events.
+# Tests and checks delete only the rows they created themselves, by exact id or a unique test marker
+# (see backend-verify.sh, scripts/backend-sql-test.sh: rolled back).
 #
-#   scripts/backend-purge-dev.sh              rows written by ?sandbox=backend and backend-verify.sh,
-#                                             tagged by label ("… (sandbox)", "Overflight sandbox",
-#                                             "Overflight verify"); nothing else is touched
-#   scripts/backend-purge-dev.sh --all --yes  EVERYTHING (all lookups, shares, stats): run once
-#                                             before launch, since dev servers share this database
+# Remove development rows from a Watched database (Management API; see backend-migrate.sh).
+# Both the project ref and a confirmation that repeats it are required:
+#
+#   SUPABASE_PROJECT_REF=<ref> scripts/backend-purge-dev.sh --confirm <ref>
+#       rows written by ?sandbox=backend and backend-verify.sh, tagged by label ("… (sandbox)",
+#       "Overflight sandbox", "Overflight verify"); nothing else is touched
+#   SUPABASE_PROJECT_REF=<ref> scripts/backend-purge-dev.sh --confirm <ref> --all --yes
+#       EVERYTHING (all lookups, shares, stats)
 set -euo pipefail
-REF="${SUPABASE_PROJECT_REF:-etiebfmgepkcewkkbxwi}"
+REF="${SUPABASE_PROJECT_REF:-}"
+if [[ -z "$REF" ]]; then echo "error: set SUPABASE_PROJECT_REF to your Supabase project ref (no default, so this never targets someone else's project)" >&2; exit 2; fi
+if [[ "${1:-}" != "--confirm" || "${2:-}" != "$REF" ]]; then
+  echo "refusing: this DELETES data from project $REF. Re-run with: --confirm $REF [--all --yes]" >&2; exit 2
+fi
+shift 2
 AUTH=()
 if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]]; then AUTH=(-H "authorization: Bearer ${SUPABASE_ACCESS_TOKEN}"); fi
 

@@ -10,7 +10,7 @@ select public.log_events($j${
   "ctx": {"device": "phone", "ref": "T.CO", "utm_source": "x", "utm_medium": "social", "v": "abc1234", "country": "ca", "ip": "1.2.3.4"},
   "events": [
     {"type": "view", "p": {"entry": "landing"}},
-    {"type": "search", "dt": 1500, "p": {"source": "search", "label": "Waterloo, Ontario, Canada", "cell": "43.47,-80.54", "country": "ca", "lat": 43.4723, "lon": -80.5449}},
+    {"type": "search", "dt": 1500, "p": {"source": "search", "label": "Testville, Test Region, Testland", "cell": "43.47,-80.54", "country": "ca", "lat": 43.4723, "lon": -80.5449}},
     {"type": "results", "p": {"sats": 31, "photos": 12, "passes": 140, "ms": 2100, "partial": true, "archive_failed": false, "extra": "x"}},
     {"type": "pass_open", "p": {"verdict": "imaged", "norad": 60989, "sat": "Sentinel-2C", "collection": "sentinel-2-l2a"}},
     {"type": "lightbox_open", "p": {"norad": 60989}},
@@ -37,7 +37,7 @@ begin
   if s.n <> 10 then raise exception 'expected 10 accepted events, got %', s.n; end if;
 
   select props into p from public.events where sid = s.sid and type = 'search';
-  if p <> '{"source": "search", "label": "Waterloo, Ontario, Canada", "cell": "43.5,-80.5", "country": "ca"}'::jsonb then
+  if p <> '{"source": "search", "label": "Testville, Test Region, Testland", "cell": "43.5,-80.5", "country": "ca"}'::jsonb then
     raise exception 'search props wrong (coords must be dropped, cell re-rounded): %', p;
   end if;
   if (select created_at from public.events where sid = s.sid and type = 'search') <> now() - interval '1.5 seconds' then
@@ -137,15 +137,15 @@ insert into public.event_sessions (sid, first_at, last_at, device, country) valu
   ('test_sid_dddddddddddddddd', now() - interval '3 days', now() - interval '3 days', 'desktop', 'jp'),
   ('test_sid_eeeeeeeeeeeeeeee', now() - interval '91 days', now() - interval '91 days', 'desktop', 'jp');
 insert into public.events (created_at, sid, type, props) values
-  (now() - interval '3 days', 'test_sid_dddddddddddddddd', 'search', '{"source": "example", "label": "Tokyo, Japan", "cell": "35.7,139.7", "country": "jp"}'),
-  (now() - interval '3 days', 'test_sid_dddddddddddddddd', 'search', '{"source": "example", "label": "Tokyo, Japan", "cell": "35.7,139.7", "country": "jp"}'),
+  (now() - interval '3 days', 'test_sid_dddddddddddddddd', 'search', '{"source": "example", "label": "Testburg, Testland", "cell": "35.7,139.7", "country": "jp"}'),
+  (now() - interval '3 days', 'test_sid_dddddddddddddddd', 'search', '{"source": "example", "label": "Testburg, Testland", "cell": "35.7,139.7", "country": "jp"}'),
   (now() - interval '91 days', 'test_sid_eeeeeeeeeeeeeeee', 'search', '{"source": "search", "label": "Old, Place", "cell": "1.0,1.0"}');
 update public.event_maint set last_at = '-infinity';
 select overflight_private.maintain_events();
 do $$
 declare d date := ((now() - interval '3 days') at time zone 'utc')::date;
 begin
-  if (select n from public.event_days where day = d and type = 'search' and dim = 'label' and val = 'Tokyo, Japan') <> 2 then
+  if (select n from public.event_days where day = d and type = 'search' and dim = 'label' and val = 'Testburg, Testland') <> 2 then
     raise exception 'rollup missing Tokyo';
   end if;
   if not exists (select 1 from public.event_rolled where day = d) then raise exception 'day not marked rolled'; end if;
@@ -155,7 +155,9 @@ end
 $$;
 
 -- ── the admin ───────────────────────────────────────────────────────────────────────────────
-select set_config('request.jwt.claims', '{"role": "authenticated", "email": "A585GUPT@uwaterloo.ca", "sub": "00000000-0000-0000-0000-000000000002"}', true);
+reset role;
+insert into overflight_private.admins (email) values ('admin@example.com') on conflict do nothing;
+select set_config('request.jwt.claims', '{"role": "authenticated", "email": "ADMIN@example.com", "sub": "00000000-0000-0000-0000-000000000002"}', true);
 set local role authenticated;
 do $$
 declare
@@ -167,10 +169,16 @@ begin
   if (j #>> '{totals,search}')::int < 1 then raise exception 'admin_stats 24h has no search: %', j -> 'totals'; end if;
   if (j #>> '{funnel,share_action}')::int < 1 then raise exception 'funnel missing share: %', j -> 'funnel'; end if;
   if jsonb_array_length(j -> 'series') not between 24 and 26 then raise exception '24h series length %', jsonb_array_length(j -> 'series'); end if;
-  if not (j -> 'top' -> 'search.label') @> '[["Waterloo, Ontario, Canada", 1]]' then raise exception 'top labels: %', j -> 'top'; end if;
-  if (j -> 'recentSearches' -> 0 ->> 'label') <> 'Waterloo, Ontario, Canada' then raise exception 'recent searches: %', j -> 'recentSearches'; end if;
+  -- Top lists keep the 15 biggest per dimension. On the live database real searches can outrank a test row, so a
+  -- test label must be there with its exact count, or the list must be full with nothing smaller than it.
+  if not ((j -> 'top' -> 'search.label') @> '[["Testville, Test Region, Testland", 1]]' or (jsonb_array_length(j -> 'top' -> 'search.label') >= 15
+      and not exists (select 1 from jsonb_array_elements(j -> 'top' -> 'search.label') e where e ->> 0 = 'Testville, Test Region, Testland')
+      and (select min((e ->> 1)::bigint) from jsonb_array_elements(j -> 'top' -> 'search.label') e) >= 1)) then raise exception 'top labels: %', j -> 'top' -> 'search.label'; end if;
+  if (j -> 'recentSearches' -> 0 ->> 'label') <> 'Testville, Test Region, Testland' then raise exception 'recent searches: %', j -> 'recentSearches'; end if;
   if jsonb_array_length(j -> 'recentErrors') < 1 then raise exception 'recent errors empty'; end if;
-  if not (a -> 'top' -> 'search.label') @> '[["Tokyo, Japan", 2]]' then raise exception 'all-time misses the rollup: %', a -> 'top'; end if;
+  if not ((a -> 'top' -> 'search.label') @> '[["Testburg, Testland", 2]]' or (jsonb_array_length(a -> 'top' -> 'search.label') >= 15
+      and not exists (select 1 from jsonb_array_elements(a -> 'top' -> 'search.label') e where e ->> 0 = 'Testburg, Testland')
+      and (select min((e ->> 1)::bigint) from jsonb_array_elements(a -> 'top' -> 'search.label') e) >= 2)) then raise exception 'all-time misses the rollup: %', a -> 'top' -> 'search.label'; end if;
   if (w -> 'top' -> 'search.label') @> '[["Old, Place", 1]]' then raise exception 'pruned event still counted'; end if;
   if jsonb_array_length(m -> 'series') < 3 then raise exception '30d series: %', m -> 'series'; end if;
   raise notice 'admin_stats 24h: %', left(j::text, 400);
