@@ -4,7 +4,7 @@ Thanks for your interest. Issues and pull requests are welcome.
 
 ## Setup
 
-You need Node 22 or newer.
+You need Node 22.12+, 24 or 26+ (the versions Vitest supports).
 
 ```bash
 npm install
@@ -32,6 +32,10 @@ npx vitest run
 ```bash
 npx vitest run --config scripts/backend-vitest.config.ts
 ```
+
+Two timing-based tests can time out on a heavily loaded machine and pass when run alone: "Flock (32 km swath): no
+missed passes over 7 days" in `src/engine/passes.test.ts`, and "R-M1: looks for the cover while the passes are
+computed, so the first report already carries it" in `src/engine/report.test.ts`.
 
 - Keep changes focused, one topic per pull request.
 - Add or update tests for behaviour you change.
