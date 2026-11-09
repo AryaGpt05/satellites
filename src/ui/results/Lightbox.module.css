@@ -377,6 +377,24 @@
 .replay {
   flex: none;
 }
+/* Phones: one fact group per line (MetaStrip's phone form); a line too long for its column ends in an ellipsis. */
+.metaLine {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.metaName {
+  font-weight: 400;
+  color: var(--bone);
+}
+.statusInline {
+  color: var(--bone-2);
+}
+.statusInline.warn {
+  color: var(--warn);
+}
 .mobile .metaText {
   white-space: normal;
 }

@@ -654,7 +654,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
       ) : null}
 
       <div ref={setChrome(1)} className={s.meta} style={{ top: layout.top + side + 12, left: mobile ? undefined : layout.left, width: mobile ? undefined : side }}>
-        <MetaStrip photo={photo} model={model} />
+        <MetaStrip photo={photo} model={model} mobile={mobile} />
         {photo.pass && onReplay ? (
           <Button
             size="sm"
@@ -737,7 +737,7 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
  * first row never truncates: the relative time ("· 2 days ago") is dropped whole when the row is too narrow for it
  * (it wraps into a clipped second line), so the satellite, day and time always read in full.
  */
-function MetaStrip({ photo, model }: { photo: Photo; model: ResultsModel }) {
+function MetaStrip({ photo, model, mobile }: { photo: Photo; model: ResultsModel; mobile: boolean }) {
   const { capture, pass } = photo
   const meta = model.meta(pass?.norad ?? capture.norad ?? 0)
   const tz = model.tz
@@ -745,28 +745,49 @@ function MetaStrip({ photo, model }: { photo: Photo; model: ResultsModel }) {
   const w = cropWidthKm(capture)
   // A daily mosaic says so once, in the product line ('Daily mosaic · 250 m'), not again as its status (PH-11).
   const status = photo.kind === 'mosaic' ? undefined : photo.clouded ? `Clouded${capture.cloudCoverPct !== undefined ? ` · ${int(capture.cloudCoverPct)}%` : ''}` : capture.spot === 'clear' ? 'Clear at your spot' : capture.spot === 'cirrus' ? 'Thin cirrus' : undefined
-  // Phones wrap these rows like prose: every value keeps its unit and its leading separator (PH-11: '15:24 / EST',
-  // '240 / KM', a dangling '·').
-  const unit = (text: string) => <span className={s.nowrap}>{text}</span>
+  const km = `${w >= 100 ? int(w) : dec1(w)} km`
+  const ago = <Ago t={pass?.tClosest ?? capture.datetime} base={model.clock} />
+  if (mobile)
+    // Phones (PH-11): one fact group per line, never wrapped like prose ('15:24 / EST', '240 / KM', a line opening on
+    // a dangling '·'): who and when · how long ago (and the status) · the product · the place · the credit.
+    return (
+      <div className={s.metaText}>
+        <span className={s.metaLine}>
+          <b className={s.metaName}>{meta.name}</b> · {t.day} · {t.time} {t.zone}
+        </span>
+        <span className={cx(s.metaLine, s.dim)}>
+          {ago}
+          {status ? (
+            <>
+              {' · '}
+              <span className={cx(s.statusInline, photo.clouded && s.warn)}>{status}</span>
+            </>
+          ) : null}
+        </span>
+        <span className={s.metaLine}>
+          {productLabel(capture)} · {km}
+        </span>
+        <span className={s.metaLine}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
+        <span className={s.credit}>{credit(capture)}</span>
+      </div>
+    )
   return (
     <div className={s.metaText}>
       <span className={s.metaRow}>
         <span className={cx(s.metaMain, s.metaFit)}>
           <span className={s.metaKeep}>
-            <b>{meta.name}</b> {unit(`· ${t.day}`)} {unit(`· ${t.time} ${t.zone}`)}
+            <b>{meta.name}</b> · {t.day} · {t.time} {t.zone}
           </span>
           <span className={cx(s.dim, s.metaOpt)}>
-            <span className={s.nowrap}>
-              {'\u00a0· '}
-              <Ago t={pass?.tClosest ?? capture.datetime} base={model.clock} />
-            </span>
+            {'\u00a0· '}
+            {ago}
           </span>
         </span>
         {status ? <span className={cx(s.status, photo.clouded && s.warn)}>{status}</span> : null}
       </span>
       <span className={s.metaRow}>
         <span className={s.metaMain}>
-          {unit(productLabel(capture))} {unit(`· ${w >= 100 ? int(w) : dec1(w)} km`)} <span className={s.nowrap}>· {coordsOf(model.report.place.lat, model.report.place.lon)}</span>
+          {productLabel(capture)} · {km} · <span className={s.nowrap}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
         </span>
       </span>
       <span className={s.credit}>{credit(capture)}</span>
