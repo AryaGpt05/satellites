@@ -301,7 +301,15 @@ export function ScrambleOnce({ text, delay = 0, duration = 380, className }: { t
 
 // ── Reveal ───────────────────────────────────────────────────────────────────────────────
 
-/** Mask-wipe reveal for a block. Children appear by clip-path from left→right (or bottom→top with `axis='y'`). */
+/**
+ * Mask-wipe reveal for a block. Children appear by clip-path from top→bottom (`axis='y'`, with a short rise) or
+ * left→right (`axis='x'`). A CSS animation whose delay is set at mount (fill: backwards): the wipe runs on wall-clock
+ * time from the frame the block first renders, so a busy main thread (the boot curtain's exit, texture uploads,
+ * the landing's first render) can drop frames of it but never pushes its start back (PH-05: a timer and a
+ * re-render started the landing's wipe up to a second late, after the loading screen's ink had gone). Once it has
+ * played the clip is released entirely, so nothing that legitimately reaches past the box (focus rings, italic
+ * overhangs, popovers) stays cut off.
+ */
 export function Reveal({
   children,
   delay = 0,
@@ -322,30 +330,16 @@ export function Reveal({
   /** Render settled at once (e.g. a return visit that already saw the entrance) */
   skip?: boolean
 }) {
-  const reduced = prefersReducedMotion()
-  // hidden → wiping → done. Once done the clip is released entirely, so nothing that legitimately
-  // reaches past the box (focus rings, italic overhangs, popovers) stays cut off after the entrance.
-  const [stage, setStage] = useState<'hidden' | 'wiping' | 'done'>(reduced || skip ? 'done' : 'hidden')
-  useEffect(() => {
-    if (reduced || skip) return
-    const start = window.setTimeout(() => setStage('wiping'), delay)
-    const end = window.setTimeout(() => setStage('done'), delay + duration + 32)
-    return () => {
-      window.clearTimeout(start)
-      window.clearTimeout(end)
-    }
-  }, [delay, duration, reduced, skip])
-  const hidden = axis === 'y' ? 'inset(0 0 100% 0)' : 'inset(0 100% 0 0)'
+  // Decided once per mount: a reduced-motion change mid-entrance must not restart or cut it.
+  const [animate] = useState(() => !skip && !prefersReducedMotion())
+  const on = animate && !skip
   return (
     <As
-      className={className}
+      className={on ? (className ? `${className} ${axis === 'y' ? s.revealY : s.revealX}` : axis === 'y' ? s.revealY : s.revealX) : className}
       style={{
         ...style,
-        clipPath: stage === 'hidden' ? hidden : stage === 'wiping' ? 'inset(0 0 0 0)' : undefined,
-        transform: stage === 'hidden' && axis === 'y' ? 'translateY(0.25em)' : undefined,
-        transition:
-          stage === 'done' ? undefined : `clip-path ${duration}ms var(--ease-out), transform ${duration}ms var(--ease-out)`,
-        display: As === 'span' ? 'inline-block' : undefined,
+        ...(on ? ({ '--reveal-ms': `${duration}ms`, '--reveal-delay': `${delay}ms` } as CSSProperties) : null),
+        display: As === 'span' ? 'inline-block' : style?.display,
       }}
     >
       {children}

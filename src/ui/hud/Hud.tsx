@@ -38,7 +38,8 @@ const TOP_GAP = 8
 /**
  * After boot, the lines start wiping in this long after the loading screen starts to leave (src/app/bootCurtain.ts:
  * its wordmark glides 760 ms onto this one). The version and About lines wait for the logo to land (it passes
- * over their spot on its way in); the other corners start sooner.
+ * over their spot on its way in: they start at 780 / 820 ms, after the 760 ms glide, now that the wipes run on CSS
+ * time from the curtain's first frame and are never late); the other corners start sooner.
  */
 const AFTER_BOOT = 300
 
@@ -167,12 +168,12 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
           <span className={s.mark} data-hud-wordmark>
             <Wordmark height={17} className={s.wordmark} />
           </span>
-          <Reveal key={`${k}-version`} skip={booting} axis="x" duration={480} delay={at(440)} as="span" className={s.versionWrap}>
+          <Reveal key={`${k}-version`} skip={booting} axis="x" duration={480} delay={at(480)} as="span" className={s.versionWrap}>
             <span className={s.version}>{VERSION}</span>
           </Reveal>
         </div>
         {onAbout ? (
-          <Reveal key={`${k}-about`} skip={booting} axis="x" duration={480} delay={at(480)} as="div" className={s.line}>
+          <Reveal key={`${k}-about`} skip={booting} axis="x" duration={480} delay={at(520)} as="div" className={s.line}>
             <button type="button" className={s.about} onClick={() => aboutRef.current?.()} aria-keyshortcuts="?">
               <span className={s.aboutText}>How this works</span>
               <Kbd className={s.desk}>?</Kbd>

@@ -75,6 +75,41 @@ const TOP = 0.92
 /** Desktop dock height the computing panel starts from when the panel is remounted at results. */
 let lastComputingH = 0
 
+/**
+ * Phones (PH-03): the snaps each kind of view was last given (px, for one viewport height), so the sheet can go to a
+ * view's snap in the beat its content swaps in, before that content is measured.
+ */
+const sheetMemo: Partial<Record<'overview' | 'photo' | 'plan', { key: string; vh: number; snaps: number[] }>> = {}
+/**
+ * A pass view's flight snap before any was measured: the grip, the one-line pass header with its reserved replay
+ * strip, and the footer (236 px at every phone width measured, 375 to 430), plus the bottom safe area.
+ */
+const FLIGHT_EST_PX = 236
+let safeBottomPx = 0
+/** The bottom safe-area inset, read once off the critical path (an idle probe after the panel mounts). */
+function measureSafeBottom() {
+  if (typeof document === 'undefined' || safeBottomPx) return
+  const el = document.createElement('div')
+  el.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom,0px);visibility:hidden;pointer-events:none'
+  document.body.appendChild(el)
+  safeBottomPx = el.offsetHeight
+  el.remove()
+}
+
+function predictSnaps(key: string, reportKey: string, vh: number, reduced: boolean, overviewIndex: number): { snaps: number[]; index: number } | undefined {
+  if (key === 'computing') return { snaps: [lastComputingSnapPx() ?? vh * 0.4, TOP], index: 0 }
+  if (key === 'overview') {
+    const o = sheetMemo.overview
+    return o && o.key === reportKey && o.vh === vh ? { snaps: o.snaps, index: Math.min(overviewIndex, o.snaps.length - 1) } : undefined
+  }
+  const kind = key === 'photo' ? 'photo' : 'plan'
+  const m = sheetMemo[kind] ?? sheetMemo.photo ?? sheetMemo.plan
+  // A pass opens at its flight snap (reduced motion: the image snap at once), as the selection effect below sets.
+  const index = reduced ? 1 : 0
+  if (m && m.vh === vh) return { snaps: sheetMemo[kind]?.vh === vh ? m.snaps : [m.snaps[0], vh * 0.7, TOP], index }
+  return { snaps: [Math.min(vh * 0.4, FLIGHT_EST_PX + safeBottomPx), vh * 0.7, TOP], index }
+}
+
 
 export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const phase = useApp((st) => st.phase)
@@ -105,10 +140,14 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const [inviteClosed, setInviteClosed] = useState(false)
   const [snap, setSnap] = useState(0)
   const overviewSnap = useRef(0)
-  // When computing started (T+ readout), reset for each new place.
-  const [t0, setT0] = useState(() => performance.now())
+  // When computing started (T+ readout): reset in the render that shows a new place, or a re-run of the same one
+  // (LAP-02: a passive effect reset it after the first paint, so a New search first showed the last search's
+  // elapsed time, 'T+50.93 S', for a few frames).
   const placeKey = place ? `${place.lat},${place.lon}` : ''
-  useEffect(() => setT0(performance.now()), [placeKey])
+  const runStart = useRef({ key: placeKey, computing, t: performance.now() })
+  if (runStart.current.key !== placeKey || (computing && !runStart.current.computing)) runStart.current = { key: placeKey, computing, t: performance.now() }
+  else runStart.current.computing = computing
+  const t0 = runStart.current.t
   const placeTz = useMemo(() => (place ? timeZoneAt(place.lat, place.lon) : undefined), [placeKey])
 
   // Continuity across a remount (the current app mounts a fresh view at the computing → results
@@ -154,6 +193,17 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     })
     return () => cancelAnimationFrame(id)
   }, [shownKey])
+
+  useEffect(() => {
+    if (!mobile) return
+    const ric = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+    const id = ric ? ric(measureSafeBottom, { timeout: 3000 }) : window.setTimeout(measureSafeBottom, 1500)
+    return () => {
+      const cic = (window as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback
+      if (ric && cic) cic(id)
+      else window.clearTimeout(id)
+    }
+  }, [mobile])
 
   // The results handoff: let the globe keep its GPU work for after the entrance.
   useEffect(() => {
@@ -245,7 +295,17 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   // The snaps (and index) the sheet was last given: a view whose content is not measured yet holds the sheet there.
   const lastShown = useRef<{ snaps: number[]; index: number } | null>(null)
   let heldIndex: number | undefined
+  // PH-03: the sheet moves in the same beat as the content swap. While the outgoing view fades out (and until the
+  // incoming one is measured) it goes to the incoming view's snaps when they are known: the computing readout's last
+  // measure, this report's overview as last measured, a pass view as last measured (the first time, its flight snap
+  // estimated from the one-line pass header and the footer). It no longer holds the old view's height over an empty
+  // body and moves only once the new content is in (a blank sheet, then a second beat).
+  const predicted = mobile && viewKey !== shownKey && shownKey !== 'computing' ? predictSnaps(viewKey, shownReportKey, vh, reduced, overviewSnap.current) : undefined
   const snaps = (() => {
+    if (predicted) {
+      heldIndex = predicted.index
+      return predicted.snaps
+    }
     if (shownKey === 'computing') {
       // R2R8: the computing snap is measured from the readout; while the outgoing overview is still mounted,
       // use the readout's last measure, so the sheet glides down once, in one direction.
@@ -268,7 +328,9 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       // 232 px band (HUD + globe) stays above the sheet (U-6: the caption was cut in half there); the mid snap
       // stays above the peek.
       const p0 = Math.min(peek, Math.max(vh * (MID - 0.02), vh - 232))
-      return [p0, Math.max(vh * MID, p0 + 60), TOP]
+      const list = [p0, Math.max(vh * MID, p0 + 60), TOP]
+      if (mobile && shownReportKey) sheetMemo.overview = { key: shownReportKey, vh, snaps: list }
+      return list
     }
     const flight = Math.min(geo.top + geo.foot + 2, vh * 0.4)
     const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 8 + geo.foot : vh * 0.7
@@ -276,7 +338,9 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     // the top snap (the sheet meets the HUD band; the globe is simply out of view).
     const band = vh - imageSnap - useApp.getState().uiInsets.top
     const image = band < 120 ? vh * TOP - 1 : Math.max(Math.min(imageSnap, vh * (TOP - 0.02)), flight + 40)
-    return [flight, image, TOP]
+    const list = [flight, image, TOP]
+    if (mobile) sheetMemo[shownKey === 'photo' ? 'photo' : 'plan'] = { key: '', vh, snaps: list }
+    return list
   })()
 
   const sheetSnap = heldIndex ?? snap
@@ -288,9 +352,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   useEffect(() => {
     if (mobile && viewKey === 'computing') setSnap(0)
   }, [viewKey, mobile])
+  // Back to a known overview (PH-03): its snap applies as the pass starts to leave, so the sheet rises in that beat.
+  const overviewKnown = mobile && viewKey === 'overview' && sheetMemo.overview?.key === shownReportKey
   useEffect(() => {
-    if (mobile && shownKey === 'overview') setSnap(overviewSnap.current)
-  }, [shownKey, mobile])
+    if (mobile && viewKey === 'overview' && (shownKey === 'overview' || overviewKnown)) setSnap(overviewSnap.current)
+  }, [viewKey, shownKey, mobile, overviewKnown])
   // A new place opens on the peek again.
   useEffect(() => {
     overviewSnap.current = 0
@@ -532,7 +598,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     <OverviewHeader
       place={place}
       model={model}
-      computing={computing}
+      // PH-01: the header keeps its computing form while the computing readout is still the body (its 160 ms fade-out
+      // at the results handoff): the phone's headline mounted there in full, then vanished and wiped in again when the
+      // overview swapped in, and the sheet glided twice. It changes in the commit that swaps the overview in, so the
+      // headline enters once and the sheet makes one move, from the computing snap to the peek.
+      computing={computing || shownKey === 'computing'}
       t0={t0}
       mobile={mobile}
       enter={handoff}
@@ -589,7 +659,14 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
             </div>
           </GlideHeight>
         }
-        footer={headActions ? undefined : footer}
+        // LAP-01: the footer is part of the view: it fades out and in with the header and the body, never pops.
+        footer={
+          headActions || !footer ? undefined : (
+            <div className={headSwapClass} style={dirStyle}>
+              {footer}
+            </div>
+          )
+        }
         snaps={snaps}
         snap={sheetSnap}
         onSnapChange={onSnapChange}

@@ -22,3 +22,29 @@
   line-height: 1em;
   vertical-align: bottom;
 }
+
+/* <Reveal>: the line mask wipe, timed in CSS from the block's mount (its delay set inline). */
+.revealY {
+  animation: reveal-y var(--reveal-ms, 900ms) var(--ease-out) var(--reveal-delay, 0ms) backwards;
+}
+.revealX {
+  animation: reveal-x var(--reveal-ms, 900ms) var(--ease-out) var(--reveal-delay, 0ms) backwards;
+}
+@keyframes reveal-y {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(0.25em);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    transform: none;
+  }
+}
+@keyframes reveal-x {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}

@@ -91,6 +91,8 @@ const DRAG_SLOP_PX = 5
 /** At the top snap, a pull this far down at scrollTop 0 hands the gesture from the body to the sheet. */
 const HANDOFF_PX = 6
 const DISMISS_PX = 72
+/** The body's glide when the header changes height over the same content (LAP-03). */
+const HEAD_GLIDE_MS = 240
 /** Elements a drag never starts from: they handle their own pointer input (a search's suggestion list scrolls). */
 const NO_DRAG = '[data-sheet-nodrag], [data-suggestions], input, textarea, select, [contenteditable="true"]'
 /** A tap on these is theirs, not a request to raise the sheet. */
@@ -573,15 +575,19 @@ function CloseButton({ label, onClose }: { label: string; onClose: () => void })
  * the same `margin-bottom`, so it ends where it did (above the footer). Both are measured once when the
  * header mounts (the first frame is placed).
  *
- * After that, two paths keep them in step with the header:
- *  - DOM changes in the header (React swapping its content, the inline search opening or closing, the
- *    common case): a MutationObserver measures it in the microtask right after the commit, before that
- *    frame's layout, and writes the transform and the margin together. The frame that shows the new header
- *    shows the body in the right place at the right height: no one-frame strip at the body's end.
- *  - Size changes with no DOM change (a width change, a font swap): the header's ResizeObserver writes the
- *    transform in the frame the height changed (paint only, before that frame is painted) and the margin in
- *    the next frame, before its layout, so no observer of the body sees it resized inside its own
- *    delivery (that would end the frame on a ResizeObserver loop error, R3-12).
+ * After that the header's ResizeObserver keeps them in step. It is delivered after the frame's layout and before
+ * its paint, with the header's new size in the entry: no layout is read or forced (LAP-04: a MutationObserver that
+ * measured the header in the microtask after every commit forced a full style + layout of the view just mounted,
+ * and its margin write then made the frame lay out a second time: 57–86 ms tasks at 1× on opening a pass and on
+ * New search). The transform is written in that callback, so the frame that shows the new header shows the body
+ * in its place; the margin follows in the next frame, before its layout (a size write inside the observer's
+ * delivery would resize the body under any observer of it and end the frame on a ResizeObserver loop error,
+ * R3-12). Until then the footer, which sits above the body, covers its end.
+ *
+ * LAP-03: when the header changes height over the SAME body content (the inline search opening or closing, a
+ * header line coming or going), the body glides to its new place (240 ms, transform only) instead of jumping.
+ * When the body's content was swapped in the same commit (a new view, entering from transparent) it is placed at
+ * once.
  *
  * Where the body starts is the header container's height (the body's previous sibling): measure that.
  */
@@ -591,40 +597,43 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
     const body = bodyRef.current
     if (!head || !body || !present) return
     const dpr = window.devicePixelRatio || 1
-    const measure = () => Math.round(head.getBoundingClientRect().height * dpr) / dpr
-    const place = (px: number) => void (body.style.transform = px ? `translateY(${px}px)` : '')
+    const round = (px: number) => Math.round(px * dpr) / dpr
+    const place = (px: number, glide: boolean) => {
+      body.style.transition = glide ? `transform ${HEAD_GLIDE_MS}ms var(--ease-out)` : ''
+      body.style.transform = px ? `translateY(${px}px)` : ''
+    }
     const size = (px: number) => void (body.style.marginBottom = px ? `${px}px` : '')
-    let h = measure()
-    place(h)
+    let h = round(head.getBoundingClientRect().height)
+    place(h, false)
     size(h)
     let raf = 0
-    // Element and class changes only: text-only updates (a ticking readout's textContent, a caret mirror)
-    // rarely change the height and are left to the ResizeObserver below, so they never force a layout here.
-    const textOnly = (r: MutationRecord) =>
-      r.type === 'childList' && [...r.addedNodes, ...r.removedNodes].every((n) => n.nodeType === Node.TEXT_NODE)
+    // The body's content swapped (its child replaced) in this frame: a mutation record, no layout read. Cleared two
+    // frames on, after this frame's observer delivery.
+    let swapped = false
+    let clear = 0
     const mo =
       typeof MutationObserver === 'undefined'
         ? null
-        : new MutationObserver((records) => {
-            if (records.every(textOnly)) return
-            const next = measure()
-            if (Math.abs(next - h) < 0.01) return
-            h = next
-            cancelAnimationFrame(raf)
-            raf = 0
-            place(h)
-            size(h)
+        : new MutationObserver(() => {
+            swapped = true
+            cancelAnimationFrame(clear)
+            clear = requestAnimationFrame(() => {
+              clear = requestAnimationFrame(() => {
+                clear = 0
+                swapped = false
+              })
+            })
           })
-    mo?.observe(head, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] })
+    mo?.observe(body, { childList: true })
     const ro =
       typeof ResizeObserver === 'undefined'
         ? null
-        : new ResizeObserver(() => {
-            // Read live, not from the entry: an earlier observer in this delivery may have changed it again.
-            const next = measure()
+        : new ResizeObserver((entries) => {
+            const box = entries[entries.length - 1]?.borderBoxSize?.[0]
+            const next = round(box ? box.blockSize : head.getBoundingClientRect().height)
             if (Math.abs(next - h) < 0.01) return
             h = next
-            place(h)
+            place(h, !swapped && !prefersReducedMotion())
             if (!raf)
               raf = requestAnimationFrame(() => {
                 raf = 0
@@ -633,10 +642,11 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
           })
     ro?.observe(head)
     return () => {
-      mo?.disconnect()
       ro?.disconnect()
+      mo?.disconnect()
       cancelAnimationFrame(raf)
-      place(0)
+      cancelAnimationFrame(clear)
+      place(0, false)
       size(0)
     }
   }, [headRef, bodyRef, mobile, present])
