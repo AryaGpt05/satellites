@@ -47,6 +47,7 @@ import { createShareSafe, peekShare, type CreateShareInput } from './backend'
 import { cardSpec, renderCardPng, summaryCardSpec, summaryFacts, weekSatellites, type CardSpec } from './card'
 import { deepLink, postText, roundedPlace, shareLink, summaryLink, summaryPostText, xIntentUrl } from './links'
 import { ShareCard } from './ShareCard'
+import { useBackLayer } from '@/lib/backStack'
 import s from './ShareSheet.module.css'
 
 export interface ShareSheetProps {
@@ -369,6 +370,8 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   // a ref so a parent re-render (a fresh inline callback) never re-runs this and steals focus.
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  // The back gesture closes the sheet (src/lib/backStack.ts).
+  useBackLayer('share', true, () => closeRef.current())
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
     rootRef.current?.focus({ preventScroll: true })

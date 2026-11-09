@@ -215,6 +215,9 @@
   transition: opacity var(--d-sm) var(--ease-out);
 }
 .acqLabel {
+  /* Wraps (right-aligned) only when the free band is narrower than the line (GlobeOverlay sets max-width). */
+  white-space: normal;
+  text-align: right;
   font-size: var(--fs-meta, 10px);
   font-weight: 350;
   letter-spacing: var(--track-label);

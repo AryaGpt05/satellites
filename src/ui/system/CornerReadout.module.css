@@ -48,6 +48,14 @@
   text-align: right;
 }
 
+/* Narrow phones (375): "HOW THIS WORKS" and "SUN 16.9°S 030.7°E" / "SCENE 12:06:47 CET" ran into each other at the
+   label tracking; half the tracking leaves a clear gap between the two top corners. */
+@media (max-width: 380px) {
+  .corner {
+    letter-spacing: 0.04em;
+  }
+}
+
 /* phone spacing */
 @media (max-width: 760px) {
   .tl,

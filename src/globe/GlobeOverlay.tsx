@@ -500,7 +500,7 @@ function AcqReadout({
 }) {
   const el = useRef<HTMLDivElement>(null)
   const value = useRef<HTMLDivElement>(null)
-  const last = useRef({ op: '', text: '', done: false, x: NaN, y: NaN })
+  const last = useRef({ op: '', text: '', done: false, x: NaN, y: NaN, maxW: NaN })
   // Its real height (the type scale differs on phones), measured off the frame loop: callouts and the chase's framing
   // keep below its bottom edge.
   const height = useRef(READOUT_H)
@@ -549,6 +549,13 @@ function AcqReadout({
     }
     const x = Math.round(ins.right + edgeFor(stacked))
     const y = Math.round(ins.top + 8)
+    // Never wider than the globe's free band beside a side panel (a short landscape phone's pass view is ~240 px):
+    // the label wraps instead of running off the screen's left edge.
+    const maxW = Math.max(120, Math.round(W - x - ins.left - edgeFor(stacked)))
+    if (maxW !== st.maxW) {
+      st.maxW = maxW
+      d.style.maxWidth = `${maxW}px`
+    }
     if (x !== st.x || y !== st.y) {
       st.x = x
       st.y = y

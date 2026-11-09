@@ -198,6 +198,39 @@
   white-space: nowrap;
   transition: color var(--d-hover) var(--ease-out);
 }
+/* Search mode (phones): the location button as its glyph alone, beside Cancel. */
+.locateGlyphOnly {
+  justify-content: center;
+  gap: 0;
+  min-width: 44px;
+  padding: 0 14px 0 15px;
+}
+/* Search mode (phones): the way back out. Its own class: the location button's narrow-phone and short-landscape
+   rules (hidden ≤ 400 px, a 44 px icon box) must not reach it. */
+.searchCancel {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 2px 0 14px;
+  border-left: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone);
+  white-space: nowrap;
+}
+/* a 44 px tall touch target, drawn no taller */
+.searchCancel::after {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+.searchCancel:active {
+  color: var(--signal);
+}
 .locateInline:active {
   color: var(--bone);
   transition-duration: 0ms;
@@ -978,3 +1011,21 @@
   -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
   mask-image: linear-gradient(to right, transparent, #000 28px);
 }
+
+/* Search mode (phones): the location glyph beside Cancel. Its divider is drawn 32 px tall like Cancel's (the button
+   keeps its 44 px touch box, whose own border would draw a taller line). Last in the file: it overrides the location
+   button's size rules above. */
+.locateInline.locateGlyphOnly {
+  position: relative;
+  border-left: 0;
+}
+.locateInline.locateGlyphOnly::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 32px;
+  margin-top: -16px;
+  border-left: 1px solid var(--line-strong);
+}
+

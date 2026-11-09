@@ -30,6 +30,8 @@ import { PushbroomReveal } from './PushbroomReveal'
 import { Reticle } from './Reticle'
 import { coordsOf, seenKeyOf } from './PhotoFrame'
 import { selectQuietly } from './actions'
+import { useBackLayer } from '@/lib/backStack'
+import { useApp } from '@/state/store'
 import { coverPinKey, pinnedOrder, useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
 import { Img } from './Img'
@@ -249,9 +251,12 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
 
   // ── close: shrink back to whichever photo is current ────────────────────────────────────
   const closingRef = useRef(false)
+  /** Gives the viewer's history entry up (set below): as the shrink starts, a Back goes to the layer under it. */
+  const releaseBack = useRef<() => void>(() => undefined)
   const close = useCallback(() => {
     if (closingRef.current) return
     closingRef.current = true
+    releaseBack.current()
     // The globe renders a fresh frame before the scrim starts fading (no stale frame shows through it).
     setOverlay(false)
     setClosing(true)
@@ -306,6 +311,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
       }),
     )
   }, [items, from, reduced, id])
+  // The back gesture closes the viewer, shrinking back like the × (src/lib/backStack.ts).
+  releaseBack.current = useBackLayer('lightbox', true, close)
 
   // ── navigate ────────────────────────────────────────────────────────────────────────────
   // The index moves at once (the counter, the metadata and the filmstrip follow in the same frame); the strip then
@@ -350,6 +357,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
     const prev = document.activeElement as HTMLElement | null
     rootRef.current?.focus({ preventScroll: true })
     const onKey = (e: KeyboardEvent) => {
+      // About open over the viewer: its keys are About's (an Esc closes About alone).
+      if (useApp.getState().aboutOpen) return
       const A = actions.current
       const k = e.key
       let handled = true

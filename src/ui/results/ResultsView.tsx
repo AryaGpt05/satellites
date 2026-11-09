@@ -17,8 +17,10 @@
  * F opens the photo large (the lightbox); Space plays/pauses the replay. Esc is NOT handled here (except
  * inside the inline search field and the lightbox): the app shell owns it.
  */
+import { flushSync } from 'react-dom'
 import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { timeZoneAt } from '@/imagery'
+import { useBackLayer } from '@/lib/backStack'
 import { SHORT_LANDSCAPE_QUERY } from '@/lib/layout'
 import { announceUiEntrance } from '@/lib/uiEvents'
 import { useApp } from '@/state/store'
@@ -111,7 +113,7 @@ function predictSnaps(key: string, reportKey: string, vh: number, reduced: boole
   // A pass opens at its flight snap (reduced motion: the image snap at once), as the selection effect below sets.
   const index = reduced ? 1 : 0
   if (m && m.vh === vh) return { snaps: sheetMemo[kind]?.vh === vh ? m.snaps : [m.snaps[0], vh * 0.7, TOP], index }
-  return { snaps: [Math.min(vh * 0.4, FLIGHT_EST_PX + safeBottomPx), vh * 0.7, TOP], index }
+  return { snaps: [Math.min(Math.max(vh * 0.4, vh - 232), FLIGHT_EST_PX + safeBottomPx), vh * 0.7, TOP], index }
 }
 
 
@@ -340,7 +342,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       if (mobile && shownReportKey) sheetMemo.overview = { key: shownReportKey, vh, snaps: list }
       return list
     }
-    const flight = Math.min(geo.top + geo.foot + 2, vh * 0.4)
+    // The flight snap shows the whole pass header (title, date, scrubber) over the footer. On a short phone (375×667)
+    // the header wraps taller than 40 % of the screen and the scrubber went under the footer: like the overview's
+    // peek, it may rise past 40 % as long as a 232 px band (HUD + globe) stays above the sheet.
+    const flight = Math.min(geo.top + geo.foot + 2, Math.max(vh * 0.4, vh - 232))
     const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 8 + geo.foot : vh * 0.7
     // R2R3: on a short phone the globe band above the sheet would be under ~120 px: the image step goes to
     // the top snap (the sheet meets the HUD band; the globe is simply out of view).
@@ -362,9 +367,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   }, [viewKey, mobile])
   // Back to a known overview (PH-03): its snap applies as the pass starts to leave, so the sheet rises in that beat.
   const overviewKnown = mobile && viewKey === 'overview' && sheetMemo.overview?.key === shownReportKey
+  // (Not while the inline search is open: a search started from a pass returns to the overview at the top snap, where
+  // the field and its suggestions sit above the keyboard, as from the overview's own search bar.)
   useEffect(() => {
-    if (mobile && viewKey === 'overview' && (shownKey === 'overview' || overviewKnown)) setSnap(overviewSnap.current)
-  }, [viewKey, shownKey, mobile, overviewKnown])
+    if (mobile && viewKey === 'overview' && (shownKey === 'overview' || overviewKnown)) setSnap(searching ? 2 : overviewSnap.current)
+  }, [viewKey, shownKey, mobile, overviewKnown, searching])
   // A new place opens on the peek again.
   useEffect(() => {
     overviewSnap.current = 0
@@ -454,6 +461,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   useEffect(() => {
     if (computing) setSearching(false)
   }, [computing])
+  // The back gesture closes the inline search (src/lib/backStack.ts), as on the landing.
+  useBackLayer('search', searching, () => setSearching(false))
 
   // ── desktop dock height: content while computing, full at results (CSS transition) ──────
   useLayoutEffect(() => {
@@ -584,11 +593,14 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   useShellExit(sectionRef, timelineRef, mobile)
 
   // ── render ─────────────────────────────────────────────────────────────────────────────
-  // Inline search lives in the overview header: from a pass, go back to the overview first.
+  // Inline search lives in the overview header: from a pass, go back to the overview first. On a phone the keyboard
+  // must open from the tap itself (iOS only raises it for a focus inside the gesture): a stand-in field takes focus
+  // in the tap, and the real one takes it over when it mounts (focus moving between fields keeps the keyboard up).
   const openSearch = onSearch
     ? () => {
+        if (mobile) holdKeyboard()
         if (useApp.getState().selectedPassId) clearPass()
-        setSearching(true)
+        flushSync(() => setSearching(true))
       }
     : undefined
   const enterKey = `enter:${reportKey || shownReportKey}`
@@ -605,6 +617,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       photo={shownKey === 'photo'}
       shared={shared ? { sat: shared.satName ?? shownModel.meta(shownPass.norad).name, place: shared.placeLabel } : undefined}
       strip={mobile && !!selected && selected.id === shownPass.id}
+      onSearch={mobile ? openSearch : undefined}
     />
   ) : (
     <OverviewHeader
@@ -994,9 +1007,15 @@ function DetailFooter({
           {shareIcon}
         </>
       ) : (
-        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label={compact ? 'Share this pass' : undefined}>
+        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label="Share this pass">
           <Glyph name="share" size={14} />
-          {compact ? 'Share' : 'Share this pass'}
+          {/* "Share this pass" where it fits; "Share" on narrow phones (≤ 400 px: it was cut to "SHARE THIS PAS"). */}
+          {compact ? 'Share' : (
+            // One inline run: as separate flex items "Share" and " this pass" got the button's gap between them.
+            <span>
+              Share<span className={s.ctaTail}> this pass</span>
+            </span>
+          )}
         </Button>
       )}
       {replay}
@@ -1113,4 +1132,25 @@ function useKeys(model: ResultsModel | undefined, selected: Pass | undefined, se
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+}
+
+/**
+ * Raise the phone keyboard inside a tap, before the field it is for exists: a 16 px (no zoom), invisible, fixed field
+ * takes focus now and goes away as soon as focus moves on (to the real field's autofocus) or after 1.5 s.
+ */
+function holdKeyboard() {
+  if (typeof document === 'undefined') return
+  const proxy = document.createElement('input')
+  proxy.type = 'text'
+  proxy.setAttribute('aria-label', 'Search another place')
+  proxy.tabIndex = -1
+  proxy.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;pointer-events:none'
+  document.body.appendChild(proxy)
+  const done = () => {
+    window.clearTimeout(timer)
+    proxy.remove()
+  }
+  const timer = window.setTimeout(done, 1500)
+  proxy.addEventListener('blur', done, { once: true })
+  proxy.focus({ preventScroll: true })
 }

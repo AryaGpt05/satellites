@@ -12,6 +12,7 @@
  *             on an empty frame while the chunk downloads (R2K4)
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { backStack, onBackSettled, watchLayer } from '@/lib/backStack'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import type { ResultsViewProps } from '@/ui/results'
@@ -124,6 +125,21 @@ const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<Re
   return <View onBack={resetToLanding} onRetry={retryReport} onSearch={searchFromPanel} />
 })
 const closeAbout = () => useApp.getState().setAboutOpen(false)
+/** The address bar for what is on screen now (the back stack calls it when its own history move lands). */
+function writeUrlNow() {
+  const st = useApp.getState()
+  if (st.place && (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error')) writeUrl(st.place, st.phase === 'results' ? st.selectedPassId : undefined)
+  // The landing: a clean address, except a share link still being looked up (?s=: it opens when it answers).
+  else if (st.phase === 'idle' && !/[?&]s=/.test(location.search)) history.replaceState(history.state, '', location.pathname)
+}
+/** Back out of a pass to the list (as the panel's "All passes"): live time, the camera back on the place. */
+function closePass() {
+  const st = useApp.getState()
+  st.selectPass(undefined)
+  st.setTimeMode('live')
+  st.setSimTime(Date.now())
+  if (st.place) st.setCamera({ kind: 'place', lat: st.place.lat, lon: st.place.lon })
+}
 
 /**
  * Landing entrance delay after `prev` (K5). After boot the kicker starts at 200 ms and the headline's first line
@@ -173,6 +189,36 @@ export default function Main() {
     }
     document.addEventListener('focusin', onFocus)
     return () => document.removeEventListener('focusin', onFocus)
+  }, [])
+
+  // The back gesture / browser Back closes the top layer (src/lib/backStack.ts): the results of a search (back to the
+  // landing) and an open pass (back to the list) are store layers; the photo viewer, the share sheet, About and the
+  // phone's search mode register themselves.
+  // Subscribed before the ?p= writer below (zustand calls listeners in subscription order). When one of the stack's own
+  // history moves lands (a close from the UI), the address bar is rewritten for what is on screen.
+  useEffect(() => {
+    if (!backStack()) return
+    onBackSettled(writeUrlNow)
+    const sub = useApp.subscribe
+    const get = useApp.getState
+    const offResults = watchLayer(sub, get, 'results', (st) => st.phase === 'computing' || st.phase === 'results' || st.phase === 'error', resetToLanding)
+    const offPass = watchLayer(sub, get, 'pass', (st) => st.phase === 'results' && !!st.selectedPassId, closePass)
+    // A reload (or a return the back-forward cache didn't keep) restores layers from the address and adopts the entries
+    // it finds; once the results have landed (a pass from ?p= is selected in the same tick), line the history up with
+    // what actually came back.
+    let reconcileTimer = 0
+    const offReconcile = sub((st, prev) => {
+      if (st.phase === 'results' && prev.phase !== 'results') {
+        window.clearTimeout(reconcileTimer)
+        reconcileTimer = window.setTimeout(() => backStack()?.reconcile(), 0)
+      }
+    })
+    return () => {
+      offResults()
+      offPass()
+      offReconcile()
+      window.clearTimeout(reconcileTimer)
+    }
   }, [])
 
   // Keep ?p=<passId> in sync with the selection so links are always shareable (including a pass preselected by

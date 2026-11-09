@@ -94,8 +94,19 @@ export function OverviewHeader(props: OverviewHeaderProps) {
             </>
           )}
         </span>
-        <HeadAction mode={computing ? 'cancel' : searching ? 'close' : 'search'} onCancel={props.onCancel} onClose={props.onCloseSearch} onSearch={props.onOpenSearch ?? props.onBack} />
+        <HeadAction
+          mode={computing ? 'cancel' : searching ? 'close' : 'search'}
+          // Phones: the search bar below is the way to a new search; the corner keeps only Cancel / Close.
+          quietSearch={mobile}
+          outlined={!mobile}
+          onCancel={props.onCancel}
+          onClose={props.onCloseSearch}
+          onSearch={props.onOpenSearch ?? props.onBack}
+        />
       </div>
+
+      {/* Phones, results: the search bar, where the place row was while computing (so nothing above it moves). */}
+      {mobile && !computing && !searching && place && model ? <SearchBar place={place} onOpen={props.onOpenSearch ?? props.onBack} /> : null}
 
       {showPlaceRow && place ? (
         <div className={s.placeRow}>
@@ -128,10 +139,34 @@ export function OverviewHeader(props: OverviewHeaderProps) {
  * whose three labels share a grid cell, so it keeps the width of the longest: switching never moves it, or the row
  * (R3-8: no layout shift at results arrival, New search, a new place).
  */
-function HeadAction({ mode, onCancel, onClose, onSearch }: { mode: 'cancel' | 'search' | 'close'; onCancel: () => void; onClose: () => void; onSearch: () => void }) {
+function HeadAction({
+  mode,
+  quietSearch = false,
+  outlined = false,
+  onCancel,
+  onClose,
+  onSearch,
+}: {
+  mode: 'cancel' | 'search' | 'close'
+  /** Phones: the search mode's label steps aside (the search bar takes that job); the button keeps its box */
+  quietSearch?: boolean
+  /** Desktop: an outlined button, not a faint label */
+  outlined?: boolean
+  onCancel: () => void
+  onClose: () => void
+  onSearch: () => void
+}) {
   const label = (m: typeof mode) => cx(s.crumbLabel, mode !== m && s.crumbLabelOff)
+  const hidden = quietSearch && mode === 'search'
   return (
-    <button type="button" className={s.crumb} onClick={mode === 'cancel' ? onCancel : mode === 'close' ? onClose : onSearch} aria-keyshortcuts="Escape">
+    <button
+      type="button"
+      className={cx(s.crumb, outlined && s.crumbOutlined, hidden && s.crumbHidden)}
+      onClick={mode === 'cancel' ? onCancel : mode === 'close' ? onClose : onSearch}
+      aria-keyshortcuts="Escape"
+      aria-hidden={hidden || undefined}
+      tabIndex={hidden ? -1 : undefined}
+    >
       <span className={s.crumbLabels}>
         <span className={label('cancel')} aria-hidden={mode !== 'cancel' || undefined}>
           Cancel
@@ -147,6 +182,25 @@ function HeadAction({ mode, onCancel, onClose, onSearch }: { mode: 'cancel' | 's
       </span>
       <span className={s.kbdHover} aria-hidden>
         <Kbd>Esc</Kbd>
+      </span>
+    </button>
+  )
+}
+
+/**
+ * Phones: the way to a new search, as the first thing in the sheet. It looks like the landing's search field (the
+ * same height, glyph and mono line) holding the current place, with "Change" at its end; a tap anywhere opens the
+ * inline search with the field focused.
+ */
+function SearchBar({ place, onOpen }: { place: Place; onOpen: () => void }) {
+  return (
+    <button type="button" className={s.searchBar} onClick={onOpen} aria-label={`Search another place (now ${place.label})`}>
+      <span className={s.searchBarGlyph} aria-hidden>
+        <Glyph name="search" size={16} />
+      </span>
+      <span className={s.searchBarPlace}>{place.label}</span>
+      <span className={s.searchBarAction} aria-hidden>
+        Change
       </span>
     </button>
   )
@@ -205,7 +259,7 @@ function InlineSearch({ onSearch, onClose, current }: { onSearch?: (p: Place) =>
   }
   return (
     <div className={s.inlineSearch} onKeyDownCapture={onKey}>
-      <SearchBox onSubmit={submit} autoFocus />
+      <SearchBox onSubmit={submit} autoFocus placeholder="Search another place" />
       {chips.length ? (
         <div className={s.recent}>
           <span className={s.recentLabel}>Recent</span>
@@ -233,10 +287,12 @@ interface DetailHeaderProps {
   photo?: boolean
   /** A shared link is open (R2R10): the tag above the header */
   shared?: { sat: string; place: string }
+  /** Phones: a new search in one tap (back to the list with the search open) */
+  onSearch?: () => void
 }
 
 /** Pass header: back, position within the verdict with ‹ ›, the satellite, its local time. */
-export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shared }: DetailHeaderProps) {
+export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shared, onSearch }: DetailHeaderProps) {
   const meta = model.meta(pass.norad)
   const lane = model.lanes[pass.verdict].passes
   const index = lane.findIndex((p) => p.id === pass.id)
@@ -320,7 +376,14 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
             <Kbd>Esc</Kbd>
           </span>
         </button>
-        {stepper}
+        <span className={s.headTopEnd}>
+          {stepper}
+          {mobile && onSearch ? (
+            <button type="button" className={s.searchIcon} onClick={onSearch} aria-label="Search another place" title="Search another place">
+              <Glyph name="search" size={14} />
+            </button>
+          ) : null}
+        </span>
       </div>
       {oneLine ? (
         // Phones: name and time on one line, so the flight snap stays low (≤ 25 % of the screen).

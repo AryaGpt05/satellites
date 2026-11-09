@@ -337,6 +337,113 @@
 .crumbLabelOff {
   visibility: hidden;
 }
+/* Phones, results: the search bar is the way to a new search; the corner button keeps its box (no shift when it
+   turns into Close or Cancel) but shows and takes nothing. */
+.crumbHidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+/* Desktop: "New search" as a real button (outlined, glyph + label), not a faint label. Drawn on the button itself so
+   the three labels' shared cell keeps its width. */
+.crumbOutlined {
+  height: 30px;
+  margin: -4px 0;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  color: var(--bone);
+}
+.crumbOutlined:focus-visible {
+  outline-offset: 2px;
+}
+/* Its three labels (New search / Close / Cancel) share one cell sized for the longest: centred in the outline, not
+   pushed to its right edge. */
+.crumbOutlined .crumbLabels {
+  justify-items: center;
+}
+/* Touch in the wide layout (a landscape phone, a tablet): a 44 px tall target, drawn 30 px. */
+@media (pointer: coarse) {
+  .crumbOutlined {
+    position: relative;
+    z-index: 1; /* its hit area runs under the place row below */
+    height: 30px;
+    padding: 0 10px;
+    margin: -4px 0;
+  }
+  .crumbOutlined::after {
+    content: '';
+    position: absolute;
+    inset: -8px -1px; /* from inside the 1 px border: 28 + 16 = 44 */
+  }
+}
+/* The pass header's right end: the stepper, and on phones the one-tap search. */
+.headTopEnd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.searchIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -12px -12px -12px 0;
+  color: var(--bone-2);
+}
+.searchIcon:active {
+  color: var(--bone);
+  background: var(--ink-2);
+}
+
+/* Phones, results: the search bar (the landing field's look: its height, glyph, mono line and hairline). */
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  height: 52px;
+  margin-top: 8px;
+  padding: 0;
+  border-bottom: 1px solid var(--line-strong);
+  text-align: left;
+  color: var(--bone);
+}
+.searchBar:active {
+  background: var(--ink-2);
+}
+.searchBar:focus-visible {
+  outline-offset: 2px;
+}
+.searchBarGlyph {
+  display: inline-flex;
+  flex: none;
+  color: var(--bone-3);
+}
+.searchBarPlace {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 300;
+  font-size: 17px;
+}
+.searchBarAction {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--signal);
+}
 @media (hover: none) {
   .kbdHover {
     display: none;
@@ -1048,7 +1155,8 @@
   min-width: 0;
 }
 @media (max-width: 400px) {
-  .ctaLead {
+  .ctaLead,
+  .ctaTail {
     display: none;
   }
 }

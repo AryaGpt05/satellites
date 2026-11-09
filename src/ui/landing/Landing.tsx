@@ -25,6 +25,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type C
 import { flushSync } from 'react-dom'
 import { DUR, EASE } from '@/lib/ease'
 import { SHORT_LANDSCAPE_QUERY, isStacked } from '@/lib/layout'
+import { useBackLayer } from '@/lib/backStack'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import {
@@ -182,6 +183,18 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
     searchingRef.current = false
     setSearching(false)
   }
+  /** Out of search mode: the field lets go of focus (the keyboard drops) and the hero comes back. */
+  const cancelSearch = () => {
+    const el = document.activeElement as HTMLElement | null
+    if (el && searchRef.current?.contains(el)) el.blur()
+    leaveSearch()
+  }
+  // Phones: the back gesture leaves search mode (the field and the keyboard), not the site (src/lib/backStack.ts). A
+  // locate started from search mode is dropped with it: the results must not open (and push) after Back.
+  useBackLayer('search', searching && liftable, () => {
+    if (locate.state.kind === 'locating') locate.cancel()
+    cancelSearch()
+  })
   // A layout change mid-search (a tablet rotated): take up the new layout's search mode, or leave it.
   const wasLiftable = useRef(liftable)
   useLayoutEffect(() => {
@@ -332,7 +345,24 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
               liftedBy={() => (searchingRef.current && !liftable ? liftRef.current : 0)}
               statusOverride={locate.state.kind === 'locating' ? <LocatingStatus state={locate.state} /> : undefined}
               idleTrailing={
-                locating ? (
+                searching && liftable && !locating ? (
+                  // Phones, search mode with nothing typed: an obvious way back out (the back gesture works too), and
+                  // the location button kept as its glyph where the field offers one (hidden ≤ 400 px, as ever).
+                  <>
+                    <button
+                      type="button"
+                      className={cx(s.locateInline, s.locateGlyphOnly)}
+                      onPointerDown={(e) => e.preventDefault()}
+                      onClick={locate.start}
+                      aria-label="Use my location"
+                    >
+                      <Glyph name="locate" size={14} />
+                    </button>
+                    <button type="button" className={s.searchCancel} onPointerDown={(e) => e.preventDefault()} onClick={cancelSearch}>
+                      Cancel
+                    </button>
+                  </>
+                ) : locating ? (
                   <button
                     type="button"
                     className={s.locateInline}

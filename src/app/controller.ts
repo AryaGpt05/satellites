@@ -158,7 +158,7 @@ export async function boot() {
     const share = await raceTimeout(shareP, Math.max(SHARE_MIN_AFTER_LIGHT_MS, SHARE_CAP_MS - (performance.now() - bootStart)))
     if (share) run = shareRun(share)
     // Unknown, expired or invalid share (settled with null): the landing, with a clean address bar.
-    else if (shareSettled) history.replaceState(null, '', location.pathname)
+    else if (shareSettled) history.replaceState(history.state, '', location.pathname)
     // Still pending: the landing, keeping ?s= — it opens when it answers, if the landing is untouched.
     else adoptLateShare(shareP, bootStart)
   }
@@ -779,7 +779,8 @@ export function resetToLanding() {
   inflight?.abort()
   inflight = null
   useApp.getState().reset()
-  history.replaceState(null, '', location.pathname)
+  // history.state is kept: it carries the back stack's stamp for this entry (src/lib/backStack.ts).
+  history.replaceState(history.state, '', location.pathname)
 }
 
 /** Address-bar writes so far: a deferred write is skipped when a newer one has happened since (R2K3). */
@@ -795,7 +796,7 @@ export function writeUrl(place: Place, passId?: string) {
   p.set('q', `${place.lat.toFixed(3)},${place.lon.toFixed(3)}`)
   p.set('n', place.label)
   if (passId) p.set('p', passId)
-  history.replaceState(null, '', `${location.pathname}?${p.toString()}`)
+  history.replaceState(history.state, '', `${location.pathname}?${p.toString()}`)
 }
 
 // ───────────────────────────── helpers ─────────────────────────────

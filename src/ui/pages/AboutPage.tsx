@@ -13,6 +13,7 @@
  * scroll settles, since sections it passed may have grown or shrunk from their placeholder height.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useBackLayer } from '@/lib/backStack'
 import { DUR, EASE } from '@/lib/ease'
 import { useApp } from '@/state/store'
 import { Bezel, Glyph, Kbd, Reveal, cx, fmtInt, useExitClone, Wordmark } from '@/ui/system'
@@ -95,6 +96,8 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
   const catalog = useCatalogStatus()
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  // The back gesture closes About (src/lib/backStack.ts).
+  useBackLayer('about', true, () => onCloseRef.current())
 
   // Focus in on open, back out on close.
   useEffect(() => {
