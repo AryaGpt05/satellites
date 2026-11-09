@@ -1,4 +1,4 @@
-# Overflight: design system
+# Watched: design system
 
 **The concept:** a precision instrument for a slightly uncanny question. It should feel like a JPL
 mission console that a Swiss poster designer was allowed to art-direct. Every pixel has a job. Every
@@ -80,7 +80,7 @@ The results headline integer is static: it does not count up. It counts satellit
 
 - The viewport is an **instrument bezel**: a hairline frame inset 16px (12px on mobile) with **corner tick marks** (8px L-shapes) and **edge rulers** (tiny ticks every 24px along the top edge, fading out at the centre). The 3D scene sits behind and bleeds past the frame.
 - Fixed **corner readouts** in mono 10.5px (they hide on small screens if crowded):
-  - TL: wordmark `OVERFLIGHT` plus version tag `v0.1 / BUILD 2026.11`
+  - TL: the serif wordmark **Watched.** (SVG, full stop in signal; `<Wordmark/>` from src/ui/system, outline in api/_lib/wordmark.ts) plus version tag `v0.1`
   - TR: live UTC clock `2026-11-08 03:31:07 UTC` with a blinking signal dot (1Hz, 50% duty, no fade)
   - BL: catalog status `12,847 OBJECTS · TLE EPOCH 2026-11-08 03:15Z · CELESTRAK`
   - BR: sub-solar point `SUN 12.4°S 118.2°E` plus scene FOV or camera altitude
@@ -119,8 +119,8 @@ The results headline integer is static: it does not count up. It counts satellit
 
 Declarative, specific, quietly uncanny. Second person. Real numbers.
 
-- Hero: "Something photographed *you* this week." Sub: "Enter any place on Earth. See every satellite that passed over it in the last 7 days, and the actual pictures they took."
-- Result headline: "In the last 7 days, **2 satellites photographed Waterloo** in detail. 5 weather satellites also imaged it, at 250–375 m per pixel. 246 more passed within view."
+- Hero: "Something watched *you* this week." (three lines: `Something` / `watched *you*` / `this week.`; the serif *you* in signal orange) Sub: "Enter any place on Earth. See every satellite that passed over it in the last 7 days, and the actual pictures they took."
+- Result headline: "In the last 7 days, **256 satellites flew over** *Waterloo*." then "**29 photos were made public.**" (N = distinct satellites with any pass; K = real public images in the window; only the photos line can be partial: "At least K photos…")
 - Pass detail: "Sentinel-2C crossed 786 km overhead at 16:14:21 UTC, moving south at 7.46 km/s. It was looking straight down. Cloud cover: 25%."
 - Commercial: "WorldView Legion 4 passed within view at 10:52 local. It could have pointed here. We can't know whether it did."
 - Geostationary: "GOES-19 has photographed this spot every 10 minutes, all week: 1,008 times."
@@ -146,3 +146,18 @@ Honesty is part of the aesthetic. Uncertainty is stated plainly in `--bone-3` mo
 - Keyboard: `/` focuses search, `←/→` steps through passes, `Esc` goes back, `Space` plays or pauses replay.
 - `prefers-reduced-motion`: no scramble, no camera flights (cut plus 300ms fade), and the reveal becomes a fade.
 - 60fps on an M1 Air at 1440p, and ≥ 40fps on a mid-range phone. DPR is capped at 2. Textures are progressive (2k first, then 8k).
+
+
+## Brand
+
+- Name **Watched**, domain **www.watched.earth** (watched.earth and the old vercel.app host redirect to it).
+- Wordmark: serif "Watched." with the full stop in signal. Never set the name in mono caps as a logo.
+- The serif *you* in the hero and the wordmark's full stop are the two brand uses of signal outside data marks.
+
+## The pass sequence (signature moment, replaces the flat orange swath)
+
+Wide chase alongside a small spacecraft model (true SGP4 position, nadir-pointing, fading orbit trail) → the
+sensor's light curtain sweeps the ground with a bright scan line → ~1 s dive onto the place → the real image
+develops onto the globe line by line → capture shockwave at the reticle + "ACQUIRED 11:21:21 EST · 10 M" →
+1.2 s settle to a near top-down view where the globe photo and the panel photo line up. Replay is explicit;
+gallery swipes only re-frame quietly. Reduced motion: final painted state.
