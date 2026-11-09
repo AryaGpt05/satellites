@@ -77,7 +77,7 @@ a{color:#FF6A1A;text-decoration:none}
 </head>
 <body>
 <p>Opening <a href="${href}">Watched</a></p>
-<script>location.replace(${jsonForScript(m.redirect)})</script>
+<script>try{sessionStorage.setItem('watched.via',JSON.stringify({r:document.referrer,q:location.search}))}catch(e){}location.replace(${jsonForScript(m.redirect)})</script>
 </body>
 </html>
 `

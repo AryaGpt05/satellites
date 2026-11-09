@@ -105,7 +105,13 @@ export function photonToPlace(f: PhotonFeature, source: Place['source'] = 'searc
     sublabel: sublabelOf(label, [p.city, p.state, p.country]),
     countryCode: p.countrycode?.toLowerCase() || undefined,
     source,
+    ...(isStreetLevel(p, label === address) ? { streetLevel: true } : {}),
   }
+}
+
+/** A street, building or address: usage stats keep only its city (src/lib/telemetry.ts regionLabel). */
+function isStreetLevel(p: PhotonProperties, labelIsAddress: boolean): boolean {
+  return labelIsAddress || !!p.housenumber || p.osm_key === 'highway' || p.osm_key === 'building' || p.type === 'street' || p.type === 'house'
 }
 
 const SETTLEMENT = new Set(['city', 'town', 'village', 'hamlet', 'suburb', 'neighbourhood', 'quarter', 'borough', 'municipality', 'locality', 'island', 'islet'])

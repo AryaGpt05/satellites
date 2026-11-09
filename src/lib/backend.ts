@@ -208,6 +208,16 @@ export function cityLevelLabel(place: Pick<Place, 'label' | 'sublabel'>): string
   return city && !specific(city) ? city.slice(0, 80) : undefined
 }
 
+/**
+ * The label record_lookup stores ("by town", About page): a street, building or address the geocoder flagged
+ * (`Place.streetLevel`, e.g. "Kalverstraat", "Rijksmuseum") is saved as its city, never by its own name.
+ */
+export function lookupLabel(place: Pick<Place, 'label' | 'sublabel' | 'streetLevel'>): string | undefined {
+  if (!place.streetLevel) return cityLevelLabel(place)
+  const city = place.sublabel?.split(',').map((s) => s.trim()).find((s) => s && !/\d/.test(s))
+  return city ? city.slice(0, 80) : undefined
+}
+
 const PLATFORM_NAMES: Record<string, string> = {
   'noaa-20': 'NOAA-20',
   'noaa-21': 'NOAA-21',
@@ -245,7 +255,7 @@ export async function recordLookup(place: Place): Promise<void> {
       p_lat: round(place.lat, 1),
       p_lon: round(place.lon, 1),
       p_country: /^[a-z]{2}$/i.test(place.countryCode ?? '') ? place.countryCode!.toLowerCase() : null,
-      p_label: cityLevelLabel(place) ?? null,
+      p_label: lookupLabel(place) ?? null,
     },
     // No `keepalive`: this request needs a CORS preflight, and keepalive + preflight is rejected
     // outright by some browsers. It is sent while the page is open (a report just finished).

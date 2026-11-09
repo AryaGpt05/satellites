@@ -10,6 +10,9 @@
     },
     "api/s.ts": {
       "maxDuration": 10
+    },
+    "api/e.ts": {
+      "maxDuration": 5
     }
   },
   "routes": [
@@ -40,6 +43,11 @@
       "dest": "/api/s"
     },
     { "src": "/s/(?<id>[^/]+)", "dest": "/api/s?id=$id" },
+    {
+      "src": "/admin(?:\\.html)?/?",
+      "dest": "/admin.html",
+      "headers": { "X-Robots-Tag": "noindex, nofollow", "X-Frame-Options": "DENY", "Cache-Control": "no-cache" }
+    },
     { "handle": "filesystem" },
     { "src": "/(?!api/|s/)[^.]*", "dest": "/index.html" }
   ]

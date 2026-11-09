@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# ⚠️  WARNING: this database holds REAL data (people's lookups and shares, in-app events). Do not run this script,
+# and never with --all, unless the owner asks for it. Tests and checks delete only the rows they created themselves,
+# by exact id or a unique test marker (see backend-verify.sh, scripts/backend-sql-test.sh: rolled back).
 # Remove development rows from the Overflight database (Management API; see backend-migrate.sh).
 #
 #   scripts/backend-purge-dev.sh              rows written by ?sandbox=backend and backend-verify.sh,

@@ -13,5 +13,5 @@
     "types": ["node"],
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["vite.config.ts", "scripts/**/*.ts", "api/**/*.ts", "api/**/*.tsx"]
+  "include": ["vite.config.ts", "vite.admin.config.ts", "scripts/**/*.ts", "api/**/*.ts", "api/**/*.tsx"]
 }

@@ -279,10 +279,12 @@ let lastRun: { place: Place; opts: RunOpts } | null = null
 export function retryReport(): Promise<void> | void {
   const st = useApp.getState()
   if (lastRun && (!st.place || (st.place.lat === lastRun.place.lat && st.place.lon === lastRun.place.lon))) {
+    mark('retry') // usage stats: this search is a retry (src/app/telemetry.ts)
     void runReport(lastRun.place, lastRun.opts)
     return
   }
   if (st.place) {
+    mark('retry')
     void runReport(st.place)
     return
   }

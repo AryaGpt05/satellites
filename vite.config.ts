@@ -82,6 +82,9 @@ function overflightHtml(): Plugin {
   }
 }
 
+// App version for in-app events (src/lib/telemetry.ts): the deployed commit, else the package version.
+process.env.VITE_APP_VERSION ||= (process.env.VERCEL_GIT_COMMIT_SHA ?? '').slice(0, 7) || process.env.npm_package_version || 'dev'
+
 export default defineConfig({
   plugins: [react(), overflightHtml()],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
