@@ -13,7 +13,8 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
   const entries: Entry[] = [{ state: null, url: first }]
   let index = 0
   let onPop: ((state: unknown) => void) | null = null
-  const pending: { delta: number; byApp: boolean }[] = []
+  const pending: { delta: number; byApp: boolean; held?: boolean }[] = []
+  let slowApp = false
   const log = { leftSite: 0, gos: [] as number[], pops: 0 }
   const traverse = (delta: number, byApp: boolean, first = false) => {
     if (delta === 0) return
@@ -38,6 +39,7 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
       // Chromium: an app history.go requested while a user traversal is pending is dropped.
       if (opts.chromium && pending.some((t) => !t.byApp)) return
       traverse(delta, true)
+      if (slowApp) pending[pending.length - 1].held = true
     },
     /** The user's Back / Forward / long-press jump */
     jump: (delta: number) => traverse(delta, false),
@@ -49,12 +51,21 @@ function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
       if (i >= 0) pending.splice(i, 1)
     },
     queued: () => pending.length,
+    /** The app's queued moves are slow (a long task, a backgrounded tab): not processed until `releaseApp` */
+    holdApp() {
+      slowApp = true
+      pending.forEach((t) => t.byApp && (t.held = true))
+    },
+    releaseApp() {
+      slowApp = false
+      pending.forEach((t) => (t.held = false))
+    },
     back: () => traverse(-1, false),
     forward: () => traverse(1, false),
     /** Land the traversals in flight (a later task). */
     deliver() {
       let moved = false
-      while (pending.length) {
+      while (pending.length && !pending[0].held) {
         const t = pending.shift()!
         const i = index + t.delta
         if (i < 0) {
@@ -686,45 +697,125 @@ describe('back stack: user traversals racing the app’s own moves (history.go r
     expect(s.names()).toEqual([])
   })
 
-  it('a dropped go(): opens are held, then the timeout lines the stack up with the browser', () => {
+  it('an app move landing after the timeout is never issued twice: "All passes" closes exactly one layer (RS-1)', () => {
     const h = fakeHistory()
-    const { s, open, uiClose, settle, appTasks, elapse } = load(h)
+    const { s, open, uiClose, closed, settle, endTick, elapse } = load(h)
     open('results')
+    open('pass')
     settle()
-    uiClose('results')
-    appTasks()
+    uiClose('pass')
+    endTick()
     expect(h.log.gos).toEqual([-1])
-    h.dropApp()
-    open('results') // a new search while the move is outstanding: held
+    h.holdApp() // a long task: the go lands 1.5 s later
+    elapse(1500)
+    h.releaseApp()
     settle()
-    expect(h.index()).toBe(1)
-    elapse(1000)
-    // the browser never left entry 1, and results are open again: they own it
+    expect(h.log.gos).toEqual([-1])
+    expect(closed).toEqual([])
     expect(s.names()).toEqual(['results'])
     expect(h.index()).toBe(1)
-    // and the stack works again: Back closes the results
-    h.back()
-    settle()
-    expect(s.names()).toEqual([])
-    expect(h.index()).toBe(0)
+    expect(h.url()).toBe('/?q=paris')
+  })
+
+  it('a slow move under two closes (New search over a pass and a photo) lands once', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, settle, endTick, elapse } = load(h)
     open('results')
+    open('pass')
+    open('lightbox')
     settle()
+    uiClose('lightbox')
+    uiClose('pass')
+    endTick()
+    expect(h.log.gos).toEqual([-2])
+    h.holdApp()
+    elapse(1500)
+    h.releaseApp()
+    settle()
+    expect(h.log.gos).toEqual([-2])
+    expect(s.names()).toEqual(['results'])
     expect(h.index()).toBe(1)
   })
 
-  it('a dropped go() with nothing reopened: the timeout retries the move down', () => {
+  it('a slow move from a shallow stack never leaves the site', () => {
     const h = fakeHistory()
-    const { s, open, uiClose, settle, appTasks, elapse } = load(h)
+    const { s, open, uiClose, settle, endTick, elapse } = load(h)
     open('results')
     settle()
     uiClose('results')
-    appTasks()
-    h.dropApp()
-    elapse(1000)
-    expect(h.log.gos).toEqual([-1, -1])
+    endTick()
+    h.holdApp()
+    elapse(1500)
+    h.releaseApp()
+    settle()
+    expect(h.log.gos).toEqual([-1])
+    expect(h.log.leftSite).toBe(0)
     expect(h.index()).toBe(0)
     expect(s.names()).toEqual([])
+  })
+
+  it('a slow move holds a later open only until the timeout; it lands, then Back closes the open layer', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, closed, settle, endTick, elapse } = load(h)
+    open('results')
+    open('pass')
+    settle()
+    uiClose('pass') // go(-1), slow
+    endTick()
+    h.holdApp()
+    open('lightbox') // held behind it…
+    settle()
+    expect(h.length()).toBe(3)
+    elapse(1000) // …until the timeout: it pushes
+    h.releaseApp()
+    settle()
+    expect(h.log.gos).toEqual([-1])
     expect(h.log.leftSite).toBe(0)
+    expect(s.names()).toEqual(['results', 'lightbox'])
+    h.back()
+    settle()
+    expect(closed).toContain('lightbox')
+    expect(s.names()).toEqual(['results'])
+    expect(h.log.leftSite).toBe(0)
+  })
+
+  it('a dropped go() is not retried on time alone; later opens still go ahead and nothing leaves the site', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, settle, endTick, elapse } = load(h)
+    open('results')
+    settle()
+    uiClose('results')
+    endTick()
+    h.dropApp()
+    elapse(1500)
+    expect(h.log.gos).toEqual([-1])
+    open('results')
+    settle()
+    expect(s.names()).toEqual(['results'])
+    expect(h.log.leftSite).toBe(0)
+  })
+  it('a second close while a slow move is on its way: both land, nothing is misread as the user’s (Esc, Esc)', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, closed, settle, endTick, elapse } = load(h)
+    open('results')
+    open('pass')
+    settle()
+    h.holdApp()
+    uiClose('pass') // Esc: go(-1), slow
+    endTick()
+    uiClose('results') // Esc again: held behind it…
+    settle()
+    elapse(1000) // …until the timeout: its own go(-1)
+    expect(h.log.gos).toEqual([-1, -1])
+    h.releaseApp()
+    settle()
+    expect(h.log.gos).toEqual([-1, -1])
+    expect(h.log.leftSite).toBe(0)
+    expect(closed).toEqual([])
+    expect(s.names()).toEqual([])
+    expect(h.index()).toBe(0)
+    expect(h.length()).toBe(3) // no entries put above a "user" move
+    expect(h.url()).toBe('/')
   })
 })
 

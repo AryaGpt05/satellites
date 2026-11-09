@@ -37,4 +37,23 @@ describe('late share gate (the landing keeps ?s= only while a late share may sti
     expect(g.pending()).toBe(false)
     expect(g.answered()).toBe(false)
   })
+
+  it('a late null (unknown share, or the lookup timing out at 12 s) ends it too: the next landing write cleans ?s= (PF-R2)', () => {
+    const c = at()
+    const g = createLateShareGate(c.clock)
+    g.start(15_000)
+    c.set(12_000) // get_share gives up: null
+    g.answered() // the controller asks before it looks at the answer
+    expect(g.pending()).toBe(false)
+  })
+
+  it('no answer at all: pending ends with the window', () => {
+    const c = at()
+    const g = createLateShareGate(c.clock)
+    g.start(15_000)
+    c.set(14_999)
+    expect(g.pending()).toBe(true)
+    c.set(15_001)
+    expect(g.pending()).toBe(false)
+  })
 })

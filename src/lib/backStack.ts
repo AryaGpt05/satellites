@@ -16,8 +16,9 @@
  *  - history.go is relative and resolved when the browser gets to it, so the app's moves go one at a time: a close
  *    from the UI moves in its own tick (ahead of a Back pressed after it), a dead Forward's undo from a fresh task
  *    (after a Back the user pressed right after it has landed); a user move that lands while one is queued is
- *    read once the app's has landed too, and entries are put above the user's so the app's lands back on it; a move
- *    that never lands is given up after MOVE_TIMEOUT_MS and the stack lines up with where the browser is.
+ *    read once the app's has landed too, and entries are put above the user's so the app's lands back on it; after
+ *    MOVE_TIMEOUT_MS a move not landed yet stops holding later changes back, and is never issued again (a late
+ *    landing is read by its depth).
  * Layers stack in their drawn order (results < pass < search < lightbox < share < about), not in the order they opened:
  * a pass a share link selects while About is up goes under About, so Back closes what is on top.
  * A deep or share link opens straight onto results: when those results actually open, a landing entry is slipped in
@@ -49,7 +50,8 @@ export interface BackStackOptions {
   schedule: (fn: () => void) => void
   /**
    * A timer (setTimeout in the browser); returns its cancel. A dead Forward's undo runs from a fresh task (after a
-   * traversal the user queued right after it has landed), and an app move that never lands is given up after a timeout.
+   * traversal the user queued right after it has landed), and an app move not landed after a timeout stops holding
+   * later changes back.
    */
   later?: (fn: () => void, ms: number) => () => void
   /** This tab's id (sessionStorage): entries stamped by this tab, in this load or an earlier one, are ours. */
@@ -74,8 +76,10 @@ export interface BackStack {
 }
 
 export const MARK = 'watched-layer'
-/** An app move that has not landed by then was dropped (or is lost behind a long task): line up with the browser. */
+/** An app move that has not landed by then stops holding later changes back (it is never issued twice). */
 export const MOVE_TIMEOUT_MS = 1000
+/** How long a move the timeout gave up on may still land and be read as the app's */
+const LATE_FORGET_MS = 10_000
 
 /** Drawn order of the layers, bottom first: a layer opens beneath any open layer drawn above it. Unknown names go on top. */
 export const LAYER_RANK: Readonly<Record<string, number>> = { results: 0, pass: 1, search: 2, lightbox: 3, share: 4, about: 5 }
@@ -116,8 +120,9 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
   /** A user traversal landed while an app move was outstanding: read it once that has landed */
   let userMoved = false
   let cancelTimeout: (() => void) | null = null
-  /** Timeouts in a row: after the second, stop issuing moves the browser keeps dropping */
-  let timeouts = 0
+  /** Moves the timeout stopped waiting for, still on their way (a popstate from one is the app's, not the user's) */
+  let late = 0
+  let cancelLate: (() => void) | null = null
   /** A move waiting for its fresh task */
   let movePending = false
   /** The next move follows a traversal (a dead Forward's undo): it waits for a fresh task, behind a Back the user may
@@ -141,7 +146,7 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
       return
     }
     const target = owned()
-    if (target >= cur || timeouts >= 2) return
+    if (target >= cur) return
     // Never below the base (target ≥ 0): the app never navigates off the site itself.
     const delta = target - cur
     outstanding++
@@ -152,15 +157,28 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
     cancelTimeout = later(onTimeout, MOVE_TIMEOUT_MS)
     h.go(delta)
   }
+  /**
+   * A move not landed by now is slow (a long task, a backgrounded tab), or very rarely dropped. It is never issued
+   * again: still queued, it lands later, and a second one would close a layer more (or leave the site). The stack only
+   * stops waiting for it: changes held behind it go ahead, and a late popstate is read by the depth it lands on.
+   */
   const onTimeout = () => {
     cancelTimeout = null
     if (outstanding === 0) return
-    // Dropped, or lost behind a long task: line up with where the browser actually is.
-    timeouts++
+    late += outstanding
+    // One a browser really dropped never lands: after a while, stop expecting it.
+    cancelLate?.()
+    cancelLate = later(() => {
+      late = 0
+      cancelLate = null
+    }, LATE_FORGET_MS)
     outstanding = 0
     outstandingDelta = 0
     userMoved = false
-    traverse(depthOf(h.state))
+    if (dirty) {
+      dirty = false
+      change()
+    }
   }
 
   const flush = () => {
@@ -243,6 +261,12 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
     },
     onPop(state) {
       const d = depthOf(state)
+      if (outstanding > 0 && late > 0 && d !== expected) {
+        // A move the timeout stopped waiting for has landed; the current one is still on its way.
+        late--
+        return []
+      }
+      if (outstanding === 0 && late > 0) late--
       if (outstanding > 0) {
         if (d === expected && !userMoved) {
           // Ours landed.
@@ -251,7 +275,6 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
           if (outstanding > 0) return []
           cancelTimeout?.()
           cancelTimeout = null
-          timeouts = 0
           settle()
           if (dirty) {
             dirty = false
@@ -266,7 +289,6 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
           userMoved = false
           cancelTimeout?.()
           cancelTimeout = null
-          timeouts = 0
           dirty = false
           return traverse(d)
         }
@@ -279,7 +301,6 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
         userMoved = true
         return []
       }
-      timeouts = 0 // the browser is traversing again: the app's moves may be tried again
       return traverse(d)
     },
     reconcile() {
