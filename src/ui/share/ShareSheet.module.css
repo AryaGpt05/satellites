@@ -45,13 +45,21 @@
   background: var(--ink-1);
   border: 1px solid var(--line-strong);
   color: var(--bone);
-  animation: rise var(--d-md) var(--ease-out) both;
+  /* The card is legible at once: opaque within the small step (240 ms), while the 12px rise settles
+     over the panel duration (480 ms), on the same ease. */
+  animation:
+    rise-in var(--d-sm) var(--ease-out) both,
+    rise var(--d-md) var(--ease-out) both;
   scrollbar-width: thin;
   scrollbar-color: var(--bone-4) transparent;
 }
-@keyframes rise {
+@keyframes rise-in {
   from {
     opacity: 0;
+  }
+}
+@keyframes rise {
+  from {
     transform: translateY(12px);
   }
 }
@@ -306,7 +314,7 @@
     width: 100%;
     max-height: calc(100dvh - 48px);
     align-self: flex-end;
-    animation-name: sheet;
+    animation: sheet var(--d-md) var(--ease-out) both;
   }
   @keyframes sheet {
     from {

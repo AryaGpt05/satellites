@@ -67,14 +67,14 @@ export const cloudsFragment = glsl`
     float lambert = sat01((NdL + 0.08) / 1.08);
     vec3 lit = uCloudColor * uSunIntensity * mix(0.32, 1.0, lambert) * shade;
     // Sunset: clouds near the terminator catch warm, low light.
-    float band = exp(-pow((NdL - 0.02) / 0.06, 2.0));
+    float band = gauss((NdL - 0.02) / 0.06);
     lit = mix(lit, uTwilightColor * uSunIntensity * 0.5, band * 0.38);
 
     vec3 col = mix(uNightColor, lit, dayMix);
     // Thin decks stay translucent; on the night side clouds are a faint veil.
     float alpha = cover * mix(0.16, 0.94, dayMix) * uOpacity;
     // Toward the limb clouds sink into the haze rather than outlining the disc.
-    float limb = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+    float limb = pow(sat01(1.0 - dot(N, V)), 4.0);
     alpha *= 1.0 - 0.55 * limb;
 
     // Where the real image has developed, its own clouds replace this global layer.

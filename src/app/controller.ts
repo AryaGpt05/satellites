@@ -294,8 +294,9 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   let heroP: Promise<unknown> | undefined
   let firstShow: Promise<void> | undefined
   let shown = false
-  /** The clear cover already preloaded for this run (its id). */
+  /** The clear cover already preloaded for this run (its id), and its decode (shared by every later swap). */
   let coverSeen: string | undefined
+  let coverReady: Promise<unknown> = Promise.resolve()
 
   /** The first time results appear: wait for the camera, the final report (briefly) and the hero image. */
   const showFirst = async (r: Report) => {
@@ -313,7 +314,11 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     if (inflight !== ctrl) return
     const best = finalReport ?? r
     if (best !== r) heroP = preloadHero(best, opts) // usually the same URL: an instant cache hit
-    if (best.clearCover) coverSeen = best.clearCover.id // the hero preload covers it (or the preselected pass leads)
+    if (best.clearCover) {
+      // The hero preload covers it (or the preselected pass leads, and the gallery preloads its neighbours).
+      coverSeen = best.clearCover.id
+      coverReady = heroP ?? coverReady
+    }
     // (4) The hero image, decoded, or at most 1.2 s more.
     await raceTimeout(heroP, HERO_RACE_MS)
     mark('hero-ready')
@@ -350,11 +355,16 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     }
     void ready(next).then(() => finalReport === next && apply(next))
   }
-  /** `r` can be swapped in without a flash: its model is built, and a clear cover new to this run is decoded. */
+  /**
+   * `r` can be swapped in without a flash: its model is built, and its clear cover is decoded. A newer patch that
+   * supersedes a swap still waiting on the cover's decode waits on that same decode (never swaps the cover in blank).
+   */
   const ready = (r: Report): Promise<unknown> => {
-    const cover = r.clearCover && r.clearCover.id !== coverSeen ? raceTimeout(preloadCover(r), COVER_RACE_MS) : undefined
-    if (r.clearCover) coverSeen = r.clearCover.id
-    return Promise.all([prewarmModel(r), cover])
+    if (r.clearCover && r.clearCover.id !== coverSeen) {
+      coverSeen = r.clearCover.id
+      coverReady = raceTimeout(preloadCover(r), COVER_RACE_MS)
+    }
+    return Promise.all([prewarmModel(r), r.clearCover ? coverReady : undefined])
   }
 
   /** Every later report (final after partial, background patches) applies at once. */
@@ -363,6 +373,9 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     if (!shown) return
     const st = useApp.getState()
     if (st.report === r) return
+    // A background retry may have swapped in a report whose archives answered: a late patch of this run's
+    // archive-outage report must never take it back.
+    if (r.archiveFailed && st.report && !st.report.archiveFailed) return
     st.setReport(r)
     if (st.selectedPassId && !r.passes.some((p) => p.id === st.selectedPassId)) st.selectPass(undefined)
   }
@@ -439,13 +452,15 @@ function scheduleArchiveRetry(place: Place, opts: RunOpts, ctrl: AbortController
       const { computeReport } = await loadEngine()
       const r = await computeReport(place, { now: windowEnd ?? opts.now, signal: ctrl.signal })
       if (inflight !== ctrl || r.archiveFailed || r.partial) return
-      const st = useApp.getState()
-      const cur = st.report
+      const cur = useApp.getState().report
       // Only ever swap in a strictly better, final report: never fewer photographs than the user already saw
       // (a GIBS budget cut on the retry can verify fewer weather mosaics than the first run did).
       if (cur && r.counts.imaged < cur.counts.imaged) return
-      await prewarmModel(r)
+      // Swapped in place like any background patch: its model built, and a clear cover (now that the archives
+      // answered) decoded first, so it never lands as an empty frame.
+      await Promise.all([prewarmModel(r), r.clearCover ? raceTimeout(preloadCover(r), COVER_RACE_MS) : undefined])
       if (inflight !== ctrl) return
+      const st = useApp.getState()
       st.setReport(r)
       if (st.selectedPassId && !r.passes.some((p) => p.id === st.selectedPassId)) st.selectPass(undefined)
     } catch {

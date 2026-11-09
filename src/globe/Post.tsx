@@ -11,7 +11,8 @@
  * shaders anyway); phones run a lighter bloom (3 mip levels from a half-resolution luminance pass).
  */
 import { useFrame, useThree } from '@react-three/fiber'
-import { BlendFunction, BloomEffect, EffectComposer, EffectPass, NoiseEffect, RenderPass, VignetteEffect } from 'postprocessing'
+import { BlendFunction, BloomEffect, EffectComposer, EffectPass, NoiseEffect, RenderPass, ShaderPass, VignetteEffect } from 'postprocessing'
+import { ShaderMaterial } from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import { HalfFloatType, Vector2 } from 'three'
 import { msaaFor } from './quality'
@@ -34,6 +35,36 @@ class ScaledBloomEffect extends BloomEffect {
 /** Render priority of the composer (any positive priority takes over R3F's own render). */
 export const POST_PRIORITY = 1
 
+/**
+ * Sanitise the scene colour before bloom: any NaN/Inf (or runaway HDR value) becomes a finite colour.
+ * Bloom's mip chain turns a single non-finite pixel into a flickering black square, and GPUs differ in what
+ * they return for undefined maths (Apple GPUs give NaN where others don't), so this is a hard backstop.
+ * Comparisons with NaN are false, so `!(x >= 0 && x <= MAX)` catches NaN, ±Inf and negatives.
+ */
+function sanitizePass(): ShaderPass {
+  const material = new ShaderMaterial({
+    name: 'SanitizeMaterial',
+    uniforms: { inputBuffer: { value: null } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = position.xy * 0.5 + 0.5;
+        gl_Position = vec4(position.xy, 1.0, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D inputBuffer;
+      varying vec2 vUv;
+      float fin(float x) { return (x >= 0.0 && x <= 64.0) ? x : (x > 64.0 && x < 1e30 ? 64.0 : 0.0); }
+      void main() {
+        vec4 c = texture2D(inputBuffer, vUv);
+        gl_FragColor = vec4(fin(c.r), fin(c.g), fin(c.b), (c.a >= 0.0 && c.a <= 1.0) ? c.a : 1.0);
+      }`,
+    depthTest: false,
+    depthWrite: false,
+  })
+  return new ShaderPass(material, 'inputBuffer')
+}
+
 /** Build the composer for this canvas and render it every frame. Returns it (for the shader warm-up). */
 export function usePost(): EffectComposer {
   const rt = useRuntime()
@@ -47,6 +78,7 @@ export function usePost(): EffectComposer {
   const composer = useMemo(() => {
     const c = new EffectComposer(gl, { multisampling: msaa, frameBufferType: HalfFloatType, stencilBuffer: false })
     c.addPass(new RenderPass(scene, camera))
+    c.addPass(sanitizePass())
     const bloom = new ScaledBloomEffect(mobile ? 0.5 : 1, {
       mipmapBlur: true,
       luminanceThreshold: 1.0,

@@ -105,7 +105,15 @@ export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
     <div ref={root} className={s.overlay} aria-hidden>
       {pass && <AcqReadout runtime={runtime} vp={vp} passId={pass.id} norad={pass.norad} imaged={!!cap} ready={catalogReady} />}
       {places.map(({ key, item, leaving }) => (
-        <PlaceLabel key={key} runtime={runtime} vp={vp} id={placeAnchorId(key)} lat={item.lat} lon={item.lon} leaving={leaving}   acq={acqLine}
+        <PlaceLabel
+          key={key}
+          runtime={runtime}
+          vp={vp}
+          id={placeAnchorId(key)}
+          lat={item.lat}
+          lon={item.lon}
+          leaving={leaving}
+          acq={acqLine}
           passId={pass?.id}
         />
       ))}
@@ -342,9 +350,11 @@ function SatLabel({
     let show = !!a?.visible && !leaving
     // Stacked: when the sheet covers most of the screen the callout would only crowd the sliver of globe left.
     if (stacked && ins.bottom > 0.7 * H) show = false
-    // The satellite itself must be on screen and not under a panel: a box nudged into the free columns with a
-    // leader running off-screen (or under the dock) reads as detached, mid-flight especially.
-    if (a && (a.x < ins.left - 2 || a.x > W - ins.right + 2 || a.y < 0 || a.y > H - ins.bottom + 2)) show = false
+    // The satellite itself must be on screen and not under a panel, the HUD band or the acquisition countdown: a box
+    // nudged into the free columns with a leader running off-screen (or under the dock, or into the readouts) reads as
+    // detached, mid-flight and as the acquisition's dive drops the spacecraft out of the top of the frame especially.
+    const topEdge = Math.max(ins.top, runtime.readoutBottom) + 4
+    if (a && (a.x < ins.left - 2 || a.x > W - ins.right + 2 || a.y < topEdge || a.y > H - ins.bottom + 2)) show = false
     let below = st.below
     if (a && show) {
       const x = Math.round(a.x)
@@ -451,6 +461,7 @@ function SatLabel({
  * changes), never through React state. While it shows, callouts keep below it.
  */
 const READOUT_HOLD_MS = 2600
+/** The readout's height before its first measurement (desktop type scale; phones measure taller). */
 const READOUT_H = 34
 
 function AcqReadout({
@@ -471,6 +482,18 @@ function AcqReadout({
   const el = useRef<HTMLDivElement>(null)
   const value = useRef<HTMLDivElement>(null)
   const last = useRef({ op: '', text: '', done: false, x: NaN, y: NaN })
+  // Its real height (the type scale differs on phones), measured off the frame loop: callouts and the chase's framing
+  // keep below its bottom edge.
+  const height = useRef(READOUT_H)
+  useEffect(() => {
+    const d = el.current
+    if (!d || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      height.current = d.offsetHeight || READOUT_H
+    })
+    ro.observe(d)
+    return () => ro.disconnect()
+  }, [])
   useEffect(
     () => () => {
       runtime.readoutBottom = 0
@@ -494,7 +517,7 @@ function AcqReadout({
     const ins = useApp.getState().uiInsets
     const { W, H } = sizeOf(vp)
     const stacked = isStacked(W, H)
-    runtime.readoutBottom = show ? ins.top + 8 + READOUT_H : 0
+    runtime.readoutBottom = show ? ins.top + 8 + height.current : 0
     if (!show) return
     const text = captured ? (imaged ? 'ACQUIRED' : 'CLOSEST APPROACH') : fmtCountdown(runtime.simTime, q.tc)
     if (text !== st.text) {

@@ -20,6 +20,9 @@ export const COMMON = glsl`
   #define TWO_PI 6.283185307179586
   float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
   float sat01(float x) { return clamp(x, 0.0, 1.0); }
+  // exp(−x²) without pow(): GLSL leaves pow() undefined for a negative base and Apple GPUs (Metal) return NaN,
+  // which the bloom mip chain spreads into flickering black squares. Never use pow(x, 2.0) on signed values.
+  float gauss(float x) { return exp(-x * x); }
 `
 
 /**
@@ -44,10 +47,10 @@ export const KEPLER_J2 = glsl`
     highp float argp = el1.x + el2.x * dt;
     // Kepler's equation E − e sin E = M, 4 Newton steps from E0 = M + e sin M.
     highp float E = M + e * sin(M);
-    for (int k = 0; k < 4; k++) E -= (E - e * sin(E) - M) / (1.0 - e * cos(E));
+    for (int k = 0; k < 4; k++) E -= (E - e * sin(E) - M) / max(1.0 - e * cos(E), 1e-3);
     // Perifocal position.
     highp float xp = a * (cos(E) - e);
-    highp float yp = a * sqrt(1.0 - e * e) * sin(E);
+    highp float yp = a * sqrt(max(1.0 - e * e, 0.0)) * sin(E);
     // Perifocal → inertial (TEME): R3(−Ω) · R1(−i) · R3(−ω).
     highp float cO = cos(raan);
     highp float sO = sin(raan);

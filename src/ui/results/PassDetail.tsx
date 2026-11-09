@@ -171,7 +171,7 @@ function Links({ capture, pass, meta, placeLabel }: { capture: Capture; pass: Pa
       const ext = blob.type.includes('png') ? 'png' : 'jpg'
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `overflight-${slug(meta.name)}-${slug(placeLabel)}-${new Date(pass.tClosest).toISOString().slice(0, 10)}.${ext}`
+      a.download = `watched-${slug(meta.name)}-${slug(placeLabel)}-${new Date(pass.tClosest).toISOString().slice(0, 10)}.${ext}`
       document.body.appendChild(a)
       a.click()
       a.remove()

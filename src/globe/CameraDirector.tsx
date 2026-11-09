@@ -24,8 +24,9 @@
  *  - pass, acquisition sequence (owner request C, acquisition.ts): while a fresh replay runs toward closest
  *    approach the target is the CHASE pose (framing.chasePose: oblique, north-up, halfway between the spacecraft
  *    and the place), recomputed every frame from the spacecraft's SGP4 position, and the camera follows it exactly
- *    once it has arrived. A replay started on the pass already in view flies to the chase first. At the capture the
- *    camera settles (a soft 1.4 s ease that does not hold the replay clock) into the resting view: for an imaged
+ *    once it has arrived; as the scan line closes on the place the chase DIVES onto it (acquisition.diveAt), so the
+ *    image paints large. A replay started on the pass already in view flies to the chase first. At the capture the
+ *    camera settles (a soft 1.2 s ease that does not hold the replay clock) into the resting view: for an imaged
  *    pass the near-top-down ACQUIRED view of the image painted onto the globe (framing.acquiredPose), otherwise the
  *    oblique pass view. Quiet selections (no replay) go straight to the resting view. A gesture ends the chase.
  *  - In idle / results the user can orbit and zoom (controls.ts); input interrupts a flight cleanly, and auto
@@ -65,7 +66,7 @@ import {
 } from './cameraMath'
 import { applyControls, attachControls, createControlInput, createControlState } from './controls'
 import { propagate } from './data'
-import type { AcqState } from './acquisition'
+import { diveAt, type AcqState } from './acquisition'
 import {
   acquiredPose,
   chasePose,
@@ -109,14 +110,16 @@ const BOOT_DOLLY_S = 2.4
 const RETARGET_MIN_S = 1.8
 /** A range folded into a flight eases over the rest of it, but never faster than this (ms). */
 const FOLD_MIN_MS = 300
-/** Acquisition: the chase keeps following this long after the capture, then settles over SETTLE_S. */
-const CAPTURE_HOLD_MS = 280
-const SETTLE_S = 1.4
+/** Acquisition: the chase keeps following this long after the capture, then settles over SETTLE_S (owner: ≈ 1.2 s). */
+const CAPTURE_HOLD_MS = 220
+const SETTLE_S = 1.2
 /**
  * A new pass whose resting view is (nearly) the one on screen (swiping between photos of the same place) is not a
  * flight: the camera re-frames softly over SAME_VIEW_S and reports arrival at once (no ring unlock, no clock hold).
+ * Each photo's view centres on its own image data (acquisition.imageFocus: up to ~20 km off the place), so two
+ * photos of one place can sit ~40 km apart: still the same view.
  */
-const SAME_VIEW = { rad: 0.004, logRange: 0.12, tilt: 0.05 }
+const SAME_VIEW = { rad: 0.008, logRange: 0.12, tilt: 0.05 }
 const SAME_VIEW_S = 0.6
 
 const INTERACTIVE: AppState['phase'][] = ['idle', 'locating', 'results', 'error']
@@ -173,6 +176,14 @@ function satNow(norad: number, ms: number) {
  * texture-resolution near limit.
  */
 const _sat = new Vector3()
+const _focus = { lat: 0, lon: 0 }
+/** The acquired view's centre (the painted image's data, acquisition.imageFocus), else the place. No allocation. */
+function focusOf(acq: AcqState, place: { lat: number; lon: number }) {
+  if (!acq.focusOk) return place
+  _focus.lat = acq.focusLat
+  _focus.lon = acq.focusLon
+  return _focus
+}
 
 function targetFor(
   intent: CameraIntent,
@@ -196,9 +207,12 @@ function targetFor(
       if (pass && place && acq.passId === pass.id) {
         if (chasing) {
           const sat = propagate(pass.norad, simTime)
-          if (sat) return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / EARTH_RADIUS_KM, _sat), place)
+          if (sat) {
+            const dive = diveAt(simTime, acq.tc, acq.speedKmS, acq.halfKm)
+            return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / EARTH_RADIUS_KM, _sat), place, dive, acq.halfKm, focusOf(acq, place))
+          }
         }
-        if (acq.imaged) return acquiredPose(vp, insets, place, acq.halfKm)
+        if (acq.imaged) return acquiredPose(vp, insets, focusOf(acq, place), acq.halfKm)
       }
       if (pass && place) return passPose(vp, insets, pass, place, floor)
       return place ? placePose(vp, insets, place.lat, place.lon, floor) : null
@@ -324,6 +338,7 @@ export function CameraDirector() {
       n: new Vector3(),
       axis: new Vector3(),
       free: { x0: 0, y0: 0, x1: 0, y1: 0 },
+      chaseInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       sub: new Vector3(),
       cam: { pos: new Vector3(), up: new Vector3(), target: new Vector3() },
     }),
@@ -341,7 +356,7 @@ export function CameraDirector() {
     const fov = fovFor(vp)
     const tanHalf = Math.tan((fov * DEG) / 2)
     const intent = store.camera
-    const insets = store.uiInsets
+    let insets = store.uiInsets
     // Near limit: the map actually on screen at the look-at point (the night map on the night side).
     const sub = intent.kind === 'place' ? dirFromLatLon(intent.lat, intent.lon, tmp.sub) : s.initialized ? s.target.d : null
     const lit = !sub || sub.dot(rt.sunDir) > 0.1
@@ -359,7 +374,16 @@ export function CameraDirector() {
     const chasing =
       acqPass && !rt.reducedMotion && !s.userTouched && (acq.armed || (s.chasing && now < acq.capturedAt + CAPTURE_HOLD_MS))
     const chaseEnded = s.chasing && !chasing
-
+    // The chase frames below the acquisition countdown (GlobeOverlay AcqReadout, under the HUD band), so the
+    // spacecraft never flies behind it (a phone's short globe band especially).
+    if (chasing && rt.readoutBottom > insets.top) {
+      const c = tmp.chaseInsets
+      c.top = rt.readoutBottom
+      c.right = insets.right
+      c.bottom = insets.bottom
+      c.left = insets.left
+      insets = c
+    }
 
     // ── target spec: recomputed only when an input changed (G13).
     const ik = insetsKeyOf(insets)

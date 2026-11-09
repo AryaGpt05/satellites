@@ -1,7 +1,8 @@
 /**
- * <AboutPage onClose/>: methodology, honesty and credits, as a full-height scrollable overlay in the
- * instrument language. A modal dialog: focus moves in and is trapped, Esc / the close control leave,
- * focus returns to where it was. The section index on the left tracks the reading position.
+ * <AboutPage onClose/>: "How this works": the short answers, the method, the limits, privacy and
+ * credits, as a full-height scrollable overlay in the instrument language. A modal dialog: focus moves
+ * in and is trapped, Esc / the close control leave, focus returns to where it was. The section index
+ * on the left tracks the reading position. The copy is the owner's (short, plain, no em dashes).
  *
  * Motion: an ink curtain. Opening, it drops from the top (360 ms ease-in-out) and the title wipes in
  * under it; closing, the text clears (120 ms) and the curtain lifts away downward (480 ms), on a
@@ -23,14 +24,18 @@ import { fmtStampZ } from '@/ui/hud/readouts'
 import s from './AboutPage.module.css'
 
 const SECTIONS = [
-  { id: 'isnt', index: '00', title: 'What it isn’t' },
-  { id: 'method', index: '01', title: 'How a pass is computed' },
-  { id: 'words', index: '02', title: 'What the words mean' },
+  { id: 'short', index: '00', title: 'The short version' },
+  { id: 'method', index: '01', title: 'How we find the passes' },
+  { id: 'words', index: '02', title: 'What the labels mean' },
   { id: 'accuracy', index: '03', title: 'What we can’t see' },
   { id: 'privacy', index: '04', title: 'Privacy' },
-  { id: 'credits', index: '05', title: 'Data and credits' },
-  { id: 'keys', index: '06', title: 'Keys' },
+  { id: 'credits', index: '05', title: 'Credits' },
+  { id: 'keys', index: '06', title: 'Keyboard' },
 ] as const
+
+/** The maker (credits and footer). */
+const MAKER_HANDLE = '@armaangupt0'
+const MAKER_URL = 'https://x.com/armaangupt0'
 
 type SectionId = (typeof SECTIONS)[number]['id']
 
@@ -151,7 +156,9 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
     // The last sections can't reach the reading band: at the end of the page, the last one is current
     // (also when the observer reports after the scroll event that got there, e.g. a jump to "Keys").
     const atEnd = () => root.scrollTop + root.clientHeight >= root.scrollHeight - 8
-    const last = SECTIONS[SECTIONS.length - 1].id
+    // (The last one shown: touch-only devices have no "Keyboard" section.)
+    const shown = [...root.querySelectorAll<HTMLElement>('section[id^="about-"]')].filter((el) => getComputedStyle(el).display !== 'none')
+    const last = (shown[shown.length - 1]?.id.replace('about-', '') ?? SECTIONS[SECTIONS.length - 1].id) as SectionId
     const io = new IntersectionObserver(
       (entries) => {
         if (atEnd()) return setCurrent(last)
@@ -235,7 +242,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
           <nav className={s.nav} aria-label="Sections">
             <ol>
               {SECTIONS.map((sec) => (
-                <li key={sec.id}>
+                <li key={sec.id} className={sec.id === 'keys' ? s.keyboardOnly : undefined}>
                   <button
                     type="button"
                     className={cx(s.navItem, current === sec.id && s.navCurrent)}
@@ -254,81 +261,84 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
             <header className={s.intro}>
               <h1 id="about-title" className={s.title}>
                 <Reveal as="span" className={s.titleLine} delay={300}>
-                  What this is,
+                  How this
                 </Reveal>
                 <Reveal as="span" className={s.titleLine} delay={360}>
-                  and what it <em className={s.serif}>isn’t</em>.
+                  <em className={s.serif}>works</em>.
                 </Reveal>
               </h1>
               <Reveal as="p" className={s.lede} delay={500} duration={720}>
-                Overflight replays the last seven days of orbits over a single point on Earth, then asks the public archives for
-                the pictures. Every number is computed from public data, in your browser. Anything uncertain is labelled as such.
+                Pick a spot on Earth. We work out which satellites flew over it in the last week, then go find the photos they
+                took. It all runs in your browser, on public data.
               </Reveal>
             </header>
 
-            <Section id="isnt" index="00" title="What it isn’t">
+            <Section id="short" index="00" title="The short version">
               <Facts
                 rows={[
-                  ['Live', 'No. Archives publish scenes hours to days after the pass. The newest passes may not have pictures yet.'],
-                  ['A camera on you', 'No. At 10 m per pixel a car is at most one pixel, and a person is invisible. Nothing here can identify anyone.'],
                   [
-                    'Everything',
-                    'No. Military and intelligence satellites are largely absent from public catalogs, and commercial operators don’t publish where they pointed.',
+                    'Is it live?',
+                    'Not quite. Photos land in the archives a few hours to a couple of days after they’re taken, so the newest passes might not have one yet.',
+                  ],
+                  ['Can it see me?', 'No. At best a pixel here is 10 m across. A car is one pixel. You’re not in it.'],
+                  [
+                    'Is this every satellite?',
+                    'No. Military and spy satellites mostly aren’t in public catalogs, and companies don’t say where they point their cameras.',
                   ],
                 ]}
               />
             </Section>
 
-            <Section id="method" index="01" title="How a pass is computed">
+            <Section id="method" index="01" title="How we find the passes">
               <p>
-                We start from the public catalog of orbital elements that{' '}
+                Every object in orbit has a public set of numbers that describes its path.{' '}
                 <a href="https://celestrak.org/NORAD/elements/" target="_blank" rel="noreferrer">
                   CelesTrak
                 </a>{' '}
-                publishes from US Space Force tracking: General Perturbations (GP) mean elements for every active object.
-                We refresh our copy every six hours.{' '}
+                publishes them from US Space Force tracking, and we grab a fresh copy every six hours.
                 {catalog.state === 'ready' ? (
                   <>
-                    The one this page loaded holds <span className={s.num}>{fmtInt(catalog.count)}</span> objects, fetched{' '}
+                    {' '}
+                    This page loaded <span className={s.num}>{fmtInt(catalog.count)}</span> objects, fetched{' '}
                     <span className={s.num}>{fmtStampZ(catalog.fetchedAt)}</span>.
                   </>
                 ) : null}
               </p>
               <p>
-                For each satellite, the SGP4 propagator — the model those elements are fitted for — gives its position across the
-                past week. We look for the moments the place fell inside what the satellite could see:
+                We run each satellite through SGP4, the standard orbit model, for the past seven days and note every time your spot
+                was inside what it could see.
               </p>
               <Facts
                 rows={[
-                  ['Fixed swath', 'Pushbroom imagers see a fixed strip beneath them: about 290 km for Sentinel-2, 185 km for Landsat 8 and 9. The place has to fall inside it.'],
-                  ['Field of regard', 'Agile commercial imagers can tilt, typically 30–45° off nadir. The place has to be within reach of that tilt.'],
                   [
-                    'Daylight',
-                    'Optical cameras need the sun: a pass in darkness never counts as a photograph. Weather imagers also see heat at night; those passes count as likely.',
+                    'Straight down',
+                    'Sentinel-2 and Landsat look straight down at a strip of ground, about 290 km wide for Sentinel-2 and 185 km for Landsat. You have to be in the strip.',
                   ],
-                  ['Geostationary', 'Weather satellites parked over the equator image the whole disk every 10 minutes or so. If the place is on their disk, it is in every frame.'],
+                  ['Tilting cameras', 'Lots of commercial satellites can lean 30 to 45 degrees. If you were in reach, we call it “could have pointed here”.'],
+                  ['Daylight', 'Regular cameras need the sun. A pass in the dark never counts as a photo.'],
+                  [
+                    'Weather satellites',
+                    'A few sit over the equator and photograph half the planet every 10 minutes. If you’re on their side of Earth, you’re in every frame.',
+                  ],
                 ]}
               />
               <p>
-                Finally we search the archives — Microsoft Planetary Computer for Sentinel-2 and Landsat (with Element 84 Earth
-                Search as a second source for Sentinel-2), NASA GIBS for weather imagery — and match real scenes to passes by
-                platform and time. When we show a
-                picture, it is that scene, cropped around the place.
+                Then we search the image archives (Microsoft Planetary Computer, Element 84 and NASA) and match each photo to the
+                pass that took it. Every photo you see is the real one, cropped around your spot.
               </p>
             </Section>
 
-            <Section id="words" index="02" title="What the words mean">
+            <Section id="words" index="02" title="What the labels mean">
               <Terms />
             </Section>
 
             <Section id="accuracy" index="03" title="What we can’t see">
               <Facts
                 rows={[
-                  ['Element sets', 'Public elements are good to roughly a kilometre near their epoch and drift by a few kilometres a day after it. Pass times can be off by seconds, ground tracks by a few kilometres.'],
-                  ['Classified', 'Military and intelligence satellites are largely absent from public catalogs, and none publish what they image. Some of the most capable cameras in orbit are invisible here.'],
-                  ['Cloud', 'An image that exists may show only cloud. Where the archive allows, we read the cloud mask at the exact pixel over the place and say so.'],
-                  ['Latency', 'Scenes reach the archives hours to days after capture, so the most recent passes may not have pictures yet.'],
-                  ['Published figures', 'Swath widths and pointing limits are published specifications, not live tasking.'],
+                  ['Exact positions', 'Public orbit data is good to about a kilometre and drifts a little each day. Times can be off by a few seconds.'],
+                  ['Secret satellites', 'Some of the best cameras in orbit belong to militaries. They don’t show up here.'],
+                  ['Clouds', 'Plenty of photos are just cloud. When the archive tells us, we check the exact pixel over your spot and say so.'],
+                  ['Delays', 'Photos can take a day or two to show up.'],
                 ]}
               />
             </Section>
@@ -336,38 +346,46 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
             <Section id="privacy" index="04" title="Privacy">
               <Facts
                 rows={[
-                  ['Computation', 'Orbits and passes are computed in your browser.'],
+                  ['Where it runs', 'The orbit maths happens in your browser.'],
+                  ['What we keep', 'To count searches we save a rough 10 km area and the nearest town. Never your exact spot.'],
+                  ['Who else sees it', 'Searches go to Photon (by komoot) to look up the place name. Photos load straight from the archives.'],
                   [
-                    'What we store',
-                    'To count how many places have been checked, each search stores a coarse grid cell about 10 km across, with its country and the nearest town’s name. Never your exact location.',
-                  ],
-                  ['Who else sees it', 'Place searches, and your position if you choose “Use my location”, go to the Photon geocoder (komoot) to find a name. Image requests go straight from your browser to the archives and include the area being shown.'],
-                  [
-                    'Shares',
-                    'Only when you make one. A share link is public to anyone who has it: it holds the place name, its position rounded to about 1 km, and the pass you chose.',
+                    'Share links',
+                    'Only made when you share something. Anyone with the link sees the place name, a spot rounded to about 1 km, and the pass you picked.',
                   ],
                 ]}
               />
             </Section>
 
-            <Section id="credits" index="05" title="Data and credits">
+            <Section id="credits" index="05" title="Credits">
               <ul className={s.credits}>
-                <Credit who="Copernicus Sentinel-2">Contains modified Copernicus Sentinel data {years}, processed by ESA. Served by Microsoft Planetary Computer and Element 84 Earth Search.</Credit>
+                <Credit who="Made by">
+                  Armaan,{' '}
+                  <a href={MAKER_URL} target="_blank" rel="noreferrer">
+                    {MAKER_HANDLE}
+                  </a>{' '}
+                  on X
+                </Credit>
+                <Credit who="Sentinel-2">Contains modified Copernicus Sentinel data {years}, processed by ESA.</Credit>
                 <Credit who="Landsat 8 / 9">Landsat imagery courtesy of the U.S. Geological Survey and NASA.</Credit>
-                <Credit who="NASA GIBS / EOSDIS">VIIRS and MODIS imagery from NASA’s Global Imagery Browse Services, part of EOSDIS. GOES GeoColor via NOAA and CIRA; Himawari imagery via JMA.</Credit>
-                <Credit who="Orbital data">General Perturbations element sets from CelesTrak. Propagation with satellite.js (SGP4).</Credit>
-                <Credit who="Geocoding">Photon by komoot. Map data © OpenStreetMap contributors, available under the ODbL.</Credit>
-                <Credit who="Earth textures">Day, night and cloud maps by Solar System Scope (CC BY 4.0), based on NASA Blue Marble and Black Marble imagery.</Credit>
-                <Credit who="Type">Instrument Sans and Instrument Serif by Instrument; Martian Mono by Evil Martians. SIL Open Font License.</Credit>
+                <Credit who="NASA GIBS">Imagery from NASA’s GIBS, part of EOSDIS. GOES via NOAA and CIRA, Himawari via JMA.</Credit>
+                <Credit who="Archives">Microsoft Planetary Computer and Element 84 Earth Search.</Credit>
+                <Credit who="Orbits">Element sets from CelesTrak. SGP4 by satellite.js.</Credit>
+                <Credit who="Place names">Photon by komoot. Map data © OpenStreetMap contributors (ODbL).</Credit>
+                <Credit who="Earth textures">Solar System Scope (CC BY 4.0), from NASA Blue Marble and Black Marble.</Credit>
+                <Credit who="Type">Instrument Sans and Serif by Instrument, Martian Mono by Evil Martians (SIL OFL).</Credit>
               </ul>
             </Section>
 
-            <Section id="keys" index="06" title="Keys">
+            <Section id="keys" index="06" title="Keyboard" className={s.keyboardOnly}>
               <dl className={s.keys}>
                 <Key k={['/']}>Search for a place</Key>
                 <Key k={['↑', '↓']}>Move through suggestions</Key>
                 <Key k={['Enter']}>Choose</Key>
                 <Key k={['←', '→']}>Step through passes</Key>
+                <Key k={['←', '→']}>Previous / next photo</Key>
+                <Key k={['F']}>Expand the photo</Key>
+                <Key k={['+', '−']}>Zoom (when expanded)</Key>
                 <Key k={['Space']}>Play or pause the replay</Key>
                 <Key k={['Esc']}>Back, or close</Key>
                 <Key k={['?']}>This page</Key>
@@ -378,7 +396,16 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
               <span>
                 Overflight <span className={s.ver}>{VERSION}</span>
               </span>
-              <span className={s.dim}>Built on public data. Nothing here is a picture we took.</span>
+              <span className={s.byline}>
+                <span className={s.bySep} aria-hidden>
+                  ·
+                </span>
+                Built by{' '}
+                <a href={MAKER_URL} target="_blank" rel="noreferrer">
+                  {MAKER_HANDLE}
+                </a>
+              </span>
+              <span className={s.dim}>Made from public data. We didn’t take any of these photos.</span>
             </footer>
           </article>
         </div>
@@ -388,9 +415,9 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
   )
 }
 
-function Section({ id, index, title, children }: { id: SectionId; index: string; title: string; children: ReactNode }) {
+function Section({ id, index, title, className, children }: { id: SectionId; index: string; title: string; className?: string; children: ReactNode }) {
   return (
-    <section id={`about-${id}`} className={s.section} aria-labelledby={`about-${id}-h`}>
+    <section id={`about-${id}`} className={cx(s.section, className)} aria-labelledby={`about-${id}-h`}>
       <div className={s.secRule} aria-hidden>
         <span className={s.secIdx}>{index}</span>
       </div>
@@ -402,7 +429,7 @@ function Section({ id, index, title, children }: { id: SectionId; index: string;
   )
 }
 
-function Facts({ rows }: { rows: [string, string][] }) {
+function Facts({ rows }: { rows: [string, ReactNode][] }) {
   return (
     <dl className={s.facts}>
       {rows.map(([k, v]) => (
@@ -420,9 +447,9 @@ function Facts({ rows }: { rows: [string, string][] }) {
  * from the product's one vocabulary table (DESIGN §7), so About always says what the results say.
  */
 const VERDICT_MORE: Record<Verdict, string> = {
-  imaged: 'When we show it, you are looking at that scene.',
-  likely: 'Not yet, or not kept because of cloud.',
-  could: 'We can’t know whether it did, and we don’t pretend to.',
+  imaged: 'If we show it, it’s the actual photo.',
+  likely: 'The photo isn’t public yet, or it got tossed because of clouds.',
+  could: 'There’s no way to know if it actually did.',
   overhead: '',
 }
 

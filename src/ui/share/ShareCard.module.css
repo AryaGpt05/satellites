@@ -49,6 +49,15 @@
   opacity: 1;
   transition: opacity var(--d-md) var(--ease-out);
 }
+/* The geometry stand-in's chips (plate coordinates). They leave in the small step as the picture fades in. */
+.labels {
+  position: absolute;
+  inset: 0;
+}
+.labelsOut {
+  opacity: 0;
+  transition: opacity var(--d-sm) var(--ease-out);
+}
 /* The card's own crop, filling the plate. */
 .img {
   position: absolute;

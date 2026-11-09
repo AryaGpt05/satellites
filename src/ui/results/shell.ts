@@ -15,6 +15,14 @@ import { DUR, EASE } from '@/lib/ease'
 import { useApp } from '@/state/store'
 import { prefersReducedMotion } from '@/ui/system'
 
+/**
+ * Laptops up to 860 px tall (1280×800): the summary drops its own notch and the pass header sets the name and the
+ * time on one line, so the counts, 02 / PASSES and the pass photo fit the first screen (R2R1). Copied in the CSS.
+ */
+export const SHORT_DESK_QUERY = '(min-width: 761px) and (orientation: landscape) and (max-height: 860px), (min-width: 1101px) and (max-height: 860px)'
+/** Laptops up to 880 px tall (1280×800, 1536×864): the pass header's name and time share one line, so the photo reaches the column's width at 864 px. */
+export const ONE_LINE_TITLE_QUERY = '(min-width: 761px) and (orientation: landscape) and (max-height: 880px), (min-width: 1101px) and (max-height: 880px)'
+
 // ── staged swap ──────────────────────────────────────────────────────────────────────────
 
 export const SWAP_OUT_MS = 160
@@ -57,8 +65,11 @@ export function useStagedKey(target: string): Staged {
  * `outer` glides to the natural height of `inner` whenever it changes (240 ms ease-in-out), then
  * releases to auto. Measured, not guessed: the inner box is never height-constrained.
  */
-export function useAnimatedHeight(outer: RefObject<HTMLElement | null>, inner: RefObject<HTMLElement | null>, enabled = true) {
+export function useAnimatedHeight(outer: RefObject<HTMLElement | null>, inner: RefObject<HTMLElement | null>, enabled = true, swapKey?: string) {
   const last = useRef<number | null>(null)
+  const keyRef = useRef(swapKey)
+  keyRef.current = swapKey
+  const measuredKey = useRef(swapKey)
   useLayoutEffect(() => {
     const o = outer.current
     const i = inner.current
@@ -68,7 +79,13 @@ export function useAnimatedHeight(outer: RefObject<HTMLElement | null>, inner: R
       const h = i.offsetHeight
       const from = last.current
       last.current = h
-      if (!enabled || from === null || Math.abs(from - h) < 2 || prefersReducedMotion()) return
+      // New content swapped in (`swapKey` changed: the old content has faded out and the new one fades in from 0):
+      // take the new height at once, while nothing under it is visible. A glide here would move the freshly mounted
+      // content below every frame for 240 ms (layout shift, A1/A3); only in-place changes glide.
+      const swapped = measuredKey.current !== keyRef.current
+      measuredKey.current = keyRef.current
+      if (swapped) anim?.cancel()
+      if (!enabled || from === null || swapped || Math.abs(from - h) < 2 || prefersReducedMotion()) return
       anim?.cancel()
       anim = o.animate([{ height: `${from}px` }, { height: `${h}px` }], { duration: DUR.sm, easing: EASE.inOut })
       o.style.overflow = 'hidden'

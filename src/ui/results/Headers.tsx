@@ -21,13 +21,14 @@ import { timeZoneAt } from '@/imagery'
 import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { SearchBox } from '@/ui/landing/SearchBox'
-import { Glyph, Kbd, LiveDot, ScrambleOnce, cx, fmtLat, fmtLon } from '@/ui/system'
+import { Glyph, Kbd, LiveDot, ScrambleOnce, cx, fmtLat, fmtLon, useMediaQuery } from '@/ui/system'
 import { secs } from './ComputingBody'
 import { Mark } from './Mark'
 import { useOnce } from './once'
 import { ReplayStrip } from './ReplayControls'
 import { Headline, MoreLine } from './Summary'
 import { clearPass } from './actions'
+import { ONE_LINE_TITLE_QUERY } from './shell'
 import { glyphForPass, markColorVar } from './lib/meta'
 import { stepPass } from './lib/timeline'
 import { fmtDayMonth, zoneLabel } from './lib/time'
@@ -235,6 +236,8 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
     if (next && next.id !== pass.id) onSelect(next)
   }
   const t = model.times(pass)
+  // Phones and short laptops: the name and the time on one line (R2R1: the pass photo gets the height).
+  const oneLine = useMediaQuery(ONE_LINE_TITLE_QUERY) || mobile
   // The strip shows once the camera has arrived and the scene is replaying or held (MOB-16).
   // Once shown in this header, it stays while the scene is in replay time: a quiet selection's short camera
   // move never blinks it off and on (A1).
@@ -286,7 +289,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
           </button>
         </span>
       </div>
-      {mobile ? (
+      {oneLine ? (
         // Phones: name and time on one line, so the flight snap stays low (≤ 25 % of the screen).
         <div key={titleKey} className={cx(s.passTitle, s.passTitleCompact, titleCls)}>
           <Mark name={glyphForPass(pass.verdict, meta.category)} size={14} color={markColorVar(pass.verdict, meta.category)} />

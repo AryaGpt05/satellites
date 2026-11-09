@@ -50,6 +50,12 @@ const CURTAIN_COLS = 32
 const CURTAIN_LIFT = 1.0006
 /** After the capture of an imaged pass the curtain bows out: the developed image speaks. */
 const CURTAIN_AFTER_CAPTURE_MS = 900
+/**
+ * With the camera below the spacecraft (the dive, the settled close view) the curtain is a wall of light standing on
+ * the scan line. It fades out as it nears the camera along-track (between these distances, km), so it never sweeps
+ * through the lens.
+ */
+const WALL_FADE_KM = { near: 70, far: 190 }
 /** The ribbon covers this much ground track either side of the place. */
 export const RIBBON_CLIP_KM = 700
 const FADE_IN_MS = 500
@@ -260,6 +266,7 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   const twoPts = useMemo(() => [new Vector3(), new Vector3()], [])
   const tmp = useMemo(() => ({ x: new Vector3(), y: new Vector3(), z: new Vector3(), m: new Matrix4(), g: new Vector3(), right: new Vector3(), q: new Vector3() }), [])
   const live = useRef(0)
+  const wall = useRef(0)
 
   useFrame((state, dtRaw) => {
     const dt = Math.min(dtRaw, 0.1)
@@ -301,13 +308,28 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
     const acq = rt.acq
     const isAcq = acq.passId === pass.id
 
-    // ── the sequence is LIVE while the replay runs (or a live sequence is armed). For an imaged pass the curtain bows
-    // out shortly after the capture; and never while the camera sits below the spacecraft (the settled close view).
+    // ── the sequence is LIVE while the replay runs (or a live sequence is armed). For an imaged pass the curtain and
+    // the scan line's glow bow out shortly after the capture: the developed image speaks.
     let liveWant = active && (st.timeMode === 'replay' || (isAcq && acq.armed)) ? 1 : 0
     if (isAcq && acq.imaged && acq.capturedAt > acq.armedAt && perfNow - acq.capturedAt > CURTAIN_AFTER_CAPTURE_MS) liveWant = 0
-    if (s.ok && rt.camera.altitudeKm < s.altKm * 1.15) liveWant = 0
-    live.current += (liveWant - live.current) * damp(dt, rt.reducedMotion ? 0.05 : 0.16)
-    const L = live.current * f
+    const tau = rt.reducedMotion ? 0.05 : 0.16
+    live.current += (liveWant - live.current) * damp(dt, tau)
+    // Below the spacecraft the curtain is a wall on the scan line: it leaves before it could reach the camera.
+    let wallWant = 1
+    if (s.ok && rt.camera.altitudeKm < s.altKm * 1.15) {
+      const cam = state.camera.position
+      const cl = cam.length()
+      const sl = s.pos.length()
+      const t0 = acq.t0
+      const sepKm =
+        isAcq && cl > 0 && sl > 0
+          ? Math.abs(Math.asin(Math.max(-1, Math.min(1, s.pos.dot(t0) / sl))) - Math.asin(Math.max(-1, Math.min(1, cam.dot(t0) / cl)))) * EARTH_RADIUS_KM
+          : 0
+      const x = Math.max(0, Math.min(1, (sepKm - WALL_FADE_KM.near) / (WALL_FADE_KM.far - WALL_FADE_KM.near)))
+      wallWant = x * x * (3 - 2 * x)
+    }
+    wall.current += (wallWant - wall.current) * damp(dt, tau)
+    const L = live.current * wall.current * f
     u.uRate.value = isAcq ? acq.rate : st.timeMode === 'replay' ? st.replayRate : 0
     u.uLive.value = live.current
 

@@ -36,7 +36,7 @@ import { detectTier } from './quality'
 import { FRAME, RuntimeContext, useRuntime, type GlobeRuntime } from './runtime'
 import { SatelliteField } from './SatelliteField'
 import { Stars } from './Stars'
-import { useEarthTextures } from './textures'
+import { REPLAY_QUIET_MS, useEarthTextures } from './textures'
 
 export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
   const gl = useThree((s) => s.gl)
@@ -302,6 +302,8 @@ const INCLINE_MS = 3000 // ≥ 58 fps for 3 s before going up
 const INCLINE_FPS = 58
 /** Direction reversals allowed before the DPR freezes (settles instead of oscillating). */
 const FLIPFLOPS = 2
+/** No DPR change this long after an acquisition's capture (its settle and the image's last strokes). */
+const ACQ_QUIET_MS = 2500
 
 /**
  * DPR policy (PERF-08). Phones start at 1.5 (floor 1.0) and only reach 2.0 after ≥ 58 fps for 3 s; desktops
@@ -380,11 +382,14 @@ function AdaptiveDpr() {
         }
       }
     }
-    // Apply a queued change only while nothing choreographed is moving.
+    // Apply a queued change only while nothing choreographed is moving (the acquisition sequence included: its chase
+    // and settle are not flights, and a reallocation there would hitch the signature moment).
     if (c.want >= 0 && c.want !== c.index) {
       const st = useApp.getState()
+      const sequence =
+        rt.acq.armed || now - rt.acq.capturedAt < ACQ_QUIET_MS || (st.timeMode === 'replay' && now - rt.replayStartedAt < REPLAY_QUIET_MS)
       const quiet =
-        !rt.camera.flying && now - rt.camera.arrivedAt > 1000 && now - rt.phaseEnteredAt > 2000 && now > st.motionBusyUntil
+        !sequence && !rt.camera.flying && now - rt.camera.arrivedAt > 1000 && now - rt.phaseEnteredAt > 2000 && now > st.motionBusyUntil
       if (quiet) {
         const dir = Math.sign(c.want - c.index)
         if (c.lastDir !== 0 && dir !== c.lastDir) c.flips++

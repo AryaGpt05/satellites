@@ -11,7 +11,8 @@
  * Every image is fetched and decoded off the critical path (preloadImage: one request per URL for the session, then
  * createImageBitmap), and uploaded at a chosen frame: prefetches and the context patch only through the texture
  * upload gate (textures.ts canUpload: nothing choreographed moving); the selected pass's image as soon as no camera
- * flight is past its first few percent (it must be on the GPU before its scan line arrives). Patches fade in and out
+ * flight is past its first few percent and no UI entrance runs (store.motionBusyUntil), or at once while the replay
+ * stands still waiting for it on arrival (it must be on the GPU before its scan line arrives). Patches fade in and out
  * (never pop); a pass switch fades the old image out before the new one comes in. Uploaded images stay cached (a few),
  * so swiping back and forth never re-fetches or re-uploads.
  */
@@ -247,8 +248,10 @@ export function Imagery() {
     if (pass && acq.imaged && acq.passId === pass.id && state.passEntry) {
       want = state.passEntry
       want.usedAt = now
-      // The selected image uploads as soon as no flight is mid-way: its scan line may be seconds away.
-      if (want.state === 'decoded' && !midFlight) store.upload(want)
+      // The selected image uploads as soon as no flight is mid-way and no UI entrance is running (its scan line may
+      // be seconds away), or at once when the replay stands still waiting for it (Clock: the decal hold on arrival).
+      const waiting = acq.armed && !rt.camera.flying
+      if (want.state === 'decoded' && !midFlight && (waiting || now > st.motionBusyUntil)) store.upload(want)
     }
     // Prefetch the hero's capture once results have settled (network + decode now, upload when quiet).
     if (settledResults && report) {

@@ -24,6 +24,7 @@ import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
 import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion } from '@/ui/system'
+import { SETTLE_MAX_MS, settleMs } from '@/ui/system/sheetMath'
 import { GeoLook } from './BestLook'
 import { ComputingBody } from './ComputingBody'
 import { Gallery, galleryCtl } from './Gallery'
@@ -43,7 +44,7 @@ import { stepPass } from './lib/timeline'
 import { useResultsModel, type ResultsModel } from './model'
 import type { CameraFlight } from '@/state/store'
 import { useOnce } from './once'
-import { exitTimeline, lastShellUnmount, publishSheetInset, rememberComputingSnap, lastComputingSnapPx, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
+import { SHORT_DESK_QUERY, exitTimeline, lastShellUnmount, publishSheetInset, rememberComputingSnap, lastComputingSnapPx, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
 import s from './results.module.css'
 
 export interface ResultsViewProps {
@@ -55,11 +56,14 @@ export interface ResultsViewProps {
   onSearch?: (place: Place) => void
 }
 
+/** R2R3: the phone sheet's settle into the image step ends this long after the camera lands. */
+const RAISE_AFTER_ARRIVAL_MS = 100
 /** Phone snaps that are fractions of the viewport (the measured ones are px). */
 const MID = 0.62
 const TOP = 0.92
 /** Desktop dock height the computing panel starts from when the panel is remounted at results. */
 let lastComputingH = 0
+
 
 export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const phase = useApp((st) => st.phase)
@@ -70,6 +74,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const selectedId = useApp((st) => st.selectedPassId)
   const mobile = useIsMobile()
   const shortLandscape = useMediaQuery(SHORT_LANDSCAPE_QUERY) && !mobile
+  const shortDesk = useMediaQuery(SHORT_DESK_QUERY) && !mobile && !shortLandscape
   const reduced = useReducedMotion()
   const computing = phase !== 'results' || !report
   const liveModel = useResultsModel(computing ? undefined : report)
@@ -204,6 +209,9 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const geo = useSheetGeometry(bodyRef, innerRef, mobile, shownKey, [shownKey, full])
   if (geo && geo.key === 'computing') rememberComputingSnap(Math.min(window.innerHeight * 0.8, geo.top + geo.pad + geo.content + 18))
   const vh = typeof window === 'undefined' ? 800 : window.innerHeight
+  // The snaps (and index) the sheet was last given: a view whose content is not measured yet holds the sheet there.
+  const lastShown = useRef<{ snaps: number[]; index: number } | null>(null)
+  let heldIndex: number | undefined
   const snaps = (() => {
     if (shownKey === 'computing') {
       // R2R8: the computing snap is measured from the readout; while the outgoing overview is still mounted,
@@ -212,6 +220,14 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       return [c, TOP]
     }
     if (!geo) return [0.42, MID, TOP]
+    // The content changed (a pass opened, back to the overview, results landed) but its geometry is the previous
+    // view's for a frame: hold the sheet where it is (the same snap list, so the same sheet height, and the same
+    // index), so it glides once, to the measured target, never first toward a stale one (A1: one move per element
+    // per action).
+    if (geo.key !== shownKey && lastShown.current) {
+      heldIndex = lastShown.current.index
+      return lastShown.current.snaps
+    }
     const pad = geo.pad
     if (shownKey === 'overview') {
       const peek = geo.peekEnd !== undefined ? geo.top + pad + geo.peekEnd + 12 : vh * 0.36
@@ -226,20 +242,29 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     return [flight, image, TOP]
   })()
 
-  // Phase / view changes pick the snap.
+  const sheetSnap = heldIndex ?? snap
+  lastShown.current = { snaps, index: Math.min(sheetSnap, snaps.length - 1) }
+  const snapsPx = useRef<number[]>([])
+  snapsPx.current = snaps.map((v) => (v <= 1 ? v * vh : v))
+
+  // Phase / view changes pick the snap. A new search drops to the computing snap at once (R2R8: one glide down);
+  // the overview's snap applies when the overview is the content shown, so Back never first drops the sheet to the
+  // outgoing pass's lowest snap.
   useEffect(() => {
-    if (!mobile) return
-    if (viewKey === 'computing') setSnap(0)
-    else if (viewKey === 'overview') setSnap(overviewSnap.current)
+    if (mobile && viewKey === 'computing') setSnap(0)
   }, [viewKey, mobile])
+  useEffect(() => {
+    if (mobile && shownKey === 'overview') setSnap(overviewSnap.current)
+  }, [shownKey, mobile])
   // A new place opens on the peek again.
   useEffect(() => {
     overviewSnap.current = 0
   }, [placeKey])
 
   // A pass on phones: flight first (sheet low, the camera and swath visible), then the image. The sheet's
-  // settle is timed to END as the camera lands (R2R3): it starts 650 ms before the flight's eta. A quiet
-  // selection (a gallery swipe) never moves the sheet.
+  // settle is timed to END as the camera lands (R2R3: 0 to +250 ms after arrival): it starts one settle duration
+  // (the Sheet's own, from the flight → image distance) before the flight's eta, plus 100 ms. A quiet selection
+  // (a gallery swipe) never moves the sheet.
   useEffect(() => {
     if (!mobile || !selectedId) return
     if (quiet.id === selectedId) return
@@ -267,7 +292,13 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       if (f.id === lastId) return
       lastId = f.id
       window.clearTimeout(lead)
-      lead = window.setTimeout(raise, Math.max(0, f.eta - 650 - performance.now()))
+      // Wake a little before the longest settle could need to start, then start exactly one settle before the eta
+      // (the snaps are measured by then: the pass content mounted while the camera flew).
+      lead = window.setTimeout(() => {
+        const [lo, hi] = snapsPx.current
+        const d = lo !== undefined && hi !== undefined ? settleMs(hi - lo) : SETTLE_MAX_MS
+        lead = window.setTimeout(raise, Math.max(0, f.eta + RAISE_AFTER_ARRIVAL_MS - d - performance.now()))
+      }, Math.max(0, f.eta - SETTLE_MAX_MS - 150 - performance.now()))
     }
     if (start.flying) schedule(start)
     const unsub = useApp.subscribe((st) => {
@@ -476,7 +507,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       <Sheet
         label={place ? `Satellites over ${place.label}` : 'Computing passes'}
         header={
-          <GlideHeight enabled={mobile}>
+          <GlideHeight enabled={mobile} swapKey={headerKeyOf(staged.shown)}>
             <div key={headerKeyOf(staged.shown)} className={headSwapClass} style={dirStyle}>
               {header}
             </div>
@@ -484,7 +515,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         }
         footer={footer}
         snaps={snaps}
-        snap={snap}
+        snap={sheetSnap}
         onSnapChange={onSnapChange}
         onVisibleChange={mobile ? publishSheetInset : undefined}
         className={cx(
@@ -510,6 +541,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
               model={lastModel.current}
               mobile={mobile}
               compactTimeline={mobile || shortLandscape}
+              noSummaryRule={shortDesk}
               full={full}
               enterKey={enterKey}
               selectedId={selectedId}
@@ -526,7 +558,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
 
       {!mobile && !shortLandscape && model && dockFull ? (
         <TimelineDock dockRef={timelineRef} className={cx(s.vars, s.timelineDock, dockEnter && s.dockEnter)}>
-          <Timeline model={model} selectedId={selectedId} onSelect={select} />
+          <Timeline model={model} selectedId={selectedId} onSelect={select} index={shortDesk ? '03' : '04'} />
         </TimelineDock>
       ) : null}
 
@@ -556,11 +588,11 @@ function TimelineDock({ dockRef, className, children }: { dockRef: React.RefObje
   )
 }
 
-/** Phones: the sheet header glides to its new height when its content changes (R14). */
-function GlideHeight({ enabled, children }: { enabled: boolean; children: React.ReactNode }) {
+/** Phones: the sheet header glides to its new height when its content changes in place (R14); a swap takes it at once. */
+function GlideHeight({ enabled, swapKey, children }: { enabled: boolean; swapKey: string; children: React.ReactNode }) {
   const outer = useRef<HTMLDivElement>(null)
   const inner = useRef<HTMLDivElement>(null)
-  useAnimatedHeight(outer, inner, enabled)
+  useAnimatedHeight(outer, inner, enabled, swapKey)
   return (
     <div ref={outer} data-anim-outer>
       <div ref={inner} data-anim-inner>
@@ -576,6 +608,8 @@ interface OverviewProps {
   model: ResultsModel
   mobile: boolean
   compactTimeline: boolean
+  /** Short laptops: no 01 / SUMMARY notch (the passes are 01, as on phones) */
+  noSummaryRule?: boolean
   full: boolean
   enterKey: string
   selectedId?: string
@@ -587,11 +621,11 @@ interface OverviewProps {
   onCloseInvite: () => void
 }
 
-function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
+function Overview({ model, mobile, compactTimeline, noSummaryRule = false, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
   const { report } = model
   // Notch indices in reading order (V22): phones have no SUMMARY rule (the summary is the sheet's
-  // header and hero), so their first rule is 01 / PASSES.
-  const idx = (n: number) => String(mobile ? n - 1 : n).padStart(2, '0')
+  // header and hero), so their first rule is 01 / PASSES; short laptops likewise (R2R1).
+  const idx = (n: number) => String(mobile || noSummaryRule ? n - 1 : n).padStart(2, '0')
   const enter = useOnce(`${enterKey}:body`)
   // The summary leads with the photos (owner B): the gallery, photo #1 being the closest look. With no photo
   // at all, the geostationary imager that sees the place all week.
@@ -606,7 +640,7 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
   ) : null
   const inviteBar = invite ? (
     <div className={s.invite}>
-      <p className={s.inviteText}>Something photographed you this week too.</p>
+      <p className={s.inviteText}>Something watched you this week too.</p>
       {onCheckPlace ? (
         <Button variant="primary" size="sm" onClick={onCheckPlace}>
           Check your place
@@ -638,9 +672,11 @@ function Overview({ model, mobile, compactTimeline, full, enterKey, selectedId, 
         </section>
       ) : (
         <section className={s.section} aria-label="Summary">
-          <Rule index="01" className={s.rule}>
-            Summary
-          </Rule>
+          {noSummaryRule ? null : (
+            <Rule index="01" className={s.rule}>
+              Summary
+            </Rule>
+          )}
           <div className={s.headBlock}>
             <Headline model={model} enter={enter} />
             <MoreLine model={model} enter={enter} onRetry={onRetry} />

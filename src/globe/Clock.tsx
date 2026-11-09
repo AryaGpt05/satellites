@@ -21,7 +21,7 @@ import { easeInOut } from '@/lib/ease'
 import { sceneClock } from '@/state/sceneClock'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { Pass, Report } from '@/types'
-import { approachStart, captureOf, DECAL_WAIT_MS, decalSpecFor, scanAt, scanFrame, slowFactor, slowWindowS, type AcqState } from './acquisition'
+import { approachStart, captureOf, DECAL_WAIT_MS, decalSpecFor, imageFocus, scanAt, scanFrame, slowFactor, slowWindowS, type AcqState } from './acquisition'
 import { createClock, stepClock } from './clock'
 import { FRAME, useRuntime } from './runtime'
 import { sweptAcross } from './swath'
@@ -224,5 +224,10 @@ function resetAcq(acq: AcqState, pass: Pass | undefined, report: Report | undefi
   const spec = cap ? decalSpecFor(cap.collection, mobile) : null
   acq.imaged = !!spec
   acq.halfKm = spec ? spec.halfSizeKm : 0
+  const place = report?.place
+  const focus = place ? imageFocus(place, acq.halfKm, cap?.footprint) : undefined
+  acq.focusOk = !!focus
+  acq.focusLat = focus?.lat ?? 0
+  acq.focusLon = focus?.lon ?? 0
   scanFrame(pass, acq.p0, acq.t0)
 }

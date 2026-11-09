@@ -62,20 +62,24 @@ function computeLayout(mobile: boolean): Layout {
     const side = Math.max(160, Math.min(W, H - topH - metaH))
     return { side, left: (W - side) / 2, top: topH + Math.max(0, (H - topH - metaH - side) / 2) }
   }
-  const topH = 64
+  // The top bar (56), the metadata strip under the photo (12 + three rows), the filmstrip (48 px thumbs, 24 px off
+  // the bottom): the photo takes the rest, up to 85vh (≥ 700 px on a 900 px tall laptop).
+  const topH = 56
   const metaH = 64
-  const filmH = 76
-  const side = Math.max(240, Math.min(H - topH - metaH - filmH - 16, W - 2 * 96, Math.round(H * 0.85)))
+  const filmH = 78
+  const side = Math.max(240, Math.min(H - topH - metaH - filmH, W - 2 * 96, Math.round(H * 0.85)))
   return { side, left: (W - side) / 2, top: topH + Math.max(0, (H - topH - metaH - filmH - side) / 2) }
 }
 
 export function Lightbox({ model, mobile, onReplay }: { model: ResultsModel; mobile: boolean; onReplay?: (p: Pass) => void }) {
   const lb = useGallery((g) => g.lightbox)
   if (!lb) return null
-  return createPortal(<Viewer key={lb.key + (lb.from ? '' : '-')} model={model} mobile={mobile} startKey={lb.key} from={lb.from} onReplay={onReplay} />, document.body)
+  return createPortal(<Viewer key={lb.id} id={lb.id} model={model} mobile={mobile} startKey={lb.key} from={lb.from} onReplay={onReplay} />, document.body)
 }
 
 interface ViewerProps {
+  /** This opening (gallery.ts) */
+  id: number
   model: ResultsModel
   mobile: boolean
   startKey: string
@@ -83,7 +87,7 @@ interface ViewerProps {
   onReplay?: (p: Pass) => void
 }
 
-function Viewer({ model, mobile, startKey, from, onReplay }: ViewerProps) {
+function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const filter = useGallery((g) => g.filter)
   const items = useMemo(() => {
     const list = filterPhotos(model.photos, filter)
@@ -186,7 +190,8 @@ function Viewer({ model, mobile, startKey, from, onReplay }: ViewerProps) {
     if (!box || !scrim) return
     const chrome = chromeRef.current.filter(Boolean)
     const done = () => setOpened(true)
-    if (reduced || !from || !from.isConnected) {
+    // Grow from the photo only when it is on screen (a frame scrolled out of its carousel or the panel fades in instead).
+    if (reduced || !from || !from.isConnected || !onScreen(from)) {
       const a = [rootRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: reduced ? FADE_MS : 220, easing: 'linear' })]
       if (a[0]) a[0].onfinish = done
       else done()
@@ -226,7 +231,8 @@ function Viewer({ model, mobile, startKey, from, onReplay }: ViewerProps) {
       if (p.pass && document.querySelector('[data-gallery="detail"]')) selectQuietly(p.pass)
     }
     const finish = () => {
-      useGallery.getState().closeLightbox()
+      // Only this viewer: a photo opened again while this one was still shrinking away keeps its own viewer.
+      if (useGallery.getState().lightbox?.id === id) useGallery.getState().closeLightbox()
       const target = p ? document.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(p.key)}"] button`) : null
       ;(target ?? from?.querySelector<HTMLElement>('button') ?? from)?.focus?.({ preventScroll: true })
     }
@@ -238,7 +244,7 @@ function Viewer({ model, mobile, startKey, from, onReplay }: ViewerProps) {
       requestAnimationFrame(() => {
         const el = p ? document.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(p.key)}"]`) : null
         const r = el?.getBoundingClientRect()
-        const vis = !!r && r.width > 0 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth
+        const vis = !!el && onScreen(el)
         if (!box || !scrim || reduced || !vis || !r) {
           const a = rootRef.current?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: reduced ? FADE_MS : 200, easing: 'linear', fill: 'forwards' })
           if (a) a.onfinish = finish
@@ -266,42 +272,41 @@ function Viewer({ model, mobile, startKey, from, onReplay }: ViewerProps) {
         a.onfinish = finish
       }),
     )
-  }, [items, from, reduced])
+  }, [items, from, reduced, id])
 
   // ── navigate ────────────────────────────────────────────────────────────────────────────
-  const navigating = useRef(false)
+  // The index moves at once (the counter, the metadata and the filmstrip follow in the same frame); the strip then
+  // glides the new photo in from where it was on screen (a drag's offset, or mid-glide on a fast ← →), so state never
+  // waits on an animation event and rapid presses chain smoothly.
+  const pendingNav = useRef<{ dir: 1 | -1; from: number } | null>(null)
   const go = useCallback(
     (dir: 1 | -1) => {
       const i = indexRef.current + dir
-      if (i < 0 || i >= n || navigating.current) return
+      if (i < 0 || i >= n) return
       const strip = stripRef.current
       resetZoom(false)
-      if (!strip || reduced) {
-        setIndex(i)
-        return
-      }
-      navigating.current = true
-      const cur = new DOMMatrixReadOnly(getComputedStyle(strip).transform).m41 || 0
-      const to = -dir * (layoutRef.current.side + GAP)
-      const a = strip.animate([{ transform: `translateX(${cur}px)` }, { transform: `translateX(${to}px)` }], { duration: NAV_MS, easing: 'cubic-bezier(.2,0,0,1)', fill: 'forwards' })
-      a.onfinish = () => {
-        navigating.current = false
-        setIndex(i)
-        // The new index lays the slides out around 0 in the same commit (layout effect below).
-        requestAnimationFrame(() => a.cancel())
-      }
+      if (strip && !reduced) pendingNav.current = { dir, from: new DOMMatrixReadOnly(getComputedStyle(strip).transform).m41 || 0 }
+      indexRef.current = i
+      setIndex(i)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [n, reduced],
   )
   useLayoutEffect(() => {
     const strip = stripRef.current
-    if (strip) strip.style.transform = ''
-    for (const a of strip?.getAnimations() ?? []) a.cancel()
+    if (!strip) return
+    for (const a of strip.getAnimations()) a.cancel()
+    strip.style.transform = ''
+    const nav = pendingNav.current
+    pendingNav.current = null
+    if (!nav) return
+    const start = nav.from + nav.dir * (layoutRef.current.side + GAP)
+    strip.animate([{ transform: `translateX(${start.toFixed(1)}px)` }, { transform: 'translateX(0px)' }], { duration: NAV_MS, easing: 'cubic-bezier(.2,0,0,1)' })
   }, [index])
   const goTo = (i: number) => {
     if (i === indexRef.current) return
     resetZoom(false)
+    pendingNav.current = null
     setIndex(Math.max(0, Math.min(n - 1, i)))
   }
 
@@ -725,7 +730,7 @@ function MetaStrip({ photo, model, cover }: { photo: Photo; model: ResultsModel;
       </span>
       <span className={s.metaRow}>
         <span className={s.metaMain}>
-          {productLabel(capture)} · {w >= 100 ? int(w) : dec1(w)} km · {coordsOf(model.report.place.lat, model.report.place.lon)}
+          {productLabel(capture)} · {w >= 100 ? int(w) : dec1(w)} km · <span className={s.nowrap}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
         </span>
       </span>
       <span className={s.credit}>{credit(capture)}</span>
@@ -774,6 +779,26 @@ function Thumb({ url, near }: { url: string; near: boolean }) {
     }
   }, [url, near, ok])
   return ok ? <img src={url} alt="" crossOrigin="anonymous" decoding="async" draggable={false} /> : null
+}
+
+/** At least half of `el` is visible: inside the window and inside every clipping ancestor (a carousel, the panel). */
+function onScreen(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect()
+  if (!r.width || !r.height) return false
+  let l = Math.max(0, r.left)
+  let t = Math.max(0, r.top)
+  let rr = Math.min(window.innerWidth, r.right)
+  let b = Math.min(window.innerHeight, r.bottom)
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const cs = getComputedStyle(p)
+    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue
+    const q = p.getBoundingClientRect()
+    l = Math.max(l, q.left)
+    t = Math.max(t, q.top)
+    rr = Math.min(rr, q.right)
+    b = Math.min(b, q.bottom)
+  }
+  return rr > l && b > t && (rr - l) * (b - t) >= 0.5 * r.width * r.height
 }
 
 function trapFocus(e: KeyboardEvent, root: HTMLElement | null) {

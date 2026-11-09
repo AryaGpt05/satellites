@@ -401,7 +401,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px 24px;
+  gap: 8px 0;
   margin-top: 96px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
@@ -411,6 +411,44 @@
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--bone-2);
+}
+
+/* "Watched v0.1 · Built by @handle" left, the disclaimer right (below it when the line is too short). */
+.byline {
+  margin-right: auto;
+  padding-right: 24px;
+}
+.bySep {
+  margin: 0 0.7em;
+  color: var(--bone-4);
+}
+.footer a,
+.creditWhat a {
+  color: var(--bone);
+  text-decoration: underline 1px var(--line-strong);
+  text-underline-offset: 3px;
+  transition:
+    color var(--d-hover) var(--ease-out),
+    text-decoration-color var(--d-hover) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .footer a:hover,
+  .creditWhat a:hover {
+    color: var(--signal);
+    text-decoration-color: var(--signal);
+  }
+}
+.footer a:active,
+.creditWhat a:active {
+  color: var(--signal);
+  transition-duration: 0ms;
+}
+
+/* Touch-only devices have no keyboard to speak of (key caps are hidden there too): no "Keyboard" section. */
+@media (hover: none) {
+  .keyboardOnly {
+    display: none;
+  }
 }
 
 /* ── narrower screens ─────────────────────────────────────────── */
@@ -457,6 +495,18 @@
   }
   .keys {
     grid-template-columns: 1fr;
+  }
+  /* one line each: the wordmark and version, the maker, the disclaimer */
+  .footer {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .byline {
+    margin-right: 0;
+    padding-right: 0;
+  }
+  .bySep {
+    display: none;
   }
 }
 

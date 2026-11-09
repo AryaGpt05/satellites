@@ -6,6 +6,9 @@ import {
   approachStart,
   closestLookPass,
   decalSpecFor,
+  DIVE_KM,
+  diveAt,
+  imageFocus,
   fmtCountdown,
   MIN_APPROACH_S,
   PAINT_REAL_S,
@@ -14,7 +17,7 @@ import {
   slowFactor,
   slowWindowS,
 } from './acquisition'
-import { acquiredPose, chasePose, freeRect, rangeForGroundKm } from './framing'
+import { acquiredPose, chasePose, DIVE_TILT, freeRect, rangeForGroundKm } from './framing'
 
 const TC = 1_800_000_000_000
 
@@ -56,9 +59,9 @@ describe('acquisition timing', () => {
     expect(approachStart(TC + 1000, TC, 40, 6.8, 30)).toBe(TC + 1000)
   })
 
-  it('the full sequence (2.4–3.6 s flight + approach + 1.4 s settle) lands in 6–8 s at the default rate', () => {
+  it('the full sequence (2.4–3.6 s flight + approach + 1.2 s settle) lands in 6–8 s at the default rate', () => {
     const approach = realSeconds(approachStart(TC - 36_000, TC, 40, 6.8, 30), TC, 40, 6.8, 30)
-    const settle = 0.28 + 1.4
+    const settle = 0.22 + 1.2
     for (const flight of [2.4, 3.6]) {
       const total = flight + approach + settle
       expect(total).toBeGreaterThanOrEqual(6)
@@ -74,6 +77,31 @@ describe('acquisition timing', () => {
 
   it('the slow-motion window covers the decal', () => {
     expect(slowWindowS(40, 6.8) * 6.8).toBeGreaterThan(40)
+  })
+
+  it('dives onto the place as the scan line closes in: a wide chase first, on the place before the image paints', () => {
+    const at = (km: number) => diveAt(TC - (km / 6.8) * 1000, TC, 6.8, 40)
+    expect(at(DIVE_KM.far + 5)).toBe(0)
+    expect(at(DIVE_KM.near)).toBeCloseTo(1, 9)
+    expect(at(40)).toBe(1) // the image's leading edge
+    expect(diveAt(TC + 3_000, TC, 6.8, 40)).toBe(1) // just after the capture (the chase holds ~0.2 s), still on the place
+    let prev = 0
+    for (let km = DIVE_KM.far; km >= DIVE_KM.near; km -= 5) {
+      const v = at(km)
+      expect(v).toBeGreaterThanOrEqual(prev)
+      prev = v
+    }
+    // No dive for wide daily mosaics or passes without an image.
+    expect(diveAt(TC, TC, 6.6, 300)).toBe(0)
+    expect(diveAt(TC, TC, 6.8, 0)).toBe(0)
+    // In real time: at least ~0.7 s of wide chase, a ~1 s dive, and the dive done before the image starts painting.
+    const start = approachStart(TC - 36_000, TC, 40, 6.8, 30)
+    const tFar = TC - (DIVE_KM.far / 6.8) * 1000
+    const tNear = TC - (DIVE_KM.near / 6.8) * 1000
+    expect(realSeconds(start, tFar, 40, 6.8, 30)).toBeGreaterThan(0.7)
+    const dive = realSeconds(tFar, tNear, 40, 6.8, 30)
+    expect(dive).toBeGreaterThan(0.8)
+    expect(dive).toBeLessThan(1.4)
   })
 })
 
@@ -111,6 +139,64 @@ describe('decal and scan geometry', () => {
   })
 })
 
+describe('the painted image focus', () => {
+  const place = { lat: 25.1124, lon: 55.139 }
+  const deg = (km: number) => km / 111.32
+  const kx = Math.cos((place.lat * Math.PI) / 180)
+
+  it('stays on the place when the image covers the whole crop, or without a footprint', () => {
+    const all: [number, number][] = [
+      [54, 24],
+      [57, 24],
+      [57, 26.5],
+      [54, 26.5],
+    ]
+    const f = imageFocus(place, 40, all)
+    expect(f.lat).toBeCloseTo(place.lat, 6)
+    expect(f.lon).toBeCloseTo(place.lon, 6)
+    expect(imageFocus(place, 40, undefined)).toEqual({ lat: place.lat, lon: place.lon })
+  })
+
+  it('leans toward the data when a tile edge cuts the crop, keeping the place near the middle', () => {
+    // Data only east of a meridian 10 km west of the place: the valid part's centre is ~15 km east.
+    const edge = place.lon - deg(10) / kx
+    const east: [number, number][] = [
+      [edge, 24],
+      [57, 24],
+      [57, 26.5],
+      [edge, 26.5],
+    ]
+    const f = imageFocus(place, 40, east)
+    const dxKm = (f.lon - place.lon) * kx * 111.32
+    expect(dxKm).toBeGreaterThan(8)
+    expect(dxKm).toBeLessThanOrEqual(0.45 * 40 + 1e-6)
+    expect(Math.abs(f.lat - place.lat)).toBeLessThan(1e-6)
+    // A corner: data only north-east of the place; the shift is capped.
+    const ne: [number, number][] = [
+      [place.lon, place.lat],
+      [57, place.lat],
+      [57, 26.5],
+      [place.lon, 26.5],
+    ]
+    const g = imageFocus(place, 40, ne)
+    const d = Math.hypot((g.lon - place.lon) * kx, g.lat - place.lat) * 111.32
+    expect(g.lat).toBeGreaterThan(place.lat)
+    expect(g.lon).toBeGreaterThan(place.lon)
+    expect(d).toBeLessThanOrEqual(0.45 * 40 + 1e-6)
+  })
+
+  it('ignores a sliver of data', () => {
+    const edge = place.lon + deg(38) / kx
+    const sliver: [number, number][] = [
+      [edge, 24],
+      [57, 24],
+      [57, 26.5],
+      [edge, 26.5],
+    ]
+    expect(imageFocus(place, 40, sliver)).toEqual({ lat: place.lat, lon: place.lon })
+  })
+})
+
 describe('acquisition camera poses', () => {
   const vp = { width: 1440, height: 900 }
   const insets = { top: 80, right: 480, bottom: 220, left: 0 }
@@ -122,6 +208,27 @@ describe('acquisition camera poses', () => {
     const fill = rangeForGroundKm(vp, freeRect(vp, insets), 80) / spec.range
     expect(fill).toBeGreaterThan(0.45)
     expect(fill).toBeLessThan(0.55)
+  })
+
+  it('the dive ends on the place, less oblique, with the painted image at a readable size', () => {
+    const sat = latLonToWorld(44.2, -81.6, 1 + 786 / EARTH_RADIUS_KM)
+    const place = { lat: 43.47, lon: -80.54 }
+    const wide = chasePose(vp, insets, sat, place, 0, 40)
+    const close = chasePose(vp, insets, sat, place, 1, 40)
+    expect(close.lat).toBeCloseTo(place.lat, 6)
+    expect(close.lon).toBeCloseTo(place.lon, 6)
+    expect(close.r!).toBeCloseTo(1, 6)
+    expect(close.tilt!).toBeCloseTo(DIVE_TILT.desktop, 6)
+    expect(close.range).toBeLessThan(wide.range / 4)
+    const fill = rangeForGroundKm(vp, freeRect(vp, insets), 80) / close.range
+    expect(fill).toBeGreaterThan(0.46)
+    expect(fill).toBeLessThan(0.54)
+    // Half way is between the two, and never closer than the end.
+    const mid = chasePose(vp, insets, sat, place, 0.5, 40)
+    expect(mid.range).toBeLessThan(wide.range)
+    expect(mid.range).toBeGreaterThan(close.range)
+    // Without an image there is nothing to dive onto.
+    expect(chasePose(vp, insets, sat, place, 1, 0).range).toBeCloseTo(wide.range, 9)
   })
 
   it('the chase looks at the midpoint between the place and the spacecraft, oblique and north-up', () => {

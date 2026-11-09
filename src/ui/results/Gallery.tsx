@@ -22,6 +22,7 @@ import { Glyph, cx, prefersReducedMotion } from '@/ui/system'
 import { Ago } from './Ago'
 import { Mark } from './Mark'
 import { PhotoFrame, coordsOf } from './PhotoFrame'
+import { isOldWindow } from './Summary'
 import { selectQuietly } from './actions'
 import { useGallery } from './gallery'
 import { warmPhoto } from './images'
@@ -80,17 +81,22 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   /** A programmatic scroll in flight: settle commits it without a feedback loop */
   const target = useRef<number | null>(null)
   const selectTimer = useRef(0)
+  /** The photo this gallery itself last committed to the store (settle): the store echoing it back is not a move to follow */
+  const committed = useRef<string | undefined>(undefined)
 
   const n = items.length
   const windowItems = useMemo(() => items.filter((p) => !!p.pass), [items])
+  const week = isOldWindow(model) ? 'that week' : 'this week'
   const counterText = useCallback(
     (i: number) => {
       const p = items[i]
       if (!p) return ''
-      if (!p.pass) return `— / ${windowItems.length}`
+      // The last clear look from before the window is not one of the window's photos: the counter says how many
+      // of those follow it ("27 this week"), never a placeholder.
+      if (!p.pass) return windowItems.length ? `${windowItems.length} ${week}` : ''
       return `${windowItems.indexOf(p) + 1} / ${windowItems.length}`
     },
-    [items, windowItems],
+    [items, windowItems, week],
   )
 
   const paintChrome = useCallback(
@@ -129,6 +135,9 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
       paintChrome(idxRef.current)
     })
     ro.observe(track)
+    // The rail can change width on its own (the pass view's square follows the panel height).
+    const rail = railRef.current?.parentElement
+    if (rail) ro.observe(rail)
     return () => ro.disconnect()
   }, [paintChrome])
 
@@ -169,6 +178,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     paintChrome(i)
     const p = items[i]
     if (!p) return
+    committed.current = p.key
     useGallery.getState().setKey(p.key, user)
     window.clearTimeout(selectTimer.current)
     if (user && detail && p.pass && p.pass.id !== selectedId) {
@@ -237,6 +247,9 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     lastFilter.current = filter
     if (!filterChanged && wantIdx === idxRef.current && target.current === null) return
     if (!filterChanged && target.current === wantIdx) return
+    // The store echoing this gallery's own settle back (its render can land after the next ← → already started a
+    // new glide): following it would pull the track back to the photo it is leaving.
+    if (!filterChanged && items[wantIdx]?.key === committed.current) return
     setIdx(wantIdx)
     if (!geo.current.ready) return
     goTo(wantIdx, !filterChanged && Math.abs(wantIdx - idxRef.current) <= 3, filterChanged)
@@ -269,6 +282,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     idxRef.current = 0
     setIdx(0)
     paintChrome(0)
+    committed.current = coverKey
     useGallery.getState().setKey(coverKey, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coverKey])
@@ -306,9 +320,18 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
         return true
       },
       expand: () => {
-        const p = items[target.current ?? idxRef.current]
-        const el = p ? trackRef.current?.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(p.key)}"]`) : null
-        if (!p || !el) return false
+        const i = target.current ?? idxRef.current
+        const p = items[i]
+        const track = trackRef.current
+        const el = p ? track?.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(p.key)}"]`) : null
+        if (!p || !el || !track) return false
+        // A glide still on its way (F pressed mid-→): land on its photo first, so the viewer grows from the frame on screen.
+        if (target.current !== null && geo.current.stride) {
+          target.current = null
+          track.scrollLeft = i * geo.current.stride
+          setIdx(i)
+          paintChrome(i)
+        }
         open(p, el)
         return true
       },
@@ -427,7 +450,6 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
   const tz = model.tz
   const t = pass ? model.times(pass) : { day: fmtLocalDay(capture.datetime, tz), time: fmtLocalTime(capture.datetime, tz), zone: zoneAbbr(capture.datetime, tz) }
   const when = pass?.tClosest ?? capture.datetime
-  const status = statusWords(photo, mobile)
   const lead = cover === 'closest' ? 'Closest look' : cover === 'lastClear' ? 'Last clear look' : cover === 'clouded' ? 'Clouded over' : undefined
   const [k, of] = position.split(' / ')
   const label = `${lead ? `${lead}: ` : ''}${meta.name}, ${t.day} ${t.time}${pass && of ? `, photo ${k} of ${of}` : ''}`
@@ -441,63 +463,66 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
 
   let caption: ReactNode
   if (detail) {
+    // The pass view's plate, on the image's edges: product · pixel · crop width (and what the picture shows at the
+    // place), the place's coordinates, the archive's credit. Narrow frames drop the crop width (the scale bar on the
+    // picture says it); phones drop the coordinates row (the globe's place label right above says them).
+    const status = detailStatus(photo)
+    const km = cropWidthKm(capture)
     caption = (
       <figcaption className={s.cap}>
         <span className={s.capRow}>
           <span className={s.capMain}>
-            {productLabel(capture)} · {cropWidthKm(capture) >= 100 ? int(cropWidthKm(capture)) : dec1(cropWidthKm(capture))} km · {coordsOf(model.report.place.lat, model.report.place.lon)}
+            {productLabel(capture)}
+            <span className={s.capKm}> · {km >= 100 ? int(km) : dec1(km)} km</span>
           </span>
-        </span>
-        <span className={s.capRow}>
-          <span className={s.credit}>{credit(capture)}</span>
           {status ? <span className={cx(s.status, photo.clouded && s.warn)}>{status}</span> : null}
         </span>
+        <span className={cx(s.capRow, s.capCoords)}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
+        <span className={s.credit}>{credit(capture)}</span>
       </figcaption>
     )
   } else {
-    // The summary card: two lines and one tap target (Replay this pass on the globe; the last clear look, which
-    // has no pass, opens large instead). Laptops add Share.
-    // The last clear look from before the window: two caption lines like every card; why it leads rides on the
-    // picture (a note chip), so the caption never grows a line when it arrives (no layout shift, A1).
-    const note = cover === 'lastClear'
+    // The summary card: the satellite and its local date and time, the pixel size and how long ago, and one tap
+    // target (Replay this pass on the globe; the last clear look, which has no pass, opens large instead). Laptops
+    // add the time and what the picture shows at the place on the same two lines, and Share. Why a cover leads
+    // ("Closest look", "Last clear look") and a clouded picture's honest label ride on the picture as chips, so the
+    // caption is the same two lines for every photo and never truncates (no layout shift, A1).
+    const status = mobile ? undefined : heroStatus(photo)
     caption = (
       <figcaption className={s.mCap}>
         <span className={s.mLines}>
           <span className={s.mLine}>
-            {lead ? <b className={cx(s.lead, cover === 'clouded' && s.warn)}>{lead} · </b> : null}
             <b>{meta.name}</b>
-            {note ? null : (
+            {' · '}
+            {t.day}
+            {mobile ? null : (
               <>
                 {' · '}
-                {t.day}
-                {mobile ? null : (
-                  <>
-                    {' · '}
-                    {t.time} {t.zone}
-                  </>
-                )}
+                {t.time}
               </>
             )}
           </span>
           <span className={s.mLine}>
-            {note ? `${t.day} · ` : mobile ? `${t.time} · ` : null}
+            {mobile ? `${t.time} · ` : null}
             {int(capture.gsdM)} m
             <span className={s.dim}>
               {' · '}
               <Ago t={when} base={model.clock} />
             </span>
-            {status ? <span className={cx(photo.clouded && s.warn)}> · {status}</span> : null}
+            {status ? <span> · {status}</span> : null}
           </span>
         </span>
         {replay ? (
           <button type="button" className={s.mReplay} onClick={replay} tabIndex={current ? 0 : -1} aria-label={`Replay this pass on the globe: ${meta.name}, ${t.day} ${t.time}`}>
             <Glyph name="play" size={10} />
-            Replay<span className={s.tabletOnly}> this pass</span>
+            <span className={s.mReplayText}>
+              Replay<span className={s.tabletOnly}> this pass</span>
+            </span>
           </button>
         ) : (
           <button type="button" className={s.mReplay} onClick={onView} tabIndex={current ? 0 : -1} aria-label="View the photo large">
             <Mark name="expand" size={11} />
-            View
+            <span className={s.mReplayText}>View</span>
           </button>
         )}
         {!mobile && pass && onShare ? (
@@ -524,7 +549,16 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
           gateOnVisible={mobile}
           onExpand={(el) => onExpand(photo, el)}
           className={detail ? s.square : s.heroFrame}
-          note={!detail && cover === 'lastClear' ? (model.windowPhotos ? 'This week’s passes saw mostly cloud' : 'Here’s the last clear look') : undefined}
+          tag={!detail && (cover === 'closest' || cover === 'lastClear') ? { text: lead! } : undefined}
+          note={
+            detail
+              ? undefined
+              : cover === 'lastClear'
+                ? { text: model.windowPhotos ? 'This week’s passes saw mostly cloud' : 'Here’s the last clear look' }
+                : photo.clouded
+                  ? { text: cloudedWords(photo, cover === 'clouded'), warn: true }
+                  : undefined
+          }
         />
         {caption}
       </div>
@@ -532,21 +566,38 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
   )
 })
 
-/** Short words for what the photo shows at the place (honest about cloud, decision #2). */
-function statusWords(p: Photo, short: boolean): string | undefined {
+/** What a picture shows at the place, in the fewest words (honest about cloud, decision #2). */
+function shortStatus(p: Photo): string | undefined {
   const c = p.capture
-  if (p.kind === 'mosaic') return short ? 'Mosaic' : 'Daily mosaic'
   if (p.clouded) return c.cloudCoverPct !== undefined && c.cloudCoverPct >= 70 ? `Clouded · ${int(c.cloudCoverPct)}%` : 'Cloud at spot'
   switch (c.spot) {
     case 'clear':
-      return short ? 'Clear' : 'Clear at your spot'
+      return 'Clear'
     case 'cirrus':
       return 'Thin cirrus'
     case 'shadow':
-      return short ? 'Shadow' : 'Cloud shadow'
+      return 'Cloud shadow'
     default:
       return c.cloudCoverPct !== undefined ? `Cloud ${int(c.cloudCoverPct)}%` : undefined
   }
+}
+
+/** Laptops' summary card, second line: a clouded picture says so on the picture itself (a chip), not here. */
+function heroStatus(p: Photo): string | undefined {
+  if (p.kind === 'mosaic') return 'Daily mosaic'
+  return p.clouded ? undefined : shortStatus(p)
+}
+
+/** The pass view's plate: a mosaic's product line already says "Daily mosaic". */
+function detailStatus(p: Photo): string | undefined {
+  return p.kind === 'mosaic' ? undefined : shortStatus(p)
+}
+
+/** A clouded picture's chip: "Clouded over · 86%" / "Cloud at your spot". */
+function cloudedWords(p: Photo, cover: boolean): string {
+  const pct = p.capture.cloudCoverPct
+  if (pct !== undefined && pct >= 70) return `Clouded over · ${int(pct)}%`
+  return cover ? 'Clouded over · cloud at your spot' : 'Cloud at your spot'
 }
 
 /** Copyright / credit line required by each archive. */

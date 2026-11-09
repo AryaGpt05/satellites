@@ -96,6 +96,13 @@
     height: 36px;
     padding: 0 11px;
   }
+  /* the bar is as tall as the filter even before the filter shows (the final report adding the weather photos, A1) */
+  .bar {
+    min-height: 38px;
+  }
+  .detail.mobile .bar {
+    min-height: 34px;
+  }
 }
 .nav {
   display: inline-flex;
@@ -121,6 +128,21 @@
 }
 .navBtn:active:not(:disabled) {
   background: var(--ink-2);
+}
+/* Laptops up to 860 px tall (R2R1): a slimmer bar. */
+@media (min-width: 761px) and (orientation: landscape) and (max-height: 860px) and (pointer: fine), (min-width: 1101px) and (max-height: 860px) and (pointer: fine) {
+  .gallery {
+    gap: 6px;
+  }
+  .bar {
+    min-height: 26px;
+  }
+  .seg {
+    height: 24px;
+  }
+  .navBtn {
+    height: 26px;
+  }
 }
 
 /* ── the track ────────────────────────────────────────────────── */
@@ -373,9 +395,20 @@
   left: 8px;
   bottom: 8px;
   max-width: calc(100% - 16px);
+  /* a sentence: on the narrowest cards it takes a second line rather than lose its end */
+  white-space: normal;
+  line-height: 1.35;
+  color: var(--bone);
+  pointer-events: none;
+}
+.noteChip.warn {
+  color: var(--warn);
+}
+/* A cover's tag (top left): why it leads. Clear of the expand control on the right. */
+.tagChip {
+  max-width: calc(100% - 72px);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--bone);
   pointer-events: none;
 }
 .br {
@@ -453,6 +486,8 @@
 
 /* ── captions ─────────────────────────────────────────────────── */
 .cap {
+  /* the plate adapts to the frame's width (container queries below) */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -506,6 +541,35 @@ b.warn,
   font-size: var(--fs-micro, 9.5px);
   letter-spacing: 0.04em;
 }
+.capCoords {
+  color: var(--bone-2);
+}
+/* A frame too narrow for the crop width next to the status (phones, short laptops): the scale bar on the picture says it. */
+@container (max-width: 349px) {
+  .capKm {
+    display: none;
+  }
+}
+/*
+ * Phones: the coordinates are in the globe's place label right above the sheet. The credit (legal wording) is set at
+ * the laptop's micro size so the Copernicus line fits one row on a 390 px phone (the image step keeps its globe band,
+ * R2R3); narrower, it wraps rather than truncate.
+ */
+@container (max-width: 399px) {
+  .mobile .capCoords {
+    display: none;
+  }
+  .mobile .cap .credit {
+    font-size: calc(var(--fs-micro, 10.5px) - 1px);
+    letter-spacing: 0.02em;
+  }
+}
+@container (max-width: 300px) {
+  .mobile .cap .credit {
+    white-space: normal;
+    overflow: visible;
+  }
+}
 .dim {
   color: var(--bone-3);
 }
@@ -550,6 +614,17 @@ b.warn,
   color: var(--signal);
   border-left: 1px solid var(--line);
   -webkit-tap-highlight-color: transparent;
+}
+/* The narrowest phones: the replay control is its glyph (a 44 px square, labelled), so the two caption lines never truncate. */
+@media (max-width: 380px) {
+  .mReplayText {
+    display: none;
+  }
+  .mReplay {
+    justify-content: center;
+    width: 44px;
+    padding-left: 0;
+  }
 }
 .mReplay:active,
 .mShare:active {
@@ -603,6 +678,12 @@ b.warn,
   width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
   margin-inline: auto;
 }
+/* …and the rail runs along the square's own top edge, not the column's */
+.detail:not(.mobile) .rail {
+  left: 50%;
+  width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
+  transform: translateX(-50%);
+}
 .detail.mobile .figure {
   width: 100%;
 }
@@ -617,6 +698,11 @@ b.warn,
   .detail .figure,
   .detail.mobile .figure {
     width: min(100%, 520px);
+  }
+  .detail.mobile .rail {
+    left: 50%;
+    width: min(100%, 520px);
+    transform: translateX(-50%);
   }
 }
 

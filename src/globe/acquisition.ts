@@ -7,6 +7,8 @@
  *              sequence: the camera chases the spacecraft (CameraDirector), the light curtain sweeps, and the real
  *              image develops onto the Earth exactly at the scan line (Earth shader, uScanS). If the seeded lead
  *              is shorter than MIN_APPROACH_S of real time, the clock rewinds to give the approach room to read.
+ *   dive       as the scan line closes on the place (DIVE_KM), the chase tightens from "spacecraft and place" onto
+ *              the place itself (diveAt), so the image develops LARGE on screen instead of as a speck.
  *   capture    sim time crosses tc during playback: the shockwave, the reticle lock, the ACQUIRED label, and the
  *              camera's settle into the near-top-down view of the painted image.
  *   settled    no live sweep: the image is simply there (fully developed), the camera rests on the acquired view.
@@ -16,11 +18,12 @@
  * the clock multiplies its replay step by slowFactor().
  */
 import { Vector3 } from 'three'
-import { clamp, EARTH_RADIUS_KM, latLonToWorld } from '@/lib/geo'
+import { bboxAround, clamp, EARTH_RADIUS_KM, latLonToWorld } from '@/lib/geo'
 import type { Capture, CaptureCollection, Pass, Report } from '@/types'
 
-/** Real seconds the approach should take at least (before the capture moment). */
-export const MIN_APPROACH_S = 2.4
+/** Real seconds the approach should take at least (before the capture moment): ~1 s of the wide chase, ~1 s of the
+ *  dive onto the place, then the paint up to the capture. */
+export const MIN_APPROACH_S = 2.9
 /** Real seconds the painting of the decal should take (the slow-motion window around tc). */
 export const PAINT_REAL_S = 1.6
 /** Slow-motion floor (fraction of the replay rate) and the sim-time ramp into it (s). */
@@ -60,6 +63,10 @@ export interface AcqState {
   halfKm: number
   /** The decal is on the GPU (written by <Imagery/>): the replay waits a moment for it on arrival */
   decalReady: boolean
+  /** Where the acquired view centres: the painted image's real data (imageFocus); focusOk once set for this pass */
+  focusOk: boolean
+  focusLat: number
+  focusLon: number
 }
 
 export function createAcqState(): AcqState {
@@ -78,6 +85,9 @@ export function createAcqState(): AcqState {
     scanS: 0,
     halfKm: 0,
     decalReady: false,
+    focusOk: false,
+    focusLat: 0,
+    focusLon: 0,
   }
 }
 
@@ -130,6 +140,79 @@ export function closestLookPass(report: Report | undefined): Pass | undefined {
 
 /** Spot clarity order (owner request B1): clear > cirrus > unknown > shadow > cloud. */
 const SPOT_RANK: Record<string, number> = { clear: 0, cirrus: 1, unknown: 2, shadow: 3, cloud: 4 }
+
+/** How far the acquired view leans from the place toward the image's data, and how far the place may sit off centre. */
+const FOCUS_LEAN = 0.75
+const FOCUS_MAX = 0.45
+
+/**
+ * Where the settled view centres: the middle of the painted image's REAL data. A Sentinel-2 item is one 110 km tile
+ * (Landsat a scene), so near a tile edge part of the crop around the place is no-data (keyed out) and an image
+ * centred on the place would sit off to one side. The valid part is the crop square clipped by the capture's
+ * footprint; the view leans most of the way toward its centroid, keeping the place within FOCUS_MAX × halfKm of the
+ * centre (the reticle stays well inside the frame). Without a usable footprint: the place.
+ */
+export function imageFocus(
+  place: { lat: number; lon: number },
+  halfKm: number,
+  footprint: [number, number][] | undefined,
+): { lat: number; lon: number } {
+  if (!footprint || footprint.length < 3 || halfKm <= 0) return { lat: place.lat, lon: place.lon }
+  const [w, s, e, n] = bboxAround(place.lat, place.lon, halfKm)
+  // Footprint ring as [lon, lat], unwrapped next to the place (no ring spans 180° of longitude).
+  let ring = footprint.map(([lon, lat]) => [place.lon + (((lon - place.lon + 540) % 360) - 180), lat] as [number, number])
+  if (ring.some(([lon]) => Math.abs(lon - place.lon) > 90)) return { lat: place.lat, lon: place.lon }
+  // Sutherland–Hodgman against the crop square.
+  const clip = (inside: (p: [number, number]) => boolean, cut: (a: [number, number], b: [number, number]) => [number, number]) => {
+    const out: [number, number][] = []
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]
+      const b = ring[(i + 1) % ring.length]
+      const ia = inside(a)
+      const ib = inside(b)
+      if (ia) out.push(a)
+      if (ia !== ib) out.push(cut(a, b))
+    }
+    ring = out
+  }
+  const atLon = (x: number) => (a: [number, number], b: [number, number]): [number, number] => [x, a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0])]
+  const atLat = (y: number) => (a: [number, number], b: [number, number]): [number, number] => [a[0] + ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]), y]
+  clip((p) => p[0] >= w, atLon(w))
+  clip((p) => p[0] <= e, atLon(e))
+  clip((p) => p[1] >= s, atLat(s))
+  clip((p) => p[1] <= n, atLat(n))
+  if (ring.length < 3) return { lat: place.lat, lon: place.lon }
+  // Area centroid (shoelace), in a local equal-scale frame (longitude shrunk by cos(lat)).
+  const k = Math.cos((place.lat * Math.PI) / 180)
+  let a2 = 0
+  let cx = 0
+  let cy = 0
+  for (let i = 0; i < ring.length; i++) {
+    const x0 = (ring[i][0] - place.lon) * k
+    const y0 = ring[i][1] - place.lat
+    const x1 = (ring[(i + 1) % ring.length][0] - place.lon) * k
+    const y1 = ring[(i + 1) % ring.length][1] - place.lat
+    const c = x0 * y1 - x1 * y0
+    a2 += c
+    cx += (x0 + x1) * c
+    cy += (y0 + y1) * c
+  }
+  // A sliver of data is no reason to move.
+  const fullA2 = 2 * ((2 * halfKm) / 111.32) ** 2
+  if (Math.abs(a2) < 0.08 * fullA2) return { lat: place.lat, lon: place.lon }
+  cx /= 3 * a2
+  cy /= 3 * a2
+  // Lean toward it, the place kept near the middle (in degrees of latitude ≈ km / 111.32).
+  let dx = cx * FOCUS_LEAN
+  let dy = cy * FOCUS_LEAN
+  const maxDeg = (FOCUS_MAX * halfKm) / 111.32
+  const d = Math.hypot(dx, dy)
+  if (d > maxDeg) {
+    dx *= maxDeg / d
+    dy *= maxDeg / d
+  }
+  return { lat: place.lat + dy, lon: place.lon + dx / k }
+}
 
 // ───────────────────────────── time ─────────────────────────────
 
@@ -197,6 +280,23 @@ export function scanFrame(pass: Pick<Pass, 'track' | 'tClosest'>, p0: Vector3, t
 
 /** Along-track position (radians from p0) of the scan line at sim time t: the sub-satellite point moves at ground speed. */
 export const scanAt = (t: number, tc: number, speedKmS: number) => (((t - tc) / 1000) * speedKmS) / EARTH_RADIUS_KM
+
+/**
+ * The dive: along-track distance (km) of the scan line from the place where the chase starts tightening onto the
+ * place, and where it is fully on it (before the image's leading edge starts to paint).
+ */
+export const DIVE_KM = { far: 210, near: 55 }
+
+/**
+ * How far the chase has dived onto the place at sim time t (0 = the wide spacecraft-and-place chase, 1 = on the
+ * place), smootherstep in the scan line's distance. Only for images small enough to need it (not daily mosaics).
+ */
+export function diveAt(t: number, tc: number, speedKmS: number, halfKm: number): number {
+  if (halfKm <= 0 || halfKm > 100) return 0
+  const d = (Math.abs(t - tc) / 1000) * speedKmS
+  const u = clamp((DIVE_KM.far - d) / (DIVE_KM.far - DIVE_KM.near), 0, 1)
+  return Math.min(1, u * u * u * (u * (6 * u - 15) + 10))
+}
 
 /** Format a countdown to tc in sim time: "T−00:01:12" / "T+00:00:03". */
 export function fmtCountdown(simTime: number, tc: number): string {

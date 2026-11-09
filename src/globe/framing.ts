@@ -315,6 +315,9 @@ export function passPose(vp: Viewport, insets: Insets, pass: Pass, place: { lat:
 export const CHASE_TILT = { stacked: 46 * DEG, desktop: 52 * DEG }
 /** Share of the free rect's limiting span that the spacecraft-to-place distance fills in the chase. */
 const CHASE_FILL = 0.6
+/** At the end of the dive: the tilt, and the share of the free rect's span the painted image fills. */
+export const DIVE_TILT = { stacked: 36 * DEG, desktop: 40 * DEG }
+const DIVE_FILL = 0.5
 /** Share of the free rect's limiting span the painted image fills in the acquired view. */
 const ACQ_FILL = 0.5
 /** The acquired view's tilt: near top-down, so the globe's image lines up with the panel's (north-up). */
@@ -322,27 +325,51 @@ export const ACQ_TILT = 5 * DEG
 
 const _s = new Vector3()
 const _m = new Vector3()
+const _f = new Vector3()
 
 /**
  * The approach: an oblique north-up view whose look-at sits halfway between the place (on the ground) and the
  * spacecraft (in orbit), at the range that fits both, so the spacecraft, its light curtain and the place all read
  * while the camera glides along with the pass. `satWorld` is the spacecraft's world position (Earth radii).
+ *
+ * `dive` (0..1, acquisition.diveAt) tightens it onto the image as the scan line closes in: the look-at slides down to
+ * `focus` (the painted image's centre, acquisition.imageFocus; the place by default), the range comes in until the
+ * image (2 × halfKm) fills DIVE_FILL of the free rect, and the tilt eases toward DIVE_TILT. The spacecraft leaves the
+ * top of the frame and its curtain comes down onto the image.
  */
-export function chasePose(vp: Viewport, insets: Insets, satWorld: Vector3, place: { lat: number; lon: number }): PoseSpec {
+export function chasePose(
+  vp: Viewport,
+  insets: Insets,
+  satWorld: Vector3,
+  place: { lat: number; lon: number },
+  dive = 0,
+  halfKm = 0,
+  focus: { lat: number; lon: number } = place,
+): PoseSpec {
   const stacked = isPhone(vp)
+  const f = freeRect(vp, insets)
   latLonToDir(place.lat, place.lon, _s)
   _m.copy(_s).add(satWorld).multiplyScalar(0.5)
+  const dKm = _s.distanceTo(satWorld) * EARTH_RADIUS_KM
+  let range = clamp(rangeForGroundKm(vp, f, dKm / CHASE_FILL), 0.1, 1.6)
+  let tilt = stacked ? CHASE_TILT.stacked : CHASE_TILT.desktop
+  const k = halfKm > 0 ? clamp(dive, 0, 1) : 0
+  if (k > 0) {
+    _m.lerp(latLonToDir(focus.lat, focus.lon, _f), k)
+    const tight = Math.min(range, rangeForGroundKm(vp, f, (2 * halfKm) / DIVE_FILL))
+    range = Math.exp(Math.log(range) + (Math.log(tight) - Math.log(range)) * k)
+    tilt += ((stacked ? DIVE_TILT.stacked : DIVE_TILT.desktop) - tilt) * k
+  }
   const r = _m.length()
   const lat = Math.asin(clamp(_m.y / r, -1, 1)) * RAD
   const lon = Math.atan2(-_m.z, _m.x) * RAD
-  const dKm = _s.distanceTo(satWorld) * EARTH_RADIUS_KM
   return {
     lat,
     lon,
     r,
     headingDeg: 0,
-    range: clamp(rangeForGroundKm(vp, freeRect(vp, insets), dKm / CHASE_FILL), 0.1, 1.6),
-    tilt: stacked ? CHASE_TILT.stacked : CHASE_TILT.desktop,
+    range,
+    tilt,
     ...freeShift(vp, insets),
   }
 }

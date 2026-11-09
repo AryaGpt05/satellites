@@ -11,7 +11,10 @@ export interface LightboxState {
   key: string
   /** The element the photo grows from (and shrinks back to, if it is still the current one) */
   from: HTMLElement | null
+  /** One per opening: a viewer still shrinking away never closes the one opened after it */
+  id: number
 }
+let opened = 0
 
 interface GalleryState {
   /** The report these belong to (a new report resets them) */
@@ -38,6 +41,6 @@ export const useGallery = create<GalleryState>((set) => ({
   reset: (reportKey) => set((st) => (st.reportKey === reportKey ? {} : { reportKey, filter: 'all', key: undefined, touched: false, lightbox: null })),
   setFilter: (filter) => set({ filter, touched: true }),
   setKey: (key, touched = true) => set((st) => (st.key === key && (!touched || st.touched) ? {} : { key, touched: st.touched || touched })),
-  openLightbox: (key, from) => set({ lightbox: { key, from } }),
+  openLightbox: (key, from) => set({ lightbox: { key, from, id: ++opened } }),
   closeLightbox: () => set({ lightbox: null }),
 }))

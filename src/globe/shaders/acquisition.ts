@@ -60,7 +60,7 @@ export const spacecraftFragment = glsl`
       base = uInk * 3.0 + vec3(0.01);
     }
     float earth = max(dot(N, -normalize(vPos)), 0.0) * 0.16;
-    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+    float rim = pow(sat01(1.0 - dot(N, V)), 3.0);
     vec3 col = base * (0.1 + uLit * (0.25 + ndl * 0.95) + earth) + uBone * rim * 0.18 + vec3(1.0, 0.96, 0.9) * spec * uLit;
     if (vPart > 1.5 && vPart < 2.5) col = uSignal * (0.9 + 0.5 * uLit);
     gl_FragColor = vec4(col, uOpacity);
@@ -99,7 +99,7 @@ export const curtainFragment = glsl`
     // A whisper of light, warmest and densest toward the ground; the colour is mostly bone, tinted by the verdict.
     vec3 tint = mix(uBone, uColor, 0.45);
     // (Additive in linear light: over dark ground even 0.01 reads clearly, so everything here is tiny.)
-    float body = mix(0.001, 0.011, vV * vV);
+    float body = mix(0.0015, 0.02, vV * vV);
     // Scan lines streaming down: ~1 px lines, 40 across the curtain's height.
     float k = vV * 40.0 - uTime * 2.6;
     float f = fract(k);
@@ -107,7 +107,7 @@ export const curtainFragment = glsl`
     float lines = (1.0 - smoothstep(0.3, 1.2, dpx)) * (0.15 + 0.85 * vV * vV);
     // A soft brightening toward the two edges.
     float edge = smoothstep(0.86, 1.0, abs(vS)) * 0.008;
-    float a = (body + lines * 0.016 + edge) * uOpacity;
+    float a = (body + lines * 0.026 + edge) * uOpacity;
     if (a < 0.0002) discard;
     gl_FragColor = vec4(tint, a);
     ${OUTPUT}

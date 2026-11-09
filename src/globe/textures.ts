@@ -9,8 +9,10 @@
  *
  * The FIRST day step sets the zoom floor a regional view needs (decision 6), so it is on the critical path of the
  * first flight: it skips the idle wait, and on a deep link or share link (?q= / ?s=) its download starts when this
- * module evaluates (one request, one decode, handed to the upgrade through decodedMap). Once it is on the GPU,
- * store.dayMapSharp turns true (once per page; at first light if the plan has no day step).
+ * module evaluates (one request, one decode, handed to the upgrade through decodedMap). A deep link to a place that
+ * is in darkness right now adds the first NIGHT step to that critical path (on the night side the floor is the
+ * coarser of the two maps: CameraDirector). Once the critical steps are on the GPU, store.dayMapSharp turns true
+ * (once per page; at first light if the plan has none).
  *
  * Nothing is uploaded while anything choreographed is moving (decision 9, PERF-01). Fetch and decode happen off the
  * main thread (fetch → createImageBitmap); the UPLOAD waits for canUpload():
@@ -44,6 +46,7 @@ import {
   UnsignedByteType,
   type WebGLRenderer,
 } from 'three'
+import { latLonToWorld, sunDirectionWorld } from '@/lib/geo'
 import { useApp } from '@/state/store'
 import type { TextureLevel } from './framing'
 import { detectMobile, provisionalTier, type QualityTier } from './quality'
@@ -231,11 +234,39 @@ function dropUnplanned(plan: UpgradeStep[]) {
 /** The step that sharpens the day map first (the regional zoom floor), if the plan has one. */
 export const firstDayStep = (plan: UpgradeStep[]) => plan.find((st) => st.map === 'day')
 
-// A deep link or share link goes from boot straight to a regional view: fetch the day map it needs now, while the
-// boot runs (the provisional tier: the GL context does not exist yet; dropUnplanned undoes a wrong guess).
+/** A deep link's place (`?q=lat,lon`), when the URL names one. */
+export function deepLinkPlace(search: string): { lat: number; lon: number } | undefined {
+  const q = new URLSearchParams(search).get('q')
+  const m = q?.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/)
+  if (!m) return undefined
+  const lat = Number(m[1])
+  const lon = Number(m[2])
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : undefined
+}
+
+/** On the night side at `t`, by the camera's own rule (CameraDirector: the floor follows the night map there). */
+export function inDarkAt(place: { lat: number; lon: number }, t: number): boolean {
+  return latLonToWorld(place.lat, place.lon, 1).dot(sunDirectionWorld(t)) <= 0.1
+}
+
+/**
+ * The steps the first regional view waits on (the zoom floor): the first day step, and on a deep link to a place
+ * that is in darkness right now, the first night step too (there the floor is the coarser of the two maps). They
+ * skip the idle wait, cut every strip up front, and store.dayMapSharp turns true once they have all landed.
+ */
+export function criticalSteps(plan: UpgradeStep[], dark: boolean): UpgradeStep[] {
+  const day = firstDayStep(plan)
+  const night = dark ? plan.find((st) => st.map === 'night') : undefined
+  return [day, night].filter((st): st is UpgradeStep => !!st)
+}
+
+const DEEP_LINK = typeof location !== 'undefined' ? deepLinkPlace(location.search) : undefined
+const DEEP_DARK = !!DEEP_LINK && inDarkAt(DEEP_LINK, Date.now())
+
+// A deep link or share link goes from boot straight to a regional view: fetch the maps it needs now, while the boot
+// runs (the provisional tier: the GL context does not exist yet; dropUnplanned undoes a wrong guess).
 if (typeof location !== 'undefined' && (/[?&](q|s)=/.test(location.search) || /^\/s\//.test(location.pathname)) && bitmapsSupported()) {
-  const first = firstDayStep(upgradePlan(provisionalTier(detectMobile())))
-  if (first) prefetchMap(first.map, first.res)
+  for (const st of criticalSteps(upgradePlan(provisionalTier(detectMobile())), DEEP_DARK)) prefetchMap(st.map, st.res)
 }
 
 // ───────────────────────────── upload ─────────────────────────────
@@ -460,11 +491,15 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
     }
 
     const plan = upgradePlan(tier)
-    const firstDay = firstDayStep(plan)
-    /** store.dayMapSharp: once per page, when the day map is first sharper than the boot level. */
+    const critical = criticalSteps(plan, DEEP_DARK)
+    /** store.dayMapSharp: once per page, when the maps the first regional view needs are sharper than the boot level. */
     const markSharp = () => {
       const st = useApp.getState()
       if (!st.dayMapSharp) st.setDayMapSharp(true)
+    }
+    const waiting = new Set(critical)
+    const landed = (step: UpgradeStep) => {
+      if (waiting.delete(step) && waiting.size === 0) markSharp()
     }
 
     const upgrade = async () => {
@@ -473,18 +508,20 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       for (const step of plan) {
         if (ctl.signal.aborted || !current) return
         await sched.waitUntil(ready(step.when))
-        // Start fetching in an idle slot (the upload is gated separately), except the first day step: the first
-        // regional view waits on it.
-        if (step !== firstDay) {
+        // Start fetching in an idle slot (the upload is gated separately), except the critical steps: the first
+        // regional view waits on them.
+        const isCritical = critical.includes(step)
+        if (!isCritical) {
           await new Promise<void>((r) => {
             cancelIdle = idle(r)
           })
         }
         let tex: Texture
         try {
-          tex = bitmaps ? await buildSliced(step, step === firstDay) : await buildWhole(step)
+          tex = bitmaps ? await buildSliced(step, isCritical) : await buildWhole(step)
         } catch {
           if (ctl.signal.aborted) return
+          landed(step) // nothing sharper will come from it: do not hold the first view on it
           continue // keep the lower resolution; nothing else depends on it
         }
         if (ctl.signal.aborted || !current) {
@@ -496,7 +533,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
         if (step.map === 'day') rt.textureLevel = step.res
         if (step.map === 'night') rt.nightLevel = step.res
         gl.domElement.dataset.textures = `${step.map}-${step.res}`
-        if (step.map === 'day') markSharp()
+        landed(step)
         // Materials re-bind on their next frame; dispose once a few frames have rendered without it.
         afterFrames(3, () => disposeTexture(old))
       }
@@ -510,7 +547,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
         rt.nightLevel = '1k'
         setStatus({ state: 'ready', textures: tex })
         gl.domElement.dataset.textures = '1k'
-        if (!firstDay) markSharp() // nothing sharper will come: first light is as sharp as it gets
+        if (!critical.length) markSharp() // nothing sharper will come: first light is as sharp as it gets
         onFirstReady?.()
         void upgrade()
       },

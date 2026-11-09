@@ -123,16 +123,20 @@ function Row({ box, children }: { box: readonly [number, number]; children: Reac
 
 const Hair = ({ y }: { y: number }) => <div className={s.hair} style={{ left: PANEL.x, top: y, width: PANEL.w }} />
 
-function PlanView({ plan, loading }: { plan: PlanPlate; loading?: boolean }) {
-  // While the picture loads, its geometry plate stands in, with the note chip saying so.
+function PlanView({ plan, loading, leaving }: { plan: PlanPlate; loading?: boolean; leaving?: boolean }) {
+  // While the picture loads, its geometry plate stands in, with the note chip saying so. Once the picture
+  // starts to fade in over it (`leaving`), the stand-in's chips step out quickly, so the two layers' chips
+  // (which share corners) never read doubled mid-fade.
   const chips = loading ? plan.chips.map((c, i) => (i === plan.chips.length - 1 ? { ...c, segs: [{ text: 'Acquiring…', tone: 'bone2' as const }] } : c)) : plan.chips
   return (
     <div className={s.plate}>
       <Svg size={PLATE} prims={plan.prims} />
-      {chips.map((c, i) => (
-        <ChipView key={i} chip={c} />
-      ))}
-      <Scale bar={plan.scale} />
+      <div className={cx(s.labels, leaving && s.labelsOut)}>
+        {chips.map((c, i) => (
+          <ChipView key={i} chip={c} />
+        ))}
+        <Scale bar={plan.scale} />
+      </div>
     </div>
   )
 }
@@ -181,7 +185,7 @@ function ImagePlateView({ plate }: { plate: ImagePlate }) {
     : undefined
   return (
     <div className={s.plate}>
-      {img.settled ? null : <PlanView plan={plate.fallback} loading />}
+      {img.settled ? null : <PlanView plan={plate.fallback} loading leaving={img.state === 'ok'} />}
       <div className={cx(s.picture, img.state === 'ok' && (img.instant ? s.pictureNow : s.pictureOn))} onTransitionEnd={onFaded}>
         <img
           ref={imgRef}

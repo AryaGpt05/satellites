@@ -33,19 +33,32 @@ export function validStats(v: unknown): v is LookupStats {
   )
 }
 
+/**
+ * The request waits for an idle moment (at most this long): the landing mounts inside a transition (the
+ * boot curtain, Esc back from results), and the line has room reserved, so it can arrive a beat later.
+ */
+const STATS_IDLE_MS = 1200
+
 export function useLookupStats(): LookupStats | null {
   const [stats, setStats] = useState<LookupStats | null>(null)
   useEffect(() => {
     let alive = true
     let timer = 0
-    const timeout = new Promise<null>((r) => (timer = window.setTimeout(() => r(null), STATS_TIMEOUT_MS)))
-    Promise.race([getStats(), timeout])
-      .then((v) => {
-        if (alive && validStats(v)) setStats({ total: v.total, last24h: v.last24h })
-      })
-      .catch(() => undefined)
+    const start = () => {
+      if (!alive) return
+      const timeout = new Promise<null>((r) => (timer = window.setTimeout(() => r(null), STATS_TIMEOUT_MS)))
+      Promise.race([getStats(), timeout])
+        .then((v) => {
+          if (alive && validStats(v)) setStats({ total: v.total, last24h: v.last24h })
+        })
+        .catch(() => undefined)
+    }
+    const idle = typeof window.requestIdleCallback === 'function'
+    const handle = idle ? window.requestIdleCallback(start, { timeout: STATS_IDLE_MS }) : window.setTimeout(start, 200)
     return () => {
       alive = false
+      if (idle) window.cancelIdleCallback(handle)
+      else window.clearTimeout(handle)
       window.clearTimeout(timer)
     }
   }, [])

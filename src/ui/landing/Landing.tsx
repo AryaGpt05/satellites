@@ -1,6 +1,7 @@
 /**
  * <Landing onSubmit enterDelay/>: phases 'idle' and 'locating'. The hero, the place search, "Use my
- * location", curated example places and a live stats footnote, laid out so the globe stays the hero:
+ * location", curated example places, the maker's credit and a live stats footnote, laid out so the
+ * globe stays the hero:
  *
  *   wide            a text column on the left of the 12-column grid; the globe frames to its right.
  *                   When suggestions open, the copy fades and the field lifts to the headline's place,
@@ -67,6 +68,9 @@ useApp.subscribe((st, prev) => {
 const PANEL_PAD_TOP = 22
 /** Wide: the globe's point cloud keeps this much air from the end of the text. */
 const TEXT_CLEAR = 24
+/** The maker's credit under the example chips. */
+const CREDIT_HANDLE = '@armaangupt0'
+const CREDIT_URL = 'https://x.com/armaangupt0'
 
 interface LandingProps {
   onSubmit: (place: Place) => void
@@ -278,10 +282,10 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
               Something
             </Reveal>
             <Reveal as="span" className={s.hl} delay={delay + 200} skip={!first}>
-              photographed
+              watched <em className={s.serif}>you</em>
             </Reveal>
             <Reveal as="span" className={s.hl} delay={delay + 260} skip={!first}>
-              <em className={s.serif}>you</em> this week.
+              this week.
             </Reveal>
           </h1>
 
@@ -354,8 +358,15 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
           </div>
 
           <Examples onPick={submit} disabled={locating} locate={locate} />
-          {/* A nicety: it steps aside while a locate note needs the room. */}
-          <StatsLine hidden={locate.state.kind !== 'idle'} />
+          {/* Under the chips: the maker's credit, and (tall wide screens) the live stats beside it. The row
+              is there from the first frame, so the stats arriving later never move the column. The stats
+              are a nicety: they step aside while a locate note needs the room. */}
+          <div className={cx(s.foot, s.rise, s.riseExamples)} data-hero-copy>
+            <a className={s.credit} href={CREDIT_URL} target="_blank" rel="noreferrer">
+              Built by {CREDIT_HANDLE}
+            </a>
+            <StatsLine hidden={locate.state.kind !== 'idle'} />
+          </div>
         </div>
       </section>
     </div>
@@ -445,7 +456,8 @@ function useBalance(
       if (noteH === 0) baseH.current = contentH
       setPad(balancePad(column.clientHeight, contentH, baseH.current, noteH))
     }
-    measure()
+    // No direct call: the observer's first callback (after this frame's layout, before its paint)
+    // measures, so mounting the landing (inside the Esc that leaves results) forces no layout of its own.
     const ro = new ResizeObserver(measure)
     ro.observe(column)
     ro.observe(content)
@@ -587,12 +599,12 @@ function StatsLine({ hidden }: { hidden?: boolean }) {
   const stats = useLookupStats()
   if (!stats) return null
   return (
-    <p className={s.stats} hidden={hidden} data-hero-copy>
+    <p className={s.stats} hidden={hidden}>
       {/* counts settle from 90% (never caught at 0 in a screen recording) */}
       <Num value={stats.total} from={Math.round(stats.total * 0.9)} className={s.statNum} />{' '}
       {stats.total === 1 ? 'place' : 'places'} checked
       <span className={s.exSep}>·</span>
-      <Num value={stats.last24h} from={Math.round(stats.last24h * 0.9)} delay={120} className={s.statNum} /> in the last 24&nbsp;h
+      <Num value={stats.last24h} from={Math.round(stats.last24h * 0.9)} delay={120} className={s.statNum} /> in 24&nbsp;h
     </p>
   )
 }

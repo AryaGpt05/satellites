@@ -33,6 +33,8 @@ interface Props {
   selectedId?: string
   onSelect: (p: Pass) => void
   compact?: boolean
+  /** The strip's notch index ("04"; "03" where the summary has no notch of its own) */
+  index?: string
   className?: string
 }
 
@@ -94,7 +96,7 @@ function dayLabel(d: { weekday: string; day: number; label: string }, dayW: numb
   return String(d.day)
 }
 
-export function Timeline({ model, selectedId, onSelect, compact = false, className }: Props) {
+export function Timeline({ model, selectedId, onSelect, compact = false, index = '04', className }: Props) {
   const { report, tz, lanes, sun, days, hours, meta } = model
   const t0 = report.windowStart
   const t1 = report.windowEnd
@@ -369,7 +371,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, classNa
       {!compact ? (
         <div className={s.head}>
           <span className={s.title}>
-            <span className={s.idx}>04</span>
+            <span className={s.idx}>{index}</span>
             <span className={s.sep}>/</span>Timeline
             <span className={s.meta}>
               {daysN} days · {model.tzLabel} · {tzLabel}
