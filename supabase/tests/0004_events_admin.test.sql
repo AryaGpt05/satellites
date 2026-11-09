@@ -155,7 +155,9 @@ end
 $$;
 
 -- ── the admin ───────────────────────────────────────────────────────────────────────────────
-select set_config('request.jwt.claims', '{"role": "authenticated", "email": "A585GUPT@uwaterloo.ca", "sub": "00000000-0000-0000-0000-000000000002"}', true);
+reset role;
+insert into overflight_private.admins (email) values ('admin@example.com') on conflict do nothing;
+select set_config('request.jwt.claims', '{"role": "authenticated", "email": "ADMIN@example.com", "sub": "00000000-0000-0000-0000-000000000002"}', true);
 set local role authenticated;
 do $$
 declare
