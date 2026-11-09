@@ -69,7 +69,7 @@ insert into public.event_maint (id, last_at) values (1, '-infinity') on conflict
 create table if not exists overflight_private.admins (
   email         text primary key check (email = lower(email))
 );
-insert into overflight_private.admins (email) values ('a585gupt@uwaterloo.ca') on conflict do nothing;
+-- No admin is seeded here: add yours with scripts/backend-set-admin.sh <email> (keeps addresses out of the repo).
 
 create index if not exists events_created_at_idx      on public.events (created_at);
 create index if not exists events_type_created_at_idx on public.events (type, created_at);
