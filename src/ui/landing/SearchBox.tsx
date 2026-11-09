@@ -41,8 +41,11 @@ export function SearchBox({
   onListChange,
   onQueryChange,
   liftedBy,
+  placeholder = 'Search a place',
 }: {
   onSubmit: (place: Place) => void
+  /** The empty field's prompt ("Search another place" from results) */
+  placeholder?: string
   onFocusChange?: (focused: boolean) => void
   disabled?: boolean
   autoFocus?: boolean
@@ -368,7 +371,7 @@ export function SearchBox({
             ) : null}
           </>
         }
-        placeholder="Search a place"
+        placeholder={placeholder}
         value={query}
         disabled={disabled}
         autoFocus={autoFocus}
