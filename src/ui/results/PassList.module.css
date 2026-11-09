@@ -189,6 +189,9 @@
 
 /* thumbnail of the real crop */
 .thumb {
+  /* A block box: inside the absolutely positioned .thumbBtn it is no longer a flex item, and an inline span
+     would ignore its width/height and let the image spill over the rows below. */
+  display: block;
   position: relative;
   /* A block, not a flex item: inside the absolutely positioned .thumbBtn an inline span ignored its 56 px box and the
      photo spilled over the rows below (hotfix on main after 77a2435, kept here). */

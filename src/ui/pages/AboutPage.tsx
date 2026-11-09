@@ -332,7 +332,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                   ['Daylight', 'Regular cameras need the sun. A pass in the dark never counts as a photo.'],
                   [
                     'Weather satellites',
-                    'A few sit over the equator and photograph half the planet every 10 minutes. If you’re on their side of Earth, you’re in every frame.',
+                    'A few sit over the equator and watch half the planet every 10 minutes. If you’re on their side of Earth, you’re in every frame.',
                   ],
                 ]}
               />

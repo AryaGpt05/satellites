@@ -114,7 +114,7 @@ export const PROFILES: readonly SatProfile[] = [
     swathKm: 2330,
     resolutionM: 250,
     gibs: { collection: 'gibs-modis-terra', layer: 'MODIS_Terra_CorrectedReflectance_TrueColor', kind: 'daily' },
-    blurb: 'Its MODIS imager has photographed the planet in a 2,330 km swath since 1999.',
+    blurb: 'Its MODIS imager has watched the whole planet, 2,330 km at a time, since 1999.',
   },
   {
     norad: [27424],
@@ -124,7 +124,7 @@ export const PROFILES: readonly SatProfile[] = [
     swathKm: 2330,
     resolutionM: 250,
     gibs: { collection: 'gibs-modis-aqua', layer: 'MODIS_Aqua_CorrectedReflectance_TrueColor', kind: 'daily' },
-    blurb: 'Its MODIS imager has photographed the planet in a 2,330 km swath since 2002.',
+    blurb: 'Its MODIS imager has watched the whole planet, 2,330 km at a time, since 2002.',
   },
   {
     norad: [38771],

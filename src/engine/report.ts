@@ -482,7 +482,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     const out: string[] = []
     if (unconfirmed > 0)
       out.push(
-        `NASA GIBS was slow to confirm ${unconfirmed === 1 ? 'one VIIRS image' : `${nf.format(unconfirmed)} VIIRS images`}; VIIRS images the whole globe every day, so ${unconfirmed === 1 ? 'that pass counts' : 'those passes count'} as photographed.`,
+        `NASA GIBS was slow to confirm ${unconfirmed === 1 ? 'one VIIRS image' : `${nf.format(unconfirmed)} VIIRS images`}; VIIRS images the whole globe every day, so ${unconfirmed === 1 ? 'that pass counts' : 'those passes count'} as watched.`,
       )
     if (missing > 0) {
       const all = missing >= mosaics

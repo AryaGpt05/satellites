@@ -359,7 +359,7 @@ export default function BackendSandbox() {
           <code className="t-mono">npx tsx scripts/backend-render-og.ts</code>.
         </p>
         <figure className="bkx-og">
-          <img src="/og-default.png" width={1200} height={630} alt="Overflight card: Something photographed you this week." />
+          <img src="/og-default.png" width={1200} height={630} alt="Watched card: Something watched you this week." />
           <figcaption className="t-label">
             <span>1200 × 630 · PNG</span>
             <span>og:image · twitter:card summary_large_image</span>
