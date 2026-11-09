@@ -451,8 +451,8 @@
     position: relative;
     z-index: 1;
     display: inline-block;
-    padding-block: 12px;
-    margin-block: -12px;
+    padding-block: 14px;
+    margin-block: -14px;
   }
 }
 

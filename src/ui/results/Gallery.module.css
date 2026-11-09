@@ -173,6 +173,18 @@
     letter-spacing: 0.04em;
   }
 }
+/* The short-landscape dock's half column (263 px): the words stay inside their segments (PH-14). */
+@container gallery (max-width: 300px) {
+  .seg {
+    flex: none;
+    padding: 0 3px;
+    font-size: 10px;
+  }
+  .counter {
+    min-width: 0;
+    font-size: 10px;
+  }
+}
 @media (pointer: coarse) {
   .navBtn {
     display: none;
@@ -638,7 +650,7 @@ b.warn,
 }
 .mCap {
   /* the caption adapts to the card's width (container query below) */
-  container-type: inline-size;
+  container: card / inline-size;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -647,7 +659,16 @@ b.warn,
 }
 /* A narrow card (the 400 px panel at 1024, the short-landscape dock's half column; PH-14 / LAP-09): the replay control
    is its glyph and the status leaves the second line, so both lines keep the time whole instead of truncating it. */
-@container (max-width: 360px) {
+.capTimeB {
+  display: none;
+}
+@container card (max-width: 360px) {
+  .gallery:not(.mobile) .capTimeA {
+    display: none;
+  }
+  .gallery:not(.mobile) .capTimeB {
+    display: inline;
+  }
   .gallery:not(.mobile) .mReplayText {
     display: none;
   }
@@ -659,7 +680,12 @@ b.warn,
   .gallery:not(.mobile) .mStatus {
     display: none;
   }
+  /* Share stays in the pass view's own actions; here the two lines keep the room */
+  .gallery:not(.mobile) .mShare {
+    display: none;
+  }
 }
+
 .mLines {
   flex: 1;
   min-width: 0;

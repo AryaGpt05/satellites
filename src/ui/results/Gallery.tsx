@@ -407,8 +407,10 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
             // stays): the results' arrival lays out 5 slides, not all 29 (~30 nodes each), in the frame the panel mounts.
             Math.abs(i - idx) > MOUNT_NEAR && !mountedSlides.current.has(p.key) ? (
               <figure key={p.key} className={s.slide} aria-hidden>
+                {/* the same frame box as the photo's (its aspect: the hero's 3:2 / 16:9, the pass view's square), so a
+                    far slide never sets the track's height */}
                 <div className={s.figure}>
-                  <div className={s.frame} />
+                  <div className={cx(s.frame, detail ? s.square : s.heroFrame)} />
                 </div>
               </figure>
             ) : (
@@ -556,14 +558,15 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
             {' · '}
             {t.day}
             {mobile ? null : (
-              <>
+              <span className={s.capTimeA}>
                 {' · '}
                 {t.time}
-              </>
+              </span>
             )}
           </span>
           <span className={s.mLine}>
-            {mobile ? `${t.time} · ` : null}
+            {/* Phones, and a narrow card (PH-14), set the time at the head of the second line, so the first never cuts it. */}
+            {mobile ? `${t.time} · ` : <span className={s.capTimeB}>{`${t.time} · `}</span>}
             {int(capture.gsdM)} m
             <span className={s.dim}>
               {' · '}
