@@ -6,6 +6,7 @@ const imagery = vi.hoisted(() => ({
   searchCapturesDetailed: vi.fn(),
   weatherCaptures: vi.fn(),
   spotCloud: vi.fn(),
+  spotCheck: vi.fn(),
   ensureTz: vi.fn(),
   sentinel2PlanCovers: vi.fn(),
   searchClearScenes: vi.fn(),
@@ -50,6 +51,8 @@ beforeEach(() => {
   imagery.searchCapturesDetailed.mockReset()
   imagery.weatherCaptures.mockReset()
   imagery.spotCloud.mockReset().mockResolvedValue('unknown')
+  // The report reads spot + clear fraction through spotCheck; these tests script the spot through spotCloud.
+  imagery.spotCheck.mockReset().mockImplementation(async (c: Capture, p: LatLon, s?: AbortSignal) => ({ spot: await imagery.spotCloud(c, p, s) }))
   imagery.ensureTz.mockReset().mockResolvedValue(undefined)
   imagery.sentinel2PlanCovers.mockReset().mockResolvedValue(true)
   imagery.searchClearScenes.mockReset().mockResolvedValue([])
@@ -504,6 +507,25 @@ describe('computeReport', () => {
     const report = await computeReport(waterloo, { now })
     expect(performance.now() - t0).toBeLessThan(5000)
     expect(report.captures[0].spot).toBeUndefined()
+  })
+
+  it('drops a spot check that answers after its budget: the captures the reports rank on stay put (CT-11)', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const scene = capture({ id: 'S2_LATE', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: s2c[0].tClosest - 7 * 60_000, cloudCoverPct: 3 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [scene], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    let answered!: () => void
+    const late = new Promise<void>((resolve) => (answered = resolve))
+    imagery.spotCheck.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 1_800)) // the budget is 1.5 s
+      answered()
+      return { spot: 'cloud', clearFraction: 0.05 }
+    })
+    const report = await computeReport(waterloo, { now })
+    await late
+    await new Promise((r) => setTimeout(r, 0))
+    expect(report.captures[0].spot).toBeUndefined()
+    expect(report.captures[0].clearFraction).toBeUndefined()
   })
 
   it('recasts open-optical passes over the open ocean, where Sentinel-2 never images', async () => {

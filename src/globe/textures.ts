@@ -417,6 +417,11 @@ export async function decodeImageUrl(url: string, signal?: AbortSignal): Promise
   }
 }
 
+/** Decode image bytes fetched elsewhere (a Sentinel-2 / Landsat decal toned by the imagery module), off the main thread. */
+export function decodeImageBlob(blob: Blob): Promise<DecodedMap> {
+  return decodeBlob(blob)
+}
+
 /** Maps whose download + decode started early (a deep link; every phone page), by URL. Each is handed over once. */
 const decoded = new Map<string, Promise<DecodedMap>>()
 

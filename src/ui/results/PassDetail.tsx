@@ -13,10 +13,12 @@
  * near-total one is dimmed so it is never the brightest thing on screen.
  */
 import { startTransition, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { spotCloud } from '@/imagery'
+import { isTonedUrl, spotCloud, tonedImageBlob } from '@/imagery'
 import type { Capture, Pass, SpotCloud } from '@/types'
 import { Glyph, Readout, Rule, ScrambleOnce, cx, fmtNorad, fmtUtc } from '@/ui/system'
 import { reportNow } from './Ago'
+import { decodedPhoto } from './images'
+import { cardUrl } from './lib/photos'
 import { Gallery } from './Gallery'
 import { PassPlan } from './PassPlan'
 import { ReplayControls } from './ReplayControls'
@@ -165,9 +167,14 @@ function Links({ capture, pass, meta, placeLabel }: { capture: Capture; pass: Pa
     setDl('busy')
     const url = downloadUrl(capture, spec)
     try {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(String(res.status))
-      const blob = await res.blob()
+      // Sentinel-2 / Landsat: the lossless render, toned exactly like the photo on screen (same curve, PNG).
+      let blob: Blob
+      if (isTonedUrl(url)) blob = await tonedImageBlob(url, { fmt: 'png' })
+      else {
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(String(res.status))
+        blob = await res.blob()
+      }
       const ext = blob.type.includes('png') ? 'png' : 'jpg'
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -186,7 +193,8 @@ function Links({ capture, pass, meta, placeLabel }: { capture: Capture; pass: Pa
   return (
     <div className={s.links}>
       {dl === 'err' ? (
-        <a className={s.link} href={downloadUrl(capture, spec)} target="_blank" rel="noopener noreferrer">
+        // The picture on screen (its toned bytes, a blob: URL) when the lossless render could not be fetched.
+        <a className={s.link} href={decodedPhoto(cardUrl(capture))?.src ?? downloadUrl(capture, spec)} target="_blank" rel="noopener noreferrer">
           <Glyph name="arrow-up-right" size={12} />
           Open image to save it
         </a>

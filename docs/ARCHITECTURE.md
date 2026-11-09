@@ -16,8 +16,8 @@ Read first: `docs/DESIGN.md` (non-negotiable art direction), `src/types.ts` (sha
 |---|---|---|
 | Orbit catalog | `/data/catalog.json` (built by `.github/workflows/catalog.yml` from CelesTrak) | `CatalogFile` with `CatalogRow`s, ~16.9k rows, 2.4 MB (0.8 MB gz) |
 | Sentinel-2 + Landsat search | `POST https://planetarycomputer.microsoft.com/api/stac/v1/search` | collections `sentinel-2-l2a`, `landsat-c2-l2`; `intersects` Point; `datetime` range; props `platform` (`Sentinel-2A/B/C`, `landsat-8/9`), `eo:cloud_cover`, `view:sun_elevation` |
-| Crops (server-rendered PNG) | `GET https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/{minx},{miny},{maxx},{maxy}/{w}x{h}.png?collection=…&item=…&…` | S2: `assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0`. Landsat: `assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55`. ~1–3 s |
-| Point value (cloud at the spot) | `GET …/api/data/v1/item/point/{lon},{lat}?collection=sentinel-2-l2a&item=…&assets=SCL` | SCL classes 8, 9 = cloud, 10 = cirrus, 3 = cloud shadow |
+| Crops (server-rendered) | `GET https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/{minx},{miny},{maxx},{maxy}/{w}x{h}.{jpg,png}?collection=…&item=…&…` | One recipe for every renderer, `api/_lib/toneRender.ts` `pcRenderQuery`: surface reflectance (S2 `B04/B03/B02`, Landsat `red/green/blue`), `asset_as_band=true&expression=sqrt(where(B04>1000,B04-1000,0));…&rescale=0,100` (square root of reflectance 0…1; S2 offset 1000 from processing baseline 04.00, i.e. products generated from 25 Jan 2022, else 0; Landsat `…>7272.727…&rescale=0,190.693`), `reproject=lanczos` (the default nearest warp leaves 10 m / 30 m stair-steps; `resampling=` is ignored by bbox crops). Never shown as it comes: toned first (see below). ~0.7 s (112 px) … 2.7 s (1024) … 5 s (2048) |
+| Cloud mask (spot, clear share, tone) | `GET …/api/data/v1/item/bbox/{box}/64x64.npy?collection=…&item=…&assets=SCL` (Landsat `assets=qa_pixel`) | `api/_lib/toneRender.ts` `maskUrl`: the photo's square (S2 ±5 km, Landsat ±7.5 km) around the place ROUNDED to 0.01°, raw classes + validity band. SCL 8, 9 = cloud, 10 = thin cirrus, 3 = cloud shadow. One request per capture and place serves the spot check (1 km majority at the exact place), the clear share for the lead ranking and the photo's white point. ~0.5–1 s |
 | Fallback S2 search | `POST https://earth-search.aws.element84.com/v1/search`, collection `sentinel-2-c1-l2a` | assets `visual` = 8-bit RGB COG (range requests OK) |
 | Weather imagery | NASA GIBS WMS `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS={layer}&STYLES=&FORMAT=image/jpeg&CRS=EPSG:4326&BBOX={minLat},{minLon},{maxLat},{maxLon}&WIDTH=&HEIGHT=&TIME={YYYY-MM-DD or ISO}` | layers: `VIIRS_NOAA20_CorrectedReflectance_TrueColor`, `VIIRS_NOAA21_…`, `VIIRS_SNPP_…`, `MODIS_Terra_…`, `MODIS_Aqua_…` (daily); `GOES-East_ABI_GeoColor`, `GOES-West_ABI_GeoColor` (10 min), `Himawari_AHI_Band3_Red_Visible_1km`. **Note the BBOX axis order for EPSG:4326 in WMS 1.3.0 is lat,lon** |
 | Geocoding | `https://photon.komoot.io/api/?q=…&limit=6` and `/reverse?lat=&lon=` | GeoJSON; properties `name, city, state, country, countrycode, osm_value` |
@@ -98,7 +98,25 @@ export function locateMe(): Promise<LatLon>
 export function timeZoneAt(lat: number, lon: number): string
 export function preloadImage(url: string): Promise<HTMLImageElement>
 ```
-`preloadImage` decodes off the main thread and caches by URL. Show the element it resolves with (or a clone): for a NASA
+`preloadImage` decodes off the main thread and caches by URL. A Sentinel-2 / Landsat crop (the encoded render above) is
+fetched and TONED in the pixels worker before anything shows it (`api/_lib/tone.ts`, owner rules: global edits only,
+disclosed on the About page): one curve per capture and place (black point = the ground's darkest 0.5 % of any channel,
+at most 0.06 reflectance; white point = the 99.5th percentile of the luminance each ground pixel needs for its brightest
+channel to fit once coloured, with the mask's cloud / cirrus / shadow cells left out; gamma putting the median at ~42 %
+grey, 48 % for bright scenes, clamped to [0.55, 0.8]; a frame of cloud is exposed for the cloud, white point ≤ 0.85;
+a coarse crop with no shared curve yet widens its span by up to ×1.25), applied the same at every pixel: the curve on
+luminance, colour ratios ^0.55 over half the black point, saturation ×1.2, out-of-gamut colour pulled towards grey at
+constant luma (blown cloud goes white), the JPEG's 8-px grid smoothed in flat areas (steps ≤ 10 levels between flat
+sides), then an unsharp mask on luma (σ ≈ 0.6 native px, amount 0.55, threshold 2/255, capped at 16/255; none on the
+server's card plate, which is its own size and already crisper than the app's resampled cut). It is measured over the
+share card's square around the rounded place (which the server's card crop IS), on the first crop near native
+resolution measured WITH its mask, and reused by the capture's other sizes, so the photo, the lightbox's sharper render,
+the DOM share card, the downloaded PNG and the server's OG card (`api/_lib/imagery.ts fetchCropPicture`, the same
+module; a plate toned without its mask is cached briefly, not as final) agree. Thumbnails and globe decals never ask for
+a mask of their own. The worker runs the tone in ~12 ms slices (`toneCropAsync`), so cloud masks and GIBS checks are
+never stuck behind a 2048 px photo; a transient HTTP error on a mask is not kept (the spot check retries). The
+element's `src` is a blob: URL of the toned bytes (as for GIBS); `tonedImageBlob(url, { fmt })` gives the bytes
+(the globe's decal, "Download image" as PNG). Show the element it resolves with (or a clone): for a NASA
 GIBS image its `src` is a blob: URL of the bytes the pixels worker fetched and checked for GIBS's all-black "no data"
 answer (I-1: no full-size draw or read-back on the main thread), so a fresh `<img src={url}>` would download it again.
 

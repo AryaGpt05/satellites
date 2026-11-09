@@ -17,6 +17,7 @@
  * Around tc the replay slows (imaged passes only) so the image paints over ≈ PAINT_REAL_S instead of flashing past:
  * the clock multiplies its replay step by slowFactor().
  */
+import { pickLead } from '@/lib/clarity'
 import { Vector3 } from 'three'
 import { bboxAround, clamp, EARTH_RADIUS_KM, latLonToWorld } from '@/lib/geo'
 import type { Capture, CaptureCollection, Pass, Report } from '@/types'
@@ -119,20 +120,10 @@ export function captureOf(report: Pick<Report, 'captures'> | undefined, pass: Pi
   return report.captures.find((c) => c.id === pass.captureId)
 }
 
-/** Spot clarity order (owner request B1): clear > cirrus > unknown > shadow > cloud. */
-const SPOT_RANK: Record<string, number> = { clear: 0, cirrus: 1, unknown: 2, shadow: 3, cloud: 4 }
-/** Scene cloud cover at or above this (or cloud at the spot) is "clouded over" (results lib/bestLook.ts CLOUDED_PCT). */
-const CLOUDED_PCT = 70
 /** Sun high enough that a daily true-colour mosaic shows the ground (results lib/photos.ts MOSAIC_MIN_SUN_DEG). */
 const MOSAIC_MIN_SUN_DEG = 10
 
 type CoverCandidate = { p: Pass; c: Capture }
-const spotRank = (c: Capture) => SPOT_RANK[c.spot ?? 'unknown'] ?? 2
-/** Most zoomed in, then clearest spot, then newest. */
-const byCloseness = (a: CoverCandidate, b: CoverCandidate) => a.c.gsdM - b.c.gsdM || spotRank(a.c) - spotRank(b.c) || b.p.tClosest - a.p.tClosest
-/** Least cloudy: the spot, then scene cloud (unknown counts as 50 %), then sharper, then newer. */
-const byCloud = (a: CoverCandidate, b: CoverCandidate) =>
-  spotRank(a.c) - spotRank(b.c) || (a.c.cloudCoverPct ?? 50) - (b.c.cloudCoverPct ?? 50) || a.c.gsdM - b.c.gsdM || b.p.tClosest - a.p.tClosest
 /** Weather mosaics: sharpest, then a well-lit day, then newest. */
 const byMosaic = (a: CoverCandidate, b: CoverCandidate) => {
   const lit = (x: CoverCandidate) => Number((x.p.sunElevationDeg ?? 0) >= MOSAIC_MIN_SUN_DEG)
@@ -141,11 +132,11 @@ const byMosaic = (a: CoverCandidate, b: CoverCandidate) => {
 
 /**
  * The pass whose image the results panel leads with (R3-17), so its decal is fetched before anyone opens it. The
- * same pick as results lib/photos.ts windowCover (lib/bestLook.ts pickBestLook; acquisition.test.ts checks the two
- * agree): among the window's imaged passes, the most zoomed-in CLEAR detailed capture (not clouded: spot ≠ cloud and
- * scene cloud < 70 %; smallest gsd, then the clearest spot, then the newest); with every detailed capture clouded,
- * the least cloudy one; with none, the sharpest weather mosaic. Only images the globe can paint count; partial
- * reports wait for the final one (the cover can still change).
+ * same pick as results lib/photos.ts windowCover (both rank detailed photos with src/lib/clarity.ts pickLead;
+ * acquisition.test.ts checks the two agree): among the window's imaged passes, the most zoomed-in CLEAR detailed
+ * capture of the clearest tier present (ties: clear spot, clearer square, higher sun, straighter view, newer); with
+ * every detailed capture clouded, the least cloudy one; with none, the sharpest weather mosaic. Only images the globe
+ * can paint count; partial reports wait for the final one (the cover can still change).
  */
 export function coverPass(report: Report | undefined): Pass | undefined {
   if (!report || report.partial) return undefined
@@ -160,9 +151,8 @@ export function coverPass(report: Report | undefined): Pass | undefined {
     if (c.provider !== 'gibs') detailed.push({ p, c })
     else if (isDaily(c.collection)) mosaics.push({ p, c })
   }
-  const clouded = (c: Capture) => c.spot === 'cloud' || (c.cloudCoverPct ?? 0) >= CLOUDED_PCT
-  const clear = detailed.filter((x) => !clouded(x.c))
-  const pick = clear.length ? clear.sort(byCloseness)[0] : detailed.length ? detailed.sort(byCloud)[0] : mosaics.sort(byMosaic)[0]
+  const lead = pickLead(detailed.map((x) => ({ x, capture: x.c, t: x.p.tClosest, sunDeg: x.p.sunElevationDeg, offNadirDeg: x.p.offNadirDeg })))
+  const pick = lead ? lead.item.x : mosaics.sort(byMosaic)[0]
   return pick && decalSpecFor(pick.c.collection, false) ? pick.p : undefined
 }
 

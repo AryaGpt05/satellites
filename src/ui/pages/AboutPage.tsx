@@ -340,6 +340,14 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 Then we search the image archives (Microsoft Planetary Computer, Element 84 and NASA) and match each photo to the
                 pass that took it. Every photo you see is the real one, cropped around your spot.
               </p>
+              <Facts
+                rows={[
+                  [
+                    'Touch-ups',
+                    'Sentinel-2 and Landsat photos are colour-balanced, smoothed and lightly sharpened for your screen, the same way across the whole picture. Nothing is added or removed.',
+                  ],
+                ]}
+              />
             </Section>
 
             <Section id="words" index="02" title="What the labels mean">

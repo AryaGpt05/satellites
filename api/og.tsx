@@ -22,7 +22,7 @@ import { buildCardSpec, buildSummarySpec, type CardSpec } from './_lib/cardSpec.
 import { displayHost, siteOrigin } from './_lib/env.js'
 import { loadFonts } from './_lib/fonts.js'
 import { loadOg } from './_lib/og-runtime.js'
-import { cropPlan, fetchImageDataUri } from './_lib/imagery.js'
+import { cropPlan, fetchCropPicture } from './_lib/imagery.js'
 import { SHARE_ID_RE, cardInputFromShare, fetchShare, shareFromParams, shareTimeZone, summaryFromParams, type ShareRecord } from './_lib/share.js'
 
 /** PC renders a 630² crop in 1–3 s, occasionally much longer; stay well inside maxDuration. */
@@ -116,7 +116,7 @@ export async function defaultCardPng(host: string): Promise<Uint8Array> {
 }
 
 type CardImage =
-  | { kind: 'image'; dataUri: string }
+  | { kind: 'image'; dataUri: string; complete: boolean } // complete: false = toned without its cloud mask (retry soon)
   | { kind: 'none' } //      not an imaged share: the geometry plate is the design
   | { kind: 'permanent' } // imaged, but no capture or one that can't be cropped here (final)
   | { kind: 'transient' } // the archive was slow or failed just now (retry soon)
@@ -125,8 +125,8 @@ async function cardImage(share: ShareRecord): Promise<CardImage> {
   if (share.verdict !== 'imaged') return { kind: 'none' }
   const plan = share.capture ? cropPlan(share.capture, share.lat, share.lon, PLATE) : null
   if (!plan) return { kind: 'permanent' }
-  const dataUri = await fetchImageDataUri(plan.url, IMAGE_TIMEOUT_MS)
-  return dataUri ? { kind: 'image', dataUri } : { kind: 'transient' }
+  const pic = await fetchCropPicture(plan.url, IMAGE_TIMEOUT_MS)
+  return pic ? { kind: 'image', ...pic } : { kind: 'transient' }
 }
 
 /** A week's summary: the closest look's crop (when it has one) beside "N satellites watched … K photos were made public." */
@@ -136,8 +136,8 @@ async function renderSummary(q: URLSearchParams, host: string): Promise<Response
   const spec = buildSummarySpec({ ...sum, timeZone: shareTimeZone(sum), host })
   const cap = sum.best?.capture
   const plan = cap ? cropPlan(cap, sum.lat, sum.lon, PLATE) : null
-  const dataUri = plan ? await fetchImageDataUri(plan.url, IMAGE_TIMEOUT_MS) : null
-  return render(shareCard({ spec, image: dataUri ? { dataUri } : null }), plan && !dataUri ? CACHE.degraded : CACHE.final)
+  const pic = plan ? await fetchCropPicture(plan.url, IMAGE_TIMEOUT_MS) : null
+  return render(shareCard({ spec, image: pic ? { dataUri: pic.dataUri } : null }), plan && !pic?.complete ? CACHE.degraded : CACHE.final)
 }
 
 async function renderDefault(host: string, cache: string): Promise<Response> {
@@ -170,8 +170,9 @@ export async function handleOg(request: Request): Promise<Response> {
 
     const img = await cardImage(share)
     const spec: CardSpec = buildCardSpec(cardInputFromShare(share, host, img.kind === 'permanent' ? 'permanent' : undefined))
-    // Only a transient archive miss is worth re-rendering soon; everything else is final.
-    const cache = degraded || img.kind === 'transient' ? CACHE.degraded : CACHE.final
+    // Only a transient archive miss (or a plate toned without its cloud mask) is worth re-rendering soon; everything
+    // else is final.
+    const cache = degraded || img.kind === 'transient' || (img.kind === 'image' && !img.complete) ? CACHE.degraded : CACHE.final
     return await render(shareCard({ spec, image: img.kind === 'image' ? { dataUri: img.dataUri } : null }), cache)
   } catch (err) {
     console.error('[og] render failed', err)

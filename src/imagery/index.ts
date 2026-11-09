@@ -20,16 +20,16 @@ export type { CaptureSearchResult } from './stac'
 export { weatherCaptures, weatherCandidates, verifyWeatherCapture, geoImageUrl, latestGeoImage, geoFrames, geoFrameCandidates, geoFrameTime, utcDate, GIBS_LAYERS, GIBS_DAILY_BY_NORAD, GEO_SAFE_LAG_MS, isGibsCollection } from './gibs'
 export type { GibsCollection, GibsLayer } from './gibs'
 
-export { spotCloud, classifyScl, classifySclArea, classifyQaPixel } from './cloud'
+export { spotCloud, spotCheck, classifyScl, classifySclArea, classifyQaPixel, type SpotCheck } from './cloud'
 export type { SpotCloud } from './cloud'
 
 export { searchPlaces, reversePlace, locateMe, timeZoneAt, ensureTz, tzReady, nauticalZone, coordinateLabel, parseCoordinates, LocateError } from './geocode'
 export type { LocateErrorCode } from './geocode'
 
-export { preloadImage, isImageCached, probeImage, decodeImagePixels, EmptyImageError } from './image'
+export { preloadImage, isImageCached, probeImage, decodeImagePixels, EmptyImageError, tonedImageBlob } from './image'
 export type { ImageProbe } from './image'
 
-export { pcCropUrl, gibsWmsUrl, gibsDomainsUrl, worldviewUrl, pcItemMapUrl } from './endpoints'
+export { pcCropUrl, gibsWmsUrl, gibsDomainsUrl, worldviewUrl, pcItemMapUrl, isTonedUrl } from './endpoints'
 export type { CropOpts } from './endpoints'
 
 export { fetchJson, withRetry, HttpError, TimeoutError, isAbortError } from './net'

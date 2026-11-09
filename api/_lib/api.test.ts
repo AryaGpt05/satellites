@@ -9,7 +9,10 @@ import { handleSharePage } from '../s.js'
 import { niceLength } from './card.js'
 import { buildCardSpec, buildSummarySpec } from './cardSpec.js'
 import { esc, jsonForScript, sharePageHtml } from './html.js'
-import { bboxAround, cropPlan } from './imagery.js'
+import { encode as encodeJpeg } from 'jpeg-js'
+import { bboxAround, cropPlan, fetchCropPicture } from './imagery.js'
+import { maskNpy } from './npyTesting.js'
+import { maskUrl, pcRenderQuery, tonePlanForUrl } from './tone.js'
 import { cardInputFromShare, description, headline, shareFromDeepLink, shareFromParams, shareFromRpc, summaryDescription, summaryFromParams, summaryTitle, text } from './share.js'
 
 /** The app's fallback link for the Sentinel-2C pass (src/ui/share/links.ts deepLink with the pass). */
@@ -222,8 +225,18 @@ describe('crop plans', () => {
     const plan = cropPlan(shareFromRpc(ROW)!.capture!, 43.47, -80.54, 630)!
     expect(plan.metresPerPx).toBe(10)
     expect(plan.halfSizeKm).toBeCloseTo(3.15)
-    expect(plan.url).toMatch(/^https:\/\/planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/-80\.\d{6},43\.\d{6},-80\.\d{6},43\.\d{6}\/630x630\.png\?/)
-    expect(plan.url).toContain('collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0')
+    expect(plan.url).toMatch(/^https:\/\/planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/-80\.\d{6},43\.\d{6},-80\.\d{6},43\.\d{6}\/630x630\.jpg\?/)
+    expect(plan.url).toContain(`collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&${pcRenderQuery('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803')}`)
+    // The server's crop is the measuring square of the app's photo: same mask, same curve key (tone.ts).
+    const tone = tonePlanForUrl(plan.url)!
+    expect(tone.maskUrl).toBe(maskUrl('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803', 43.47, -80.54))
+    tone.ref.forEach((v, i) => expect(tone.box[i]).toBeCloseTo(v, 5))
+  })
+  it('uses the Landsat render at 20 m per pixel', () => {
+    const plan = cropPlan({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_019030_20261022_02_T1' }, 43.47, -80.54, 630)!
+    expect(plan.metresPerPx).toBe(20)
+    expect(plan.url).toContain('assets=red&assets=green&assets=blue&asset_as_band=true&expression=')
+    expect(plan.url).toContain('reproject=lanczos')
   })
   it('refuses Earth Search ids (no server-side cropper)', () => {
     expect(cropPlan({ collection: 'sentinel-2-l2a', itemId: 'S2C_T17TNJ_20261101T161421_L2A' }, 43.47, -80.54, 630)).toBeNull()
@@ -436,6 +449,28 @@ describe('og card', () => {
     // IHDR: 1200 × 630
     const dv = new DataView(png.buffer, png.byteOffset)
     expect([dv.getUint32(16), dv.getUint32(20)]).toEqual([1200, 630])
+  })
+
+  it('flags a plate toned without its cloud mask, so the card is not cached as final (CT-6)', async () => {
+    const plan = cropPlan({ collection: 'sentinel-2-l2a', itemId: 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803', gsdM: 10 } as never, 43.47, -80.54, 64)!
+    const px = new Uint8Array(64 * 64 * 4)
+    for (let i = 0; i < 64 * 64; i++) px.set([60 + ((i * 37) % 90), 55 + ((i * 53) % 80), 40 + ((i * 29) % 60), 255], i * 4)
+    const jpg = Buffer.from(encodeJpeg({ data: px, width: 64, height: 64 }, 95).data)
+    const answer = (maskStatus: number) =>
+      vi.fn(async (u: string) =>
+        u.includes('.npy?')
+          ? maskStatus === 200
+            ? new Response(maskNpy(64, 64, () => 4))
+            : new Response('upstream request timeout', { status: maskStatus })
+          : new Response(jpg, { headers: { 'content-type': 'image/jpg' } }),
+      )
+    vi.stubGlobal('fetch', answer(504))
+    const without = await fetchCropPicture(plan.url, 5_000)
+    expect(without?.dataUri).toMatch(/^data:image\/jpeg;base64,/)
+    expect(without?.complete).toBe(false)
+    vi.stubGlobal('fetch', answer(200))
+    expect((await fetchCropPicture(plan.url, 5_000))?.complete).toBe(true)
+    vi.unstubAllGlobals()
   })
 
   it('caches an uncroppable capture as final without asking any archive', async () => {

@@ -4,7 +4,7 @@ import pcLandsat from './__fixtures__/pc-landsat-waterloo.json'
 import esS2 from './__fixtures__/es-s2-waterloo.json'
 import clearS2 from './__fixtures__/pc-clear-sentinel-2-l2a-waterloo.json'
 import clearLs from './__fixtures__/pc-clear-landsat-c2-l2-waterloo.json'
-import { pcCropUrl, pcPointUrl } from './endpoints'
+import { pcCropUrl } from './endpoints'
 import {
   dedupeCandidates,
   earthSearchItemToCandidate,
@@ -52,21 +52,24 @@ describe('platforms', () => {
 })
 
 describe('URL builders', () => {
-  it('builds a Sentinel-2 crop as lon/lat bbox with the TCI render params', () => {
+  it('builds a Sentinel-2 crop as lon/lat bbox with the encoded render (tone.ts)', () => {
     const url = pcCropUrl('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803', WATERLOO, { halfSizeKm: 3, px: 768 })
     expect(url).toBe(
       'https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/-80.582077,43.445320,-80.507723,43.499280/768x768.png' +
         '?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803' +
-        '&assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0',
+        '&assets=B04&assets=B03&assets=B02&asset_as_band=true' +
+        '&expression=sqrt(where(B04%3E1000%2CB04-1000%2C0))%3Bsqrt(where(B03%3E1000%2CB03-1000%2C0))%3Bsqrt(where(B02%3E1000%2CB02-1000%2C0))' +
+        '&rescale=0,100&nodata=0&reproject=lanczos',
     )
   })
-  it('builds a Landsat crop with RGB assets and the colour formula', () => {
+  it('builds a Landsat crop from the surface-reflectance bands', () => {
     const url = pcCropUrl('landsat-c2-l2', 'LC09_L2SP_019030_20261022_02_T1', WATERLOO, { halfSizeKm: 3, px: 512 })
     const [path, query] = url.split('?')
     expect(path).toBe('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/-80.582077,43.445320,-80.507723,43.499280/512x512.png')
     expect(query).toBe(
-      'collection=landsat-c2-l2&item=LC09_L2SP_019030_20261022_02_T1&assets=red&assets=green&assets=blue' +
-        '&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55',
+      'collection=landsat-c2-l2&item=LC09_L2SP_019030_20261022_02_T1&assets=red&assets=green&assets=blue&asset_as_band=true' +
+        '&expression=sqrt(where(red%3E7272.727%2Cred-7272.727%2C0))%3Bsqrt(where(green%3E7272.727%2Cgreen-7272.727%2C0))%3Bsqrt(where(blue%3E7272.727%2Cblue-7272.727%2C0))' +
+        '&rescale=0,190.693&reproject=lanczos',
     )
   })
   it('keeps west < east and south < north, and clamps px', () => {
@@ -76,11 +79,6 @@ describe('URL builders', () => {
     expect(s).toBeLessThan(n)
     expect(url).toContain('/2048x2048.png')
     expect(pcCropUrl('sentinel-2-l2a', 'x', WATERLOO, { halfSizeKm: 3, px: 1 })).toContain('/8x8.png')
-  })
-  it('builds a point query as lon,lat', () => {
-    expect(pcPointUrl('sentinel-2-l2a', 'ID', WATERLOO, 'SCL')).toBe(
-      'https://planetarycomputer.microsoft.com/api/data/v1/item/point/-80.544900,43.472300?collection=sentinel-2-l2a&item=ID&assets=SCL',
-    )
   })
 })
 

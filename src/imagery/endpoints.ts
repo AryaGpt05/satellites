@@ -4,6 +4,7 @@
  */
 import { bboxAround } from '@/lib/geo'
 import type { LatLon } from '@/types'
+import { maskUrl, pcCropUrlFor, tonePlanForUrl } from '../../api/_lib/toneRender'
 
 export const PC_STAC_SEARCH = 'https://planetarycomputer.microsoft.com/api/stac/v1/search'
 export const PC_DATA = 'https://planetarycomputer.microsoft.com/api/data/v1'
@@ -22,9 +23,6 @@ export interface CropOpts {
   px: number
 }
 
-/** Fixed decimals keep URLs (and therefore browser + LRU cache keys) stable for the same place. */
-const coord = (n: number) => n.toFixed(6)
-
 /** Clamp to what the renderers accept and what's sensible to ask a free service for. */
 export function sanitizeCrop({ halfSizeKm, px }: CropOpts): CropOpts {
   const h = Number.isFinite(halfSizeKm) && halfSizeKm > 0 ? halfSizeKm : 3
@@ -33,48 +31,27 @@ export function sanitizeCrop({ halfSizeKm, px }: CropOpts): CropOpts {
 }
 
 /**
- * Per-collection rendering of a PC data-API crop. These are the exact query strings documented
- * in ARCHITECTURE.md (S2: the 8-bit TCI "visual" asset; Landsat: L2 SR bands with a gamma/sigmoid
- * stretch). Strings, not URLSearchParams, because the API wants `assets` repeated and the
- * colour formula's commas unescaped.
- */
-const PC_RENDER: Record<StacCollection, string> = {
-  'sentinel-2-l2a': 'assets=visual&asset_bidx=visual%7C1%2C2%2C3&nodata=0',
-  'landsat-c2-l2':
-    'assets=red&assets=green&assets=blue&color_formula=gamma%20RGB%202.7,%20saturation%201.5,%20sigmoidal%20RGB%2015%200.55',
-}
-
-/**
- * Square PNG crop of one STAC item, centred on `place`, rendered by Planetary Computer.
+ * Square crop of one STAC item, centred on `place`, rendered by Planetary Computer as the shared encoded render
+ * (api/_lib/tone.ts pcRenderQuery: surface reflectance, square-root encoded, Lanczos warp). It is never shown as it
+ * comes: image.ts tones it in the pixels worker (one global curve per photo) before anything displays it, and the
+ * server's share card does the same, so every renderer shows the same pixels.
  * bbox is lon/lat order: minx (west), miny (south), maxx (east), maxy (north).
  */
 export function pcCropUrl(collection: StacCollection, itemId: string, place: LatLon, opts: CropOpts): string {
   const { halfSizeKm, px } = sanitizeCrop(opts)
-  const [w, s, e, n] = bboxAround(place.lat, place.lon, halfSizeKm)
-  return (
-    `${PC_DATA}/item/bbox/${coord(w)},${coord(s)},${coord(e)},${coord(n)}/${px}x${px}.png` +
-    `?collection=${collection}&item=${encodeURIComponent(itemId)}&${PC_RENDER[collection]}`
-  )
+  return pcCropUrlFor(collection, itemId, bboxAround(place.lat, place.lon, halfSizeKm), px, 'png')
 }
 
-/** Single-pixel value of one asset at the place (used for the spot cloud check). */
-export function pcPointUrl(collection: StacCollection, itemId: string, place: LatLon, asset: string): string {
-  return (
-    `${PC_DATA}/item/point/${coord(place.lon)},${coord(place.lat)}` +
-    `?collection=${collection}&item=${encodeURIComponent(itemId)}&assets=${encodeURIComponent(asset)}`
-  )
-}
+/** A Sentinel-2 / Landsat crop of the encoded render: toned (image.ts) before anything shows it. */
+export const isTonedUrl = (url: string) => tonePlanForUrl(url) !== null
 
 /**
- * The Sentinel-2 Scene Classification Layer over a small box around the place, as a tiny PNG whose first
- * channel is the raw class value (single uint8 band, no rescale; nearest resampling).
+ * The capture's cloud classification (Sentinel-2 SCL / Landsat QA_PIXEL) over the photo's square around the place
+ * rounded to 0.01°, as a 64 px numpy array: the spot check, the clear fraction and the photo's tone all read it
+ * (one request per capture and place).
  */
-export function pcSclAreaUrl(itemId: string, place: LatLon, halfSizeKm: number, px: number): string {
-  const [w, s, e, n] = bboxAround(place.lat, place.lon, halfSizeKm)
-  return (
-    `${PC_DATA}/item/bbox/${coord(w)},${coord(s)},${coord(e)},${coord(n)}/${px}x${px}.png` +
-    `?collection=sentinel-2-l2a&item=${encodeURIComponent(itemId)}&assets=SCL&resampling=nearest`
-  )
+export function pcMaskUrl(collection: StacCollection, itemId: string, place: LatLon): string {
+  return maskUrl(collection, itemId, place.lat, place.lon)
 }
 
 /** Human-facing map of one PC item (HTML). */
