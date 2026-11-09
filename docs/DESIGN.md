@@ -163,7 +163,8 @@ There is exactly one, and it is the wordmark. `index.html` paints `#boot-static`
 letters are an SVG path): the serif **Watched.** centred on ink, a touch above the middle, its signal full stop
 breathing (opacity, on the compositor, so it keeps moving through script parse and texture decode). No checklist, no
 progress bar, no second screen. Boot holds it at least 650 ms from navigation start and until the globe's first light
-and the first faces are in (never longer than 12 s). If loading takes over 6 s, one quiet mono line appears under the
+and the first faces are in (that wait is capped at 12 s from the moment the app's script runs; on a very slow
+link the script itself can take seconds to arrive, and the wordmark holds until it has). If loading takes over 6 s, one quiet mono line appears under the
 wordmark: "Slow connection, still loading"; it leaves with the ink.
 
 The exit (`src/app/bootCurtain.ts`, in the commit that mounts what boot led to: the landing, the computing panel, or

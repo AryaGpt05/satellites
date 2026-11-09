@@ -124,7 +124,8 @@ full stop, painted before any script runs (DESIGN §10). React never renders a b
 - `dropBootCurtain()` removes it immediately (dev sandboxes). Nothing may set the phase back to `boot` after it has
   left: a retry of the catalog (controller `retryCatalog`) loads it behind the fault notice instead.
 - Boot leaves no sooner than 650 ms after navigation start and once the globe's first light and the first faces are
-  in, never later than 12 s; deep and share links wait up to 1.2 s more for the sharp day map (R2K2).
+  in, waiting at most 12 s for them once the script runs (the script's own download comes first: measured on a 40 KB/s
+  link, the wordmark held ~19 s, its "Slow connection" line from 6 s); deep and share links wait up to 1.2 s more for the sharp day map (R2K2).
 
 ### Overlays over the globe: `<html data-overlay>`
 A full-screen overlay that covers the globe sets `document.documentElement.dataset.overlay` to `'lightbox'`, `'about'`

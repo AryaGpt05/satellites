@@ -11,7 +11,9 @@
 import { Canvas } from '@react-three/fiber'
 import { Component, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Color } from 'three'
+import { SHORT_LANDSCAPE_QUERY, STACKED_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
+import { useMediaQuery } from '@/ui/system/media'
 import { palette } from '@/ui/system/palette'
 import { GlobeOverlay } from './GlobeOverlay'
 import { detectMobile, dprLevels, prefersReducedMotion, provisionalTier } from './quality'
@@ -116,9 +118,15 @@ class SceneBoundary extends Component<{ children: ReactNode; onError: () => void
 /** Static hairline globe for browsers without WebGL 2. Honest and quiet: the rest of the app still works. */
 /** The fallback note: centred lines that never run past a phone's edges (GL-1). */
 const NOTE: CSSProperties = { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.7, maxWidth: 'calc(100% - 32px)' }
+/**
+ * Phones and short landscape screens: the bottom of the screen belongs to the sheet / landing column, which covered
+ * the note entirely. There it sits in the clear band under the HUD's top lines instead.
+ */
+const NOTE_TOP: CSSProperties = { ...NOTE, top: 'calc(var(--bezel-inset) + 64px)', bottom: 'auto' }
 const NOTE_LINE: CSSProperties = { display: 'block', whiteSpace: 'nowrap' }
 
 function GlobeFallback() {
+  const top = useMediaQuery(`${STACKED_QUERY}, ${SHORT_LANDSCAPE_QUERY}`)
   // Meridians at 0°, ±30°, ±60° from the central one project to a line and two ellipses.
   const meridians = [30, 60]
   const parallels = [-60, -30, 0, 30, 60]
@@ -139,7 +147,7 @@ function GlobeFallback() {
         </g>
       </svg>
       {/* GL-1: two centred lines, each short enough for a 375 px phone (one line ran off both edges at 390 px). */}
-      <p className={cx('t-label', s.fallbackNote)} style={NOTE}>
+      <p className={cx('t-label', s.fallbackNote)} style={top ? NOTE_TOP : NOTE}>
         <span style={NOTE_LINE}>3D view unavailable</span>
         <span style={NOTE_LINE}>WebGL 2 is off in this browser</span>
       </p>
