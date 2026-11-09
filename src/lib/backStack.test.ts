@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createBackStack, stampOf, type BackStack, type HistoryLike } from './backStack'
+import { createBackStack, resolveTabId, stampOf, type BackStack, type HistoryLike } from './backStack'
 
 /**
  * A session history for one tab, asynchronous like a browser's: `go` picks its target entry when called and lands it
@@ -395,6 +395,29 @@ describe('back stack across loads of the same tab (reloads, returns the back-for
     expect(b.s.names()).toEqual([])
   })
 
+  it('reload with a landing layer open (About, search mode): the landing restores none, the first Back is not dead (N1)', () => {
+    const h = fakeHistory()
+    const a = load(h)
+    a.open('about')
+    a.settle()
+    expect(h.index()).toBe(1)
+    const b = load(h) // reload: boot settles on the landing, nothing comes back
+    b.settle()
+    b.s.reconcile() // Main: boot → idle (or error)
+    b.settle()
+    expect(h.index()).toBe(0)
+    expect(h.url()).toBe('/')
+    expect(h.log.leftSite).toBe(0)
+    // a layer opened now gets an entry of its own, and Back closes it
+    b.open('search')
+    b.settle()
+    expect(h.index()).toBe(1)
+    h.back()
+    b.settle()
+    expect(b.closed).toEqual(['search'])
+    expect(h.index()).toBe(0)
+  })
+
   it('stamps entries with this tab and their depth; another tab’s stamps read as depth 0', () => {
     const h = fakeHistory()
     const { open, settle } = load(h)
@@ -402,5 +425,135 @@ describe('back stack across loads of the same tab (reloads, returns the back-for
     settle()
     expect(stampOf(h.state, 'tab1')).toEqual({ s: 'tab1', d: 1 })
     expect(stampOf(h.state, 'tab2')).toBeUndefined()
+  })
+})
+
+describe('back stack: layers stack in their drawn order', () => {
+  it('a pass selected while About is up goes under About: Back closes About, then the pass (F2)', () => {
+    const h = fakeHistory('/?s=abcdefgh')
+    const { s, open, closed, settle, app } = load(h, { deep: true, place: 'paris' })
+    open('results') // computing a share link
+    settle()
+    open('about') // "How this works" while it computes
+    settle()
+    open('pass') // the share's pass, selected as the results land
+    settle()
+    expect(s.names()).toEqual(['results', 'pass', 'about'])
+    expect(h.index()).toBe(3)
+    h.back()
+    settle()
+    expect(closed).toEqual(['about'])
+    expect(app.pass).toBe('P1')
+    expect(h.url()).toBe('/?q=paris&p=P1')
+    h.back()
+    settle()
+    expect(closed).toEqual(['about', 'pass'])
+    expect(h.url()).toBe('/?q=paris')
+    h.back()
+    settle()
+    expect(h.url()).toBe('/')
+    expect(h.log.leftSite).toBe(0)
+  })
+
+  it('same rank, or an unknown name, goes on top', () => {
+    const h = fakeHistory()
+    const { s, open, settle } = load(h)
+    open('results')
+    open('share')
+    open('lightbox') // drawn under the share sheet
+    open('popover') // unknown: on top
+    settle()
+    expect(s.names()).toEqual(['results', 'lightbox', 'share', 'popover'])
+    expect(h.index()).toBe(4)
+  })
+
+  it('a layer under another, closed from the UI, takes one entry off and keeps the rest in order', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, closed, settle } = load(h)
+    open('results')
+    open('about')
+    open('pass')
+    settle()
+    uiClose('pass')
+    settle()
+    expect(s.names()).toEqual(['results', 'about'])
+    expect(h.index()).toBe(2)
+    h.back()
+    settle()
+    expect(closed).toEqual(['about'])
+    expect(s.names()).toEqual(['results'])
+  })
+})
+
+describe('tab id (F4: storage blocked)', () => {
+  const store = () => {
+    const m = new Map<string, string>()
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), m }
+  }
+  const blocked = {
+    getItem: () => {
+      throw new Error('SecurityError')
+    },
+    setItem: () => {
+      throw new Error('SecurityError')
+    },
+  }
+  let n = 0
+  const mint = () => `mint${++n}`
+
+  it('sessionStorage first, kept across loads', () => {
+    const st = store()
+    const win = { name: '' }
+    const a = resolveTabId(st, null, win, mint)
+    expect(resolveTabId(st, null, { name: '' }, mint)).toBe(a)
+  })
+
+  it('storage blocked: the stamp on the entry in view, then window.name, before minting', () => {
+    const win = { name: '' }
+    const first = resolveTabId(blocked, null, win, mint)
+    // reload on a stamped entry
+    expect(resolveTabId(blocked, { 'watched-layer': { s: first, d: 2 } }, { name: '' }, mint)).toBe(first)
+    // reload on an entry the app never stamped (another page's state): window.name carries it
+    expect(resolveTabId(blocked, null, win, mint)).toBe(first)
+    expect(resolveTabId(null, null, win, mint)).toBe(first)
+  })
+
+  it('a reload with storage blocked still adopts its entries: Back closes the layer (no dead Back)', () => {
+    const h = fakeHistory()
+    const win = { name: '' }
+    const sidA = resolveTabId(blocked, h.state, win, mint)
+    const micro: (() => void)[] = []
+    const run = () => {
+      for (let i = 0; i < 10; i++) {
+        micro.splice(0).forEach((f) => f())
+        if (!h.deliver() && micro.length === 0) return
+      }
+    }
+    const a = createBackStack(h, { schedule: (f) => void micro.push(f), sid: sidA })
+    h.listen((st) => a.onPop(st))
+    a.open('results', () => undefined)
+    run()
+    expect(h.index()).toBe(1)
+    const sidB = resolveTabId(blocked, h.state, win, mint)
+    expect(sidB).toBe(sidA)
+    const b = createBackStack(h, { schedule: (f) => void micro.push(f), sid: sidB })
+    h.listen((st) => b.onPop(st))
+    const closedB: string[] = []
+    const t = b.open('results', () => {
+      closedB.push('results')
+      b.closed(t)
+    })
+    run()
+    expect(h.length()).toBe(2)
+    h.back()
+    run()
+    expect(closedB).toEqual(['results'])
+  })
+
+  it('never clobbers a window.name it did not write; ignores malformed ids', () => {
+    const win = { name: 'someone-else' }
+    const id = resolveTabId(blocked, { 'watched-layer': { s: '<bad id>', d: 1 } }, win, mint)
+    expect(id).toMatch(/^mint\d+$/)
+    expect(win.name).toBe('someone-else')
   })
 })

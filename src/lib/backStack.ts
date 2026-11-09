@@ -13,6 +13,8 @@
  *    is asked to rewrite the address bar for what is on screen (`onSettled`), whatever an earlier write left on the
  *    entry it lands on;
  *  - the app's own moves never go below this load's first entry, so the app itself never navigates off the site.
+ * Layers stack in their drawn order (results < pass < search < lightbox < share < about), not in the order they opened:
+ * a pass a share link selects while About is up goes under About, so Back closes what is on top.
  * A deep or share link opens straight onto results: when those results actually open, a landing entry is slipped in
  * under them, so Back from a shared link lands on Watched's landing instead of leaving (not on a reload: the history
  * already has its entries).
@@ -62,6 +64,10 @@ export interface BackStack {
 }
 
 export const MARK = 'watched-layer'
+
+/** Drawn order of the layers, bottom first: a layer opens beneath any open layer drawn above it. Unknown names go on top. */
+export const LAYER_RANK: Readonly<Record<string, number>> = { results: 0, pass: 1, search: 2, lightbox: 3, share: 4, about: 5 }
+const rankOf = (name: string) => LAYER_RANK[name] ?? Number.MAX_SAFE_INTEGER
 type Stamp = { s: string; d: number }
 
 /** The stamp on a history state, if it is this tab's. */
@@ -142,7 +148,11 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
         return token
       }
       slip = undefined
-      stack.push({ token, close, own: true })
+      // Beneath any open layer drawn above it (F2): Back must close what is on top. Depth is all an entry carries, so
+      // the history needs no change.
+      const r = rankOf(name)
+      const at = stack.findIndex((e) => rankOf(e.token.name) > r)
+      stack.splice(at < 0 ? stack.length : at, 0, { token, close, own: true })
       if (adoptable > 0) adoptable-- // a restored layer: its entry is already there
       else change()
       return token
@@ -201,18 +211,54 @@ let instance: BackStack | null = null
 let settledListener: (() => void) | null = null
 let popListener: ((e: PopStateEvent) => void) | null = null
 
-/** This tab's id: kept for the tab's life (sessionStorage), so a reload knows the entries it pushed before. */
-function tabId(): string {
-  const key = 'watched.backStack.tab'
-  try {
-    const v = sessionStorage.getItem(key)
-    if (v) return v
-    const id = Math.random().toString(36).slice(2, 10)
-    sessionStorage.setItem(key, id)
-    return id
-  } catch {
-    return Math.random().toString(36).slice(2, 10)
+const TAB_KEY = 'watched.backStack.tab'
+const NAME_PREFIX = 'watched-tab:'
+const TAB_ID_RE = /^[0-9a-z]{4,16}$/
+
+/**
+ * This tab's id, kept for the tab's life so a reload knows the entries it pushed before: sessionStorage, else (storage
+ * blocked: Safari's "Block All Cookies", some in-app browsers) the stamp on the entry in view, else window.name. Only
+ * a tab with none of them mints a new one (F4). window.name is written only when empty or already ours.
+ */
+export function resolveTabId(
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null,
+  state: unknown,
+  win: { name: string },
+  mint: () => string = () => Math.random().toString(36).slice(2, 10),
+): string {
+  const read = (fn: () => string | null | undefined) => {
+    try {
+      const v = fn()
+      return typeof v === 'string' && TAB_ID_RE.test(v) ? v : undefined
+    } catch {
+      return undefined
+    }
   }
+  const fromStorage = read(() => storage?.getItem(TAB_KEY))
+  const fromState = read(() => ((state as Record<string, unknown> | null)?.[MARK] as Stamp | undefined)?.s)
+  const fromName = read(() => (win.name.startsWith(NAME_PREFIX) ? win.name.slice(NAME_PREFIX.length) : undefined))
+  const id = fromStorage ?? fromState ?? fromName ?? mint()
+  try {
+    if (fromStorage !== id) storage?.setItem(TAB_KEY, id)
+  } catch {
+    // blocked: the stamp and window.name carry it
+  }
+  try {
+    if (!win.name || win.name.startsWith(NAME_PREFIX)) win.name = NAME_PREFIX + id
+  } catch {
+    // ignore
+  }
+  return id
+}
+
+function tabId(): string {
+  let storage: Storage | null = null
+  try {
+    storage = sessionStorage
+  } catch {
+    // access itself throws when storage is blocked
+  }
+  return resolveTabId(storage, history.state, window)
 }
 
 /** The page's back stack (created on first use; inert outside a browser). */

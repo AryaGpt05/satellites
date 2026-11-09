@@ -204,11 +204,15 @@ export default function Main() {
     const offResults = watchLayer(sub, get, 'results', (st) => st.phase === 'computing' || st.phase === 'results' || st.phase === 'error', resetToLanding)
     const offPass = watchLayer(sub, get, 'pass', (st) => st.phase === 'results' && !!st.selectedPassId, closePass)
     // A reload (or a return the back-forward cache didn't keep) restores layers from the address and adopts the entries
-    // it finds; once the results have landed (a pass from ?p= is selected in the same tick), line the history up with
-    // what actually came back.
+    // it finds; once what comes back has landed, line the history up with it: the results (a pass from ?p= is selected
+    // in the same tick), or a boot that settles on the landing or an error, which restores no layer of its own (N1: a
+    // reload with About or search mode open over the landing would otherwise leave a dead Back).
     let reconcileTimer = 0
     const offReconcile = sub((st, prev) => {
-      if (st.phase === 'results' && prev.phase !== 'results') {
+      const settled =
+        (st.phase === 'results' && prev.phase !== 'results') ||
+        (prev.phase === 'boot' && (st.phase === 'idle' || st.phase === 'error'))
+      if (settled) {
         window.clearTimeout(reconcileTimer)
         reconcileTimer = window.setTimeout(() => backStack()?.reconcile(), 0)
       }
