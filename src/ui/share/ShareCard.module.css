@@ -5,7 +5,13 @@
  */
 .wrap {
   position: relative;
-  width: 100%;
+  /* Sized by CSS from the first layout: the content box (inside the hairline) is 1200 : 630, which is exactly the
+     scaled card (630 × k, k = content width / 1200). A JS height (set after the scale is measured) made the
+     stacked sheet measure the card ~130px too tall in the same commit, so it opened at its 780px cap and then
+     shrank by 100px (a layout shift on phones). Auto width stretches it across its column, border included. */
+  box-sizing: content-box;
+  width: auto;
+  aspect-ratio: 1200 / 630;
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: var(--ink-0);

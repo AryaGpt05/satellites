@@ -78,6 +78,8 @@ export interface GlobeRuntime {
     progress: number
     /** Camera height above the surface, km (for readouts) */
     altitudeKm: number
+    /** Ground km per CSS px at the look-at point (drives phones' cloud-map step) */
+    kmPerPx: number
   }
   /** performance.now() of the last user input on the canvas (written by CameraDirector) */
   inputAt: number
@@ -187,7 +189,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     paint: createPaintUniforms(),
     tier,
     reducedMotion,
-    camera: { flying: false, arrivedAt: -Infinity, arrivedKind: null, flightId: 0, progress: 1, altitudeKm: 0 },
+    camera: { flying: false, arrivedAt: -Infinity, arrivedKind: null, flightId: 0, progress: 1, altitudeKm: 0, kmPerPx: Infinity },
     inputAt: -Infinity,
     throttled: false,
     resumedAt: -Infinity,

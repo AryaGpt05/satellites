@@ -70,3 +70,16 @@ export function declineLevel(levels: number[], index: number, fps: number, targe
   while (i > 0 && levels[i] > want + 1e-6) i--
   return i
 }
+
+/** The pixel ratio the canvas may ever use: the device's, never above 2 (DESIGN §9, G-M2) nor below 1. */
+export const maxDpr = (ratio: number) => Math.min(2, Math.max(1, ratio || 1))
+
+/**
+ * Adaptive-DPR levels and the starting level (PERF-08): phones start at 1.5 (floor 1.0) and earn 2.0 only by holding
+ * 58 fps; desktops start at their (capped) device ratio.
+ */
+export function dprLevels(mobile: boolean, ratio: number): { levels: number[]; start: number } {
+  const device = maxDpr(ratio)
+  const steps = mobile ? [1, 1.25, Math.min(1.5, device), device] : [1, 1.25, 1.5, 1.75, device].filter((v) => v <= device)
+  return { levels: [...new Set(steps)].sort((a, b) => a - b), start: mobile ? Math.min(1.5, device) : device }
+}

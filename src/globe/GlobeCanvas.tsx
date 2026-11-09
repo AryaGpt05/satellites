@@ -14,17 +14,16 @@ import { Color } from 'three'
 import { useApp } from '@/state/store'
 import { palette } from '@/ui/system/palette'
 import { GlobeOverlay } from './GlobeOverlay'
-import { detectMobile, prefersReducedMotion, provisionalTier } from './quality'
+import { detectMobile, dprLevels, prefersReducedMotion, provisionalTier } from './quality'
 import { createRuntime } from './runtime'
 import { GlobeScene } from './Scene'
 import s from './GlobeCanvas.module.css'
 
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ')
 
-/** Starting DPR: phones 1.5 (they earn 2.0 by holding 58 fps), desktops min(2, device). */
+/** Starting DPR: phones 1.5 (they earn 2.0 by holding 58 fps), desktops min(2, device); never above 2 (G-M2). */
 function initialDpr(mobile: boolean): number {
-  const device = Math.min(2, Math.max(1, typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1))
-  return mobile ? Math.min(1.5, device) : device
+  return dprLevels(mobile, typeof window === 'undefined' ? 1 : window.devicePixelRatio).start
 }
 
 function webgl2Available(): boolean {

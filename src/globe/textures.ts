@@ -32,7 +32,7 @@
  * Uploads are sliced: the destination is allocated once (texStorage only), then strips (128 rows on phones, 256 on
  * desktops) are uploaded straight into it with texSubImage2D (no intermediate texture and no GL state queries), one
  * per frame, or several within a small time budget under the boot curtain and in computing's windows
- * (uploadBudgetMs: never past 8 ms of upload work in a frame on phones); mips are generated once after the last
+ * (uploadBudgetMs; phones: up to 8 ms of upload work in any open frame, never more); mips are generated once after the last
  * strip, and only then is the finished texture swapped in (a batch's maps all in the same frame). The texture it
  * replaces is disposed a few frames later. Colour maps are sRGB; the cloud and data maps are data (no conversion).
  */
@@ -54,7 +54,7 @@ import {
 } from 'three'
 import { latLonToWorld, sunDirectionWorld } from '@/lib/geo'
 import { useApp } from '@/state/store'
-import type { TextureLevel } from './framing'
+import { kmPerTexel, type TextureLevel } from './framing'
 import { detectMobile, provisionalTier, type QualityTier } from './quality'
 import { FRAME, type GlobeRuntime } from './runtime'
 
@@ -187,12 +187,15 @@ export function planBatches(plan: UpgradeStep[]): UpgradeStep[][] {
 }
 
 /**
- * Phones' cloud step ('zoom'): the camera has settled below this altitude (km), where a 1k cloud texel (39 km)
- * spans well over the 2.5 px the zoom floor allows for the day map, and above the altitude where the cloud layer
- * has faded out for the close views (Imagery: uCloudFade).
+ * Phones' cloud step ('zoom'): the camera has settled so close that a 1k cloud texel (39 km) spans more than
+ * CLOUD_ZOOM_TEXEL_PX CSS px (the regional view at the 2k floor shows it at ~5 px; only a closer pass view or a
+ * zoom gets there), while the cloud layer still shows (above the altitude where it fades out for the close views:
+ * Imagery uCloudFade).
  */
-export const CLOUD_ZOOM_MAX_KM = 3000
+export const CLOUD_ZOOM_TEXEL_PX = 10
 export const CLOUD_ZOOM_MIN_KM = 600
+export const cloudZoomWanted = (kmPerPx: number, altitudeKm: number) =>
+  altitudeKm > CLOUD_ZOOM_MIN_KM && kmPerTexel('1k') / Math.max(1e-6, kmPerPx) > CLOUD_ZOOM_TEXEL_PX
 
 /** Number of strips a map of this level is uploaded in. */
 export const stripCount = (res: TextureLevel, rows = STRIP_ROWS) => Math.max(1, Math.ceil(SIZE[res][1] / rows))
@@ -269,6 +272,12 @@ export interface DecodedMap {
 
 type WorkerReply = { op: 'decoded'; req: number; width: number; height: number } | { op: 'strip'; req: number; bitmap: ImageBitmap } | { op: 'error'; req: number; message: string }
 
+class WorkerGone extends Error {
+  constructor() {
+    super('texture decode worker unavailable')
+  }
+}
+
 /** The decode worker: undefined until first asked for, null when unavailable (then decoding falls back to here). */
 let decodeWorker: Worker | null | undefined
 const replies = new Map<number, { resolve: (m: WorkerReply) => void; reject: (e: Error) => void }>()
@@ -304,12 +313,6 @@ function worker(): Worker | null {
     decodeWorker = null
   }
   return decodeWorker
-}
-
-class WorkerGone extends Error {
-  constructor() {
-    super('texture decode worker unavailable')
-  }
 }
 
 function ask(w: Worker, msg: Record<string, unknown>): Promise<WorkerReply> {
@@ -493,14 +496,15 @@ const idle = (fn: () => void, timeout = 4000): (() => void) => {
 }
 
 /**
- * Time budget (ms) for upload jobs in one frame: normally one job per frame (0 = just the first); while the boot
- * curtain covers the globe, or in computing's windows (the camera has barely moved, or is parked), a frame may take
- * several, so the critical maps land even on a slow device. Phones never spend more than 8 ms of upload work in a
- * frame (G-M1): a further job runs only if the last one's cost still fits.
+ * Time budget (ms) for upload jobs in one frame: on desktops normally one job per frame (0 = just the first); while
+ * the boot curtain covers the globe, or in computing's windows (the camera has barely moved, or is parked), a frame
+ * may take several, so the critical maps land even on a slow device. Phones spend up to 8 ms of upload work in any
+ * frame the gate allows, never more (G-M1): a further job runs only if the last one's cost still fits.
  */
 export const MOBILE_FRAME_UPLOAD_MS = 8
 export function uploadBudgetMs(phase: string, mobile = false): number {
-  if (mobile) return phase === 'boot' || phase === 'computing' ? MOBILE_FRAME_UPLOAD_MS : 0
+  // Phones' strips are small (128 rows): the 8 ms budget everywhere lands the 2k pair in a few frames.
+  if (mobile) return MOBILE_FRAME_UPLOAD_MS
   return phase === 'boot' ? 24 : phase === 'computing' ? 12 : 0
 }
 
@@ -594,11 +598,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       now - rt.camera.arrivedAt > 600
     // Zoomed in with the cloud layer still showing, settled, outside an acquisition sequence (phones' cloud step).
     const settledZoomedIn = (now: number) =>
-      !rt.camera.flying &&
-      !rt.acq.armed &&
-      now - rt.camera.arrivedAt > 600 &&
-      rt.camera.altitudeKm > CLOUD_ZOOM_MIN_KM &&
-      rt.camera.altitudeKm < CLOUD_ZOOM_MAX_KM
+      !rt.camera.flying && !rt.acq.armed && now - rt.camera.arrivedAt > 600 && cloudZoomWanted(rt.camera.kmPerPx, rt.camera.altitudeKm)
     const ready = (when: StepWhen) => () => {
       const now = performance.now()
       if (!placeSeen && settledAtPlace(now)) placeSeen = true

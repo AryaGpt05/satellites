@@ -214,7 +214,7 @@ function SharedPicture({ tz }: { tz?: string }) {
         frameClassName={s.sharedFrame}
       />
       <p className={s.sharedCaption}>
-        <b>Shared with you</b> · {name} photographed {shared.placeLabel}
+        <b>Shared with you</b> · {name} watched {shared.placeLabel}
         {when}
       </p>
     </div>

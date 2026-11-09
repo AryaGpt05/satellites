@@ -209,6 +209,12 @@
 .linkRow:focus-within {
   border-bottom-color: var(--signal);
 }
+/* The link field is a tap target too (a tap selects the link): 44px tall on touch, as every other control. */
+@media (pointer: coarse) {
+  .link {
+    height: 44px;
+  }
+}
 
 .text {
   margin: 0;

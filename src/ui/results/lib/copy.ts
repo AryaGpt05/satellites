@@ -224,10 +224,10 @@ export function radarSentence(r: NonNullable<Headline['radar']>): Sentence {
 
 // ── geostationary ─────────────────────────────────────────────────────────────────────────
 
-/** "GOES-19 has photographed this spot every 10 minutes, all week: 1,008 times." */
+/** "GOES-19 has watched this spot every 10 minutes, all week: 1,008 times." */
 export function geoSentence(g: GeoWatcher, days: number): Sentence {
   const span = Math.round(days) === 7 ? 'all week' : `for ${int(days)} days`
-  return [`${g.name} has photographed this spot every `, num(int(g.cadenceMin), 'minutes'), `, ${span}: `, num(int(g.imagesInWindow)), ' times.']
+  return [`${g.name} has watched this spot every `, num(int(g.cadenceMin), 'minutes'), `, ${span}: `, num(int(g.imagesInWindow)), ' times.']
 }
 
 // ── pass detail ───────────────────────────────────────────────────────────────────────────
@@ -339,7 +339,7 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
       } else {
         out.push([
           ...(nadir ? ['Looking straight down, '] : ['Pointing ', num(dec1(p.offNadirDeg), '°'), ' off straight down, ']),
-          `it could have photographed ${placeLabel}. We can’t know whether it did.`,
+          `it could have watched ${placeLabel}. We can’t know whether it did.`,
         ])
       }
       break
@@ -364,7 +364,7 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
 
 // ── share ─────────────────────────────────────────────────────────────────────────────────
 
-/** Card / post headline: "Sentinel-2C photographed Waterloo." */
+/** Card / post headline: "Sentinel-2C watched Waterloo." */
 export function shareHeadline(verdict: Pass['verdict'], name: string, place: string): { lead: string; place: string } {
   switch (verdict) {
     case 'imaged':

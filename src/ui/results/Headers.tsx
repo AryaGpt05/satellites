@@ -14,7 +14,7 @@
  * DetailHeader: back crumb, "3 / 31 ‹ ›" stepping within the pass's verdict (chevrons, so stepping never
  * reads as the ← of "back"), name, local time. A pass with a photo drops the stepper (the gallery under it
  * has its own counter and ‹ ›) and its name and time change in place, with a short fade, as you swipe.
- * A share recipient sees a one-line tag above it (R2R10): SHARED WITH YOU · SENTINEL-2C PHOTOGRAPHED WATERLOO.
+ * A share recipient sees a one-line tag above it (R2R10): SHARED WITH YOU · SENTINEL-2C WATCHED WATERLOO.
  */
 import { memo, useEffect, useRef, type KeyboardEvent } from 'react'
 import { timeZoneAt } from '@/imagery'
@@ -283,7 +283,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
           <p className={s.sharedTag}>
             <span className={s.sharedDot} aria-hidden />
             <span className={s.sharedText}>
-              Shared with you · {shared.sat} photographed {shared.place}
+              Shared with you · {shared.sat} watched {shared.place}
             </span>
           </p>
         ) : null}
@@ -308,7 +308,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
         <p className={s.sharedTag}>
           <span className={s.sharedDot} aria-hidden />
           <span className={s.sharedText}>
-            Shared with you · {shared.sat} photographed {shared.place}
+            Shared with you · {shared.sat} watched {shared.place}
           </span>
         </p>
       ) : null}

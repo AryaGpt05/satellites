@@ -690,6 +690,7 @@ export function CameraDirector() {
     const alt = applyPoseToCamera(s.pose, camera, vp, fov, tmp.cam)
     rt.camera.flying = s.flight !== null && !s.flight.soft
     rt.camera.altitudeKm = alt * EARTH_RADIUS_KM
+    rt.camera.kmPerPx = (s.pose.range * EARTH_RADIUS_KM * tanHalf) / Math.max(1, vp.height / 2)
     rt.inputAt = input.dragging ? now : input.lastInputAt
 
     // ── velocity estimate (smoothed over a few frames) for retargets

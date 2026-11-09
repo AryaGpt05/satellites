@@ -49,7 +49,9 @@ export function ShareCard({ spec }: { spec: CardSpec }) {
   const colW = PANEL.w / spec.readouts.length
 
   return (
-    <div ref={wrapRef} className={s.wrap} style={{ height: CARD_H * k }}>
+    // The wrap's height is CSS (aspect-ratio 1200 : 630 on its content box), so layout never waits on `k`: only the
+    // card's scale (a transform) does.
+    <div ref={wrapRef} className={s.wrap}>
       <div className={s.card} style={{ width: CARD_W, height: CARD_H, transform: `scale(${k})` }} aria-hidden>
         {spec.plate.kind === 'image' ? <ImagePlateView plate={spec.plate} /> : <PlanView plan={spec.plate} />}
         <div className={s.divider} style={{ left: PLATE }} />

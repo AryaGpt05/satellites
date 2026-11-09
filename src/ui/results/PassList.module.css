@@ -190,6 +190,9 @@
 /* thumbnail of the real crop */
 .thumb {
   position: relative;
+  /* A block, not a flex item: inside the absolutely positioned .thumbBtn an inline span ignored its 56 px box and the
+     photo spilled over the rows below (hotfix on main after 77a2435, kept here). */
+  display: block;
   flex: none;
   width: 56px;
   height: 56px;
@@ -223,6 +226,10 @@
   position: absolute;
   right: 8px;
   top: 12px;
+  display: block;
+  width: 56px;
+  height: 56px;
+  line-height: 0;
   padding: 0;
   cursor: zoom-in;
   -webkit-tap-highlight-color: transparent;
@@ -411,7 +418,8 @@
   }
 }
 @container (max-width: 340px) {
-  .thumb {
+  .thumb,
+  .thumbBtn {
     width: 48px;
     height: 48px;
   }

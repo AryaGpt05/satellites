@@ -31,21 +31,21 @@ export interface VerdictWords {
   unit: string
   /** One sentence for title= / aria-describedby / About */
   definition: string
-  /** Prose verb ("Sentinel-2C photographed Waterloo") */
+  /** Prose verb ("Sentinel-2C watched Waterloo"; owner, latest: user-facing copy says watched, never photographed) */
   verb: string
 }
 
 /** The only definition of the verdict vocabulary. Mono labels uppercase these with CSS. */
 export const VERDICT_META: Record<Verdict, VerdictWords> = {
   imaged: {
-    title: 'Photographed',
+    title: 'Watched',
     short: 'Photo',
     unit: 'images',
     definition: 'A real image of this place exists in a public archive.',
-    verb: 'photographed',
+    verb: 'watched',
   },
   likely: {
-    title: 'Likely photographed',
+    title: 'Likely watched',
     short: 'Likely',
     unit: 'passes',
     definition: 'A fixed camera’s swath covered this place. No picture of it is published.',

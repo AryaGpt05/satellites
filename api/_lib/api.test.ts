@@ -161,6 +161,19 @@ describe('summary links (R3-13)', () => {
     expect(summaryFromParams(new URLSearchParams(Q))).not.toHaveProperty('archiveDown')
     expect(summaryFromParams(new URLSearchParams(`${Q}&sa=yes`))).not.toHaveProperty('archiveDown')
   })
+  it('claims "no public photo" on an empty plate only when K is a known zero', () => {
+    const note = (q: string) => {
+      const spec = buildSummarySpec({ ...summaryFromParams(new URLSearchParams(q))!, host: '' })
+      return spec.plate.kind === 'plan' ? spec.plate.chips.map((c) => c.segs.map((s) => s.text).join(' ')).join(' | ') : 'image'
+    }
+    const bare = 'q=43.47,-80.54&n=Waterloo&sv=256&sw=1793678400000'
+    expect(note(`${bare}&sc=0,220,1544,66`)).toBe('No public photo this week')
+    // The archives didn't answer: K is unknown, so the plate can't say there was none.
+    expect(note(`${bare}&sc=0,220,1544,66&sa=1`)).toBe('No photo to show')
+    // A count with no picture in the link: never "no public photo" beside "1 photo was made public."
+    expect(note(`${bare}&sc=1,0,0,0`)).toBe('No photo to show')
+    expect(note(Q)).toBe('image')
+  })
   it('names the card and the alt text in the same words', async () => {
     const body = await (await handleSharePage(new Request(`https://www.watched.earth/api/s?${Q}`))).text()
     expect(body).toContain('<meta property="og:title" content="256 satellites watched Waterloo this week.">')

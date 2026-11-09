@@ -850,7 +850,12 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
     const credit = plateChip(creditFor(c, i.best.tClosest), { left: INSET, bottom: INSET }, 'bone2', CARD_FS.micro)
     const scale = scaleFor(crop.metresPerPx)
     plate = { kind: 'image', crop, chip, credit, scale, overlay: imageOverlay([chip, credit], scale), fallback: emptyPlate(planNote('imaged', 'transient')) }
-  } else plate = emptyPlate('No public photo this week')
+  } else {
+    // Say "no public photo" only when K says so: with the archives down (K unknown) or a count but no picture in the link,
+    // the plate stays neutral beside the sub-line ("The image archives didn’t answer." / "1 photo was made public.").
+    const none = !i.archiveDown && Math.round(i.counts.imaged) <= 0
+    plate = emptyPlate(none ? 'No public photo this week' : 'No photo to show')
+  }
   const day = i.windowEnd !== undefined ? localStamp(i.windowEnd, i.timeZone).split(' · ')[0] : ''
   const readouts: Readout[] = (['imaged', 'likely', 'could', 'overhead'] as const).map((v) => ({ label: SHORT[v], value: int(i.counts[v]) }))
   return {

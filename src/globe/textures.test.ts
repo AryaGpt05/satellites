@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { useApp } from '@/state/store'
 import { provisionalTier } from './quality'
 import { createRuntime } from './runtime'
-import { declineLevel } from './quality'
+import { declineLevel, dprLevels } from './quality'
 import {
   canUpload,
+  cloudZoomWanted,
   createScheduler,
   criticalSteps,
   deepLinkPlace,
@@ -35,6 +36,11 @@ describe('upgradePlan (decision 9)', () => {
     const plan = upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true })
     expect(plan.filter((s) => s.when === 'idle').map((s) => `${s.map}-${s.res}`)).toEqual(['day-4k', 'night-4k', 'clouds-4k', 'data-4k'])
     expect(plan.at(-1)).toEqual({ map: 'day', res: '8k', when: 'results' })
+  })
+  it("phones' cloud step waits for a view where a 1k cloud texel (39 km) shows past 10 px, with clouds still showing", () => {
+    expect(cloudZoomWanted(39.1 / 5, 9000)).toBe(false) // the regional view at the 2k floor: ~5 px
+    expect(cloudZoomWanted(39.1 / 12, 2500)).toBe(true) // zoomed in
+    expect(cloudZoomWanted(39.1 / 40, 400)).toBe(false) // so close the cloud layer has faded out
   })
   it('desktop steps swap one at a time', () => {
     const plan = upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true })
@@ -187,12 +193,11 @@ describe('critical steps (a deep link to a place in darkness waits on the night 
 })
 
 describe('upload scheduler (G-M1: ≤ 8 ms of upload work per frame on phones)', () => {
-  it('phones: one strip per frame outside boot / computing; at most 8 ms in them', () => {
-    expect(uploadBudgetMs('results', true)).toBe(0)
-    expect(uploadBudgetMs('idle', true)).toBe(0)
-    expect(uploadBudgetMs('boot', true)).toBe(8)
-    expect(uploadBudgetMs('computing', true)).toBe(8)
+  it('phones: at most 8 ms of uploads in any frame; desktops one job outside boot / computing', () => {
+    for (const phase of ['boot', 'idle', 'computing', 'results']) expect(uploadBudgetMs(phase, true)).toBe(8)
     expect(uploadBudgetMs('boot', false)).toBe(24)
+    expect(uploadBudgetMs('computing', false)).toBe(12)
+    expect(uploadBudgetMs('results', false)).toBe(0)
   })
   it('never starts a job the last one says would overrun the budget', () => {
     const sched = createScheduler()
@@ -229,5 +234,16 @@ describe('DPR decline (one reallocation for a slow device)', () => {
   })
   it('stays at the floor', () => {
     expect(declineLevel(levels, 0, 5, 40)).toBe(0)
+  })
+})
+
+describe('DPR levels (G-M2: never above 2)', () => {
+  it('a 3× phone starts at 1.5 and tops out at 2', () => {
+    expect(dprLevels(true, 3)).toEqual({ levels: [1, 1.25, 1.5, 2], start: 1.5 })
+  })
+  it('a 2× laptop starts at 2; a 1× screen stays at 1', () => {
+    expect(dprLevels(false, 2)).toEqual({ levels: [1, 1.25, 1.5, 1.75, 2], start: 2 })
+    expect(dprLevels(false, 1)).toEqual({ levels: [1], start: 1 })
+    expect(Math.max(...dprLevels(false, 4).levels)).toBe(2)
   })
 })

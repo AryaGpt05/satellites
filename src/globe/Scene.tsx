@@ -33,11 +33,11 @@ import { Imagery } from './Imagery'
 import { PassOverlay } from './PassOverlay'
 import { PlaceMarker } from './PlaceMarker'
 import { usePost } from './Post'
-import { declineLevel, detectTier } from './quality'
+import { declineLevel, detectTier, dprLevels } from './quality'
 import { FRAME, RuntimeContext, useRuntime, type GlobeRuntime } from './runtime'
 import { SatelliteField } from './SatelliteField'
 import { Stars } from './Stars'
-import { REPLAY_QUIET_MS, useEarthTextures } from './textures'
+import { inputBusy, REPLAY_QUIET_MS, useEarthTextures } from './textures'
 
 export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
   const gl = useThree((s) => s.gl)
@@ -93,16 +93,31 @@ function AnchorFlush() {
   return null
 }
 
-/** Sets store.globeReady once the first textures have actually been on screen for a couple of frames. */
+/**
+ * Phones: how long first light may wait for the 2k day + night pair (already downloading since the module loaded,
+ * decoded in the worker, uploading under the curtain), so the landing usually opens on the final maps and nobody
+ * sees the globe sharpen (G-M1). Never longer than this.
+ */
+export const SHARP_BOOT_WAIT_MS = 350
+
+/**
+ * Sets store.globeReady once the first textures have actually been on screen for a couple of frames (on phones, once
+ * the 2k pair is in too, or SHARP_BOOT_WAIT_MS later).
+ */
 function ReadySignal({ ready }: { ready: boolean }) {
+  const rt = useRuntime()
   const frames = useRef(0)
   const done = useRef(false)
+  const lightAt = useRef(-1)
   useFrame(() => {
     if (!ready || done.current) return
-    if (++frames.current >= 3) {
-      done.current = true
-      useApp.getState().setGlobeReady(true)
-    }
+    if (++frames.current < 3) return
+    const now = performance.now()
+    if (lightAt.current < 0) lightAt.current = now
+    const st = useApp.getState()
+    if (rt.tier.mobile && !st.dayMapSharp && now - lightAt.current < SHARP_BOOT_WAIT_MS) return
+    done.current = true
+    st.setGlobeReady(true)
   }, FRAME.scene)
   return null
 }
@@ -350,13 +365,15 @@ const FLIPFLOPS = 2
 /** No DPR change this long after an acquisition's capture (its settle and the image's last strokes). */
 const ACQ_QUIET_MS = 2500
 /**
- * Before a DPR change the composer holds its frames (the canvas keeps the last image) until the GPU has finished
- * everything queued: a drawing-buffer resize waits for that queue synchronously (on a slow GPU it blocked the main
- * thread for ~0.5 s; G-M1). A fence says when; the hold is capped (frames and ms), and without fences it is 2 frames.
+ * Before a DPR change the composer holds its frames (the canvas keeps the last image; the page stays live) until the
+ * GPU has finished everything queued: a drawing-buffer resize waits for that queue synchronously, and on a slow GPU
+ * that blocked the main thread for 0.4–0.6 s (G-M1). A fence says when. Holding a still view is invisible, a blocked
+ * main thread is not, so the hold may run long (capped), and any input or motion ends it at once (the change waits
+ * for the next quiet moment). Without fences: 2 frames.
  */
 const DPR_DRAIN_FRAMES = 2
-const DPR_DRAIN_MAX_FRAMES = 15
-const DPR_DRAIN_MAX_MS = 400
+const DPR_DRAIN_MAX_FRAMES = 40
+const DPR_DRAIN_MAX_MS = 2000
 
 /**
  * DPR policy (PERF-08, G-M2: never above 2). Phones start at 1.5 (floor 1.0) and only reach 2.0 after ≥ 58 fps for
@@ -370,12 +387,7 @@ function AdaptiveDpr() {
   const gl = useThree((s) => s.gl)
   const setDpr = useThree((s) => s.setDpr)
   const ctl = useMemo(() => {
-    const device = Math.min(2, Math.max(1, typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1))
-    const steps = rt.tier.mobile
-      ? [1, 1.25, Math.min(1.5, device), device]
-      : [1, 1.25, 1.5, 1.75, device].filter((v) => v <= device)
-    const levels = [...new Set(steps)].sort((a, b) => a - b)
-    const start = rt.tier.mobile ? Math.min(1.5, device) : device
+    const { levels, start } = dprLevels(rt.tier.mobile, typeof window === 'undefined' ? 1 : window.devicePixelRatio)
     return {
       levels,
       index: Math.max(0, levels.indexOf(start)),
@@ -462,7 +474,13 @@ function AdaptiveDpr() {
       const sequence =
         rt.acq.armed || now - rt.acq.capturedAt < ACQ_QUIET_MS || (st.timeMode === 'replay' && now - rt.replayStartedAt < REPLAY_QUIET_MS)
       const quiet =
-        !sequence && !rt.camera.flying && now - rt.camera.arrivedAt > 1000 && now - rt.phaseEnteredAt > 2000 && now > st.motionBusyUntil
+        !sequence &&
+        !rt.camera.flying &&
+        now - rt.camera.arrivedAt > 1000 &&
+        now - rt.phaseEnteredAt > 2000 &&
+        now > st.motionBusyUntil &&
+        now - rt.inputAt > 1000 &&
+        !inputBusy(now)
       const g = gl.getContext() as WebGL2RenderingContext
       const fences = typeof g.fenceSync === 'function'
       const endDrain = () => {
@@ -485,8 +503,8 @@ function AdaptiveDpr() {
         rt.skipRender = 1
       } else {
         c.drain++
-        // Non-blocking: the status is refreshed between frames.
-        const done = c.fence ? g.getSyncParameter(c.fence, g.SYNC_STATUS) === g.SIGNALED : c.drain >= DPR_DRAIN_FRAMES
+        // Non-blocking (a zero timeout only asks).
+        const done = c.fence ? g.clientWaitSync(c.fence, 0, 0) !== g.TIMEOUT_EXPIRED : c.drain >= DPR_DRAIN_FRAMES
         go = done || c.drain >= DPR_DRAIN_MAX_FRAMES || now - c.drainAt > DPR_DRAIN_MAX_MS
         if (go) {
           c.drain = Math.max(0, c.drain)

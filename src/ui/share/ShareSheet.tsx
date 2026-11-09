@@ -178,7 +178,10 @@ const PASS_MODELS_MAX = 16
 
 function cachedPassModel(pass: Pass, report: Report, tz: string, host: string, clouded?: boolean): ShareModel {
   const p = report.place
-  const key = [pass.id, pass.captureId ?? '', report.generatedAt, report.passes.length, report.captures.length, p.lat, p.lon, p.label, tz, host, clouded ? 1 : 0].join('|')
+  // The capture's spot class is in the key: a late spot check writes it into the shown report in place (engine
+  // checkSpots), and the card's and the post's cloud words follow it.
+  const spot = captureFor(report, pass)?.spot ?? ''
+  const key = [pass.id, pass.verdict, pass.captureId ?? '', spot, report.generatedAt, report.passes.length, report.captures.length, p.lat, p.lon, p.label, tz, host, clouded ? 1 : 0].join('|')
   let m = passModels.get(key)
   if (!m) {
     m = passModel(pass, report, tz, host, clouded)
