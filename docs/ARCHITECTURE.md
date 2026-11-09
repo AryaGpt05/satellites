@@ -94,7 +94,7 @@ fully uploaded and swapped in, or at first light when the tier plan has no such 
 It must also accept the engine's `ElementBuffer` (loaded internally via `loadCatalog` + `buildElementBuffer`).
 
 ### ui-shell → `src/ui/hud/index.ts`, `src/ui/landing/index.ts`, `src/ui/pages/index.ts`
-`<Hud/>` (bezel plus corner readouts, always mounted), `<BootScreen/>` (phase `boot`), `<Landing onSubmit={(place: Place) => void}/>` (phase `idle` / `locating`), `<AboutPage onClose/>`.
+`<Hud/>` (bezel plus corner readouts, always mounted; its lines enter when boot ends), the loading screen (static HTML in index.html, the centred wordmark; `src/app/bootCurtain.ts` glides it onto the HUD's wordmark when the phase leaves `boot`), `<Landing onSubmit={(place: Place) => void}/>` (phase `idle` / `locating`), `<AboutPage onClose/>`.
 
 ### ui-results → `src/ui/results/index.ts`, `src/ui/share/index.ts`
 `<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>`.

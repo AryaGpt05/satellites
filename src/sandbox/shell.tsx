@@ -1,7 +1,7 @@
 /**
  * ui-shell sandbox: ?sandbox=shell   (never imported by production code)
  *
- * Renders the HUD, BootScreen → Landing and the About page over the real <GlobeCanvas/> when
+ * Renders the HUD, boot → Landing and the About page over the real <GlobeCanvas/> when
  * src/globe exports it, otherwise over a sandbox-only stand-in: an orthographic projection of the
  * real day/night textures lit by the real sun (no catalog points), drawn once on a 2D canvas.
  *
@@ -21,7 +21,7 @@ import { latLonToWorld, subsolarPoint, sunDirectionWorld } from '@/lib/geo'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import { Hud } from '@/ui/hud'
-import { BootScreen, Landing } from '@/ui/landing'
+import { Landing } from '@/ui/landing'
 import { AboutPage } from '@/ui/pages'
 import { Button, Glyph, Readout, Rule, Sheet, Tag, fmtLat, fmtLon, useIsMobile } from '@/ui/system'
 
@@ -160,7 +160,6 @@ export default function ShellSandbox() {
       </div>
 
       <Hud onAbout={() => setAbout(true)} />
-      {phase === 'boot' && <BootScreen />}
       {about && <AboutPage onClose={() => setAbout(false)} />}
       {CHROME ? <Toolbar phase={phase} go={go} about={about} setAbout={setAbout} sheet={sheet} setSheet={setSheet} submitted={submitted} /> : null}
       <style>{`.sbx-scene{position:absolute;inset:0;z-index:0}.sbx-layer>*{pointer-events:auto}`}</style>

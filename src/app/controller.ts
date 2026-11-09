@@ -56,6 +56,15 @@ const SHARE_MIN_AFTER_LIGHT_MS = 2500
 const LATE_SHARE_MS = 15_000
 /** Deep and share links wait at most this long (from first light) for the sharp day map before flying (R2K2). */
 const SHARP_MAP_WAIT_MS = 1200
+/**
+ * The loading screen (index.html's wordmark) stays at least until this long after navigation start, so a fast,
+ * cached boot reads as the logo settling into place, not a flash. Measured from performance.timeOrigin.
+ */
+const LOGO_MIN_MS = 650
+/** The three faces the first screens use; loading them explicitly makes fonts.ready wait for them (no fallback flash). */
+const FIRST_FONTS = ['500 16px "Instrument Sans Variable"', '400 16px "Martian Mono Variable"', 'italic 400 16px "Instrument Serif"']
+/** Boot never waits longer than this for the faces (system fallbacks are fine on a very slow link). */
+const FONTS_CAP_MS = 4000
 /** Results never land sooner than this after a search (the readout needs a beat to read). */
 const MIN_DWELL_MS = 1800
 /**
@@ -116,14 +125,12 @@ export async function boot() {
     void loadEngine().catch(() => undefined)
   }
   startCatalog()
+  const fonts = loadFirstFonts()
 
   await Promise.race([waitFor(() => useApp.getState().globeReady), sleep(12_000)])
-  try {
-    await (document as Document & { fonts?: FontFaceSet }).fonts?.ready
-  } catch {
-    /* ignore */
-  }
+  await raceTimeout(fonts, FONTS_CAP_MS)
   mark('first-light')
+  await sleep(Math.max(0, LOGO_MIN_MS - performance.now()))
 
   // R2K2: a deep or share link flies to its place straight from boot. The globe uploads the sharp day map under
   // the curtain; give it a moment (from first light, alongside the share lookup) so the flight is planned once,
@@ -161,6 +168,18 @@ export async function boot() {
     void ensureTz()
     loadNamesWhenIdle()
   })
+}
+
+/** Request the first screens' faces now (nothing renders them until the landing does), then wait for fonts.ready. */
+async function loadFirstFonts(): Promise<void> {
+  const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
+  if (!fonts) return
+  try {
+    await Promise.all(FIRST_FONTS.map((f) => fonts.load(f)))
+    await fonts.ready
+  } catch {
+    /* system fallbacks */
+  }
 }
 
 /** The report a share opens: its place, with the window centred on the pass when it is older than the default window. */

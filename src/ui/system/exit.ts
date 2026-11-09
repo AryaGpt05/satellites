@@ -1,6 +1,6 @@
 /**
  * useExitClone: an exit animation for components that the parent unmounts outright
- * (`{phase === 'boot' && <BootScreen/>}`), without an AnimatePresence-style wrapper.
+ * (`{open && <Panel/>}`), without an AnimatePresence-style wrapper.
  *
  * On unmount, before React removes the DOM, the element is cloned in place (same parent, same
  * stacking position), made inert, and the clone is animated out with the Web Animations API and then

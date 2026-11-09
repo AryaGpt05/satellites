@@ -17,7 +17,7 @@
  * every second, SunValue every ~24 s, CatalogAge every minute); the shell renders when the phase, the
  * catalog or the clock mode changes.
  */
-import { memo, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
+import { memo, useLayoutEffect, useRef, type RefObject } from 'react'
 import { timeZoneAt, tzReady } from '@/imagery'
 import { subsolarPoint } from '@/lib/geo'
 import { sceneClock, useSceneFrame } from '@/state/sceneClock'
@@ -34,6 +34,13 @@ export const VERSION = 'v0.1'
 
 /** Space kept between the top readouts and what the camera frames below them. */
 const TOP_GAP = 8
+
+/**
+ * After boot, the lines start wiping in this long after the loading screen starts to leave (src/app/bootCurtain.ts:
+ * its wordmark glides 760 ms onto this one). The version and About lines wait for the logo to land (it passes
+ * over their spot on its way in); the other corners start sooner.
+ */
+const AFTER_BOOT = 300
 
 /**
  * The scene clock, when the globe isn't on live time (replay / scrub), at the place: the same clock and
@@ -142,22 +149,30 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
   useTopInset(topLeft, topRight)
   // The stacked sun line gives way to the scene time during a replay and comes back after it: its
   // wipe plays with the HUD's first entrance only, never again on its return (one entrance per element).
-  const sunEntered = useRef(false)
-  useEffect(() => {
-    if (live) sunEntered.current = true
-  }, [live])
+  // Set during the render that unmounts it, so its `skip` never changes while it is mounted.
+  const sunReturns = useRef(false)
+  if (!live) sunReturns.current = true
+  // Under the loading screen the lines sit settled and unseen; when boot ends they remount (new key) and wipe in
+  // while the loading screen's wordmark glides onto this one (bootCurtain), which is hidden until it lands.
+  const booting = useApp((st) => st.phase === 'boot')
+  const k = booting ? 'boot' : 'live'
+  const at = (ms: number) => (booting ? 0 : AFTER_BOOT + ms)
 
   return (
     <div ref={rootRef} className={s.hud} data-scene={scene}>
       <Bezel />
 
       <CornerReadout corner="tl" label="Watched" ref={topLeft}>
-        <Reveal axis="x" duration={480} as="div" className={s.line}>
-          <Wordmark height={17} className={s.wordmark} />
-          <span className={s.version}>{VERSION}</span>
-        </Reveal>
+        <div className={s.line}>
+          <span className={s.mark} data-hud-wordmark>
+            <Wordmark height={17} className={s.wordmark} />
+          </span>
+          <Reveal key={`${k}-version`} skip={booting} axis="x" duration={480} delay={at(440)} as="span" className={s.versionWrap}>
+            <span className={s.version}>{VERSION}</span>
+          </Reveal>
+        </div>
         {onAbout ? (
-          <Reveal axis="x" duration={480} delay={60} as="div" className={s.line}>
+          <Reveal key={`${k}-about`} skip={booting} axis="x" duration={480} delay={at(480)} as="div" className={s.line}>
             <button type="button" className={s.about} onClick={() => aboutRef.current?.()} aria-keyshortcuts="?">
               <span className={s.aboutText}>How this works</span>
               <Kbd className={s.desk}>?</Kbd>
@@ -167,21 +182,21 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
       </CornerReadout>
 
       <CornerReadout corner="tr" label="Time" ref={topRight}>
-        <Reveal axis="x" duration={480} delay={80} as="div" className={s.line}>
+        <Reveal key={`${k}-clock`} skip={booting} axis="x" duration={480} delay={at(0)} as="div" className={s.line}>
           <span className={s.dot} aria-hidden data-blink />
           <UtcClock />
         </Reveal>
         {live ? null : <SceneTime />}
         {/* stacked: the sun joins the clock (bottom corners are hidden); a replay's scene time takes its place */}
         {live ? (
-          <Reveal axis="x" duration={480} delay={120} skip={sunEntered.current} as="div" className={cx(s.line, s.mob)}>
+          <Reveal key={`${k}-sun`} skip={booting || sunReturns.current} axis="x" duration={480} delay={at(60)} as="div" className={cx(s.line, s.mob)}>
             <SunValue />
           </Reveal>
         ) : null}
       </CornerReadout>
 
       <CornerReadout corner="bl" label="Orbit catalog" className={s.wideOnly}>
-        <Reveal axis="x" duration={480} delay={160} as="div" className={s.line}>
+        <Reveal key={`${k}-objects`} skip={booting} axis="x" duration={480} delay={at(120)} as="div" className={s.line}>
           {catalog.state === 'ready' ? (
             <>
               <ScrambleOnce text={fmtObjects(catalog.count)} className={s.value} />
@@ -194,7 +209,7 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
             </>
           )}
         </Reveal>
-        <Reveal axis="x" duration={480} delay={220} as="div" className={cx(s.line, s.dim)}>
+        <Reveal key={`${k}-age`} skip={booting} axis="x" duration={480} delay={at(180)} as="div" className={cx(s.line, s.dim)}>
           {catalog.state === 'ready' ? (
             <CatalogAge fetchedAt={catalog.fetchedAt} />
           ) : catalog.state === 'error' ? (
@@ -208,10 +223,10 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
       </CornerReadout>
 
       <CornerReadout corner="br" label="Sun" className={s.wideOnly}>
-        <Reveal axis="x" duration={480} delay={240} as="div" className={s.line}>
-          <SunValue scramble />
+        <Reveal key={`${k}-subsolar`} skip={booting} axis="x" duration={480} delay={at(200)} as="div" className={s.line}>
+          <SunValue scramble={!booting} />
         </Reveal>
-        <Reveal axis="x" duration={480} delay={300} as="div" className={cx(s.line, s.dim)}>
+        <Reveal key={`${k}-gmst`} skip={booting} axis="x" duration={480} delay={at(260)} as="div" className={cx(s.line, s.dim)}>
           Sub-solar point<span className={s.sep}>·</span>
           <GmstLine />
         </Reveal>

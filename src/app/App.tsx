@@ -6,6 +6,7 @@
  * Dev keeps it lazy so sandbox pages never import unfinished modules.
  */
 import { lazy, Suspense, useLayoutEffect, type ComponentType } from 'react'
+import { dropBootCurtain } from './bootCurtain'
 import MainStatic from './Main'
 
 // Sandboxes are dev-only: production builds never bundle them (or their fixtures).
@@ -18,9 +19,9 @@ const sandboxLoader = sandboxName ? sandboxes[`../sandbox/${sandboxName}.tsx`] :
 const Root: ComponentType = sandboxLoader ? lazy(sandboxLoader) : import.meta.env.DEV ? lazy(() => import('./Main')) : MainStatic
 
 export function App() {
-  // Sandboxes have no boot screen to take over from index.html's static boot frame.
+  // Sandboxes skip the loading screen (index.html's #boot-static and html[data-boot]).
   useLayoutEffect(() => {
-    if (sandboxName) document.getElementById('boot-static')?.remove()
+    if (sandboxName) dropBootCurtain()
   }, [])
   if (sandboxName && !sandboxLoader)
     return (
