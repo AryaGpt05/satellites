@@ -7,9 +7,16 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { activeGlSwitches, GL_SWITCHES, glProbe, urlWithSwitches } from './debugGl'
+// Types only: the flag module reaches this chunk through props, so it stays in the globe chunk (no extra boot request).
+import type { GlProbe, GlSwitch } from './debugGl'
 
 type Rows = [string, string][]
+
+/** The probe, for the module-level helpers below (set by the component). */
+let glProbe: GlProbe
+const setProbe = (p: GlProbe) => {
+  glProbe = p
+}
 
 const fmt = (n: number | undefined, d = 0) => (n === undefined || Number.isNaN(n) ? '–' : n.toFixed(d))
 
@@ -133,11 +140,19 @@ const BTN: CSSProperties = {
 }
 const ON: CSSProperties = { ...BTN, background: '#ff6a1a', color: '#07080a', borderColor: '#ff6a1a' }
 
-export default function DebugGl() {
+export interface DebugGlProps {
+  probe: GlProbe
+  switches: GlSwitch[]
+  active: string[]
+  urlWith: (next: Iterable<string>) => string
+}
+
+export default function DebugGl({ probe: glProbe, switches: GL_SWITCHES, active: activeList, urlWith: urlWithSwitches }: DebugGlProps) {
+  setProbe(glProbe)
   const [open, setOpen] = useState(true)
   const [tick, setTick] = useState(0)
   const [copied, setCopied] = useState(false)
-  const active = useMemo(() => new Set(activeGlSwitches()), [])
+  const active = useMemo(() => new Set(activeList), [activeList])
 
   // Poll the probe (cheap reads) twice a second; fps from the probe's frame counter.
   const [fps, setFps] = useState(0)

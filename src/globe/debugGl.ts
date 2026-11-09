@@ -82,7 +82,18 @@ export function urlWithSwitches(next: Iterable<string>): string {
  * Live handles and counters for the panel, written by the scene (Scene.tsx, Post.tsx) only in debug mode.
  * Plain mutable object: the panel polls it.
  */
-export const glProbe = {
+export interface GlProbe {
+  gl: WebGLRenderer | null
+  composer: EffectComposer | null
+  camera: Camera | null
+  rt: GlobeRuntime | null
+  frames: number
+  nan: { scans: number; lastBad: number; maxBad: number; framesWithBad: number; lastHuge: number; error: string }
+  contextLost: number
+  contextRestored: number
+}
+
+export const glProbe: GlProbe = {
   gl: null as WebGLRenderer | null,
   composer: null as EffectComposer | null,
   camera: null as Camera | null,

@@ -15,7 +15,7 @@ import { STACKED_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import { useMediaQuery } from '@/ui/system/media'
 import { palette } from '@/ui/system/palette'
-import { GL_DEBUG, glFixedDpr, glProbe } from './debugGl'
+import { activeGlSwitches, GL_DEBUG, GL_SWITCHES, glFixedDpr, glProbe, urlWithSwitches } from './debugGl'
 import { GlobeOverlay } from './GlobeOverlay'
 import { detectMobile, dprLevels, prefersReducedMotion, provisionalTier } from './quality'
 import { createRuntime } from './runtime'
@@ -24,6 +24,7 @@ import s from './GlobeCanvas.module.css'
 
 /** The `?debug=gl` panel: its own chunk, never fetched outside debug mode. */
 const DebugGl = lazy(() => import('./DebugGl'))
+const GL_ACTIVE = activeGlSwitches()
 
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ')
 
@@ -112,7 +113,7 @@ export function GlobeCanvas({ className }: { className?: string }) {
           <GlobeOverlay runtime={runtime} />
           {GL_DEBUG && (
             <Suspense fallback={null}>
-              <DebugGl />
+              <DebugGl probe={glProbe} switches={GL_SWITCHES} active={GL_ACTIVE} urlWith={urlWithSwitches} />
             </Suspense>
           )}
         </SceneBoundary>
