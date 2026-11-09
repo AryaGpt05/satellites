@@ -194,6 +194,47 @@ export function canUpload(rt: GlobeRuntime, now: number): boolean {
 
 const BITMAP_OPTS: ImageBitmapOptions = { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }
 
+/**
+ * One upload strip: RGBA bytes the strip owns, never an ImageBitmap. On iOS WebKit an ImageBitmap cropped from another
+ * (createImageBitmap(full, x, y, w, h, { imageOrientation: 'flipY' })) can share its source's backing store and come
+ * out with the wrong rows, and texSubImage2D(ImageBitmap) is copied later in the GPU process: closing the source and the
+ * strip right after the call let that memory be recycled first, so the iPhone's day / night maps held stale rendered
+ * frames (space, satellite dots, a smaller globe) wrapped around the planet. Bytes are copied by texSubImage2D itself.
+ */
+interface TexStrip {
+  width: number
+  height: number
+  data: Uint8Array | null
+  close(): void
+}
+
+let stripSurface: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null
+
+/** Source rows [y, y + rows) of `img` as RGBA bytes, flipped vertically when `flip` (drawn flipped, never via FLIP_Y). */
+function stripBytes(img: ImageBitmap, y: number, rows: number, flip: boolean): Uint8Array {
+  const w = img.width
+  const c0 = stripSurface
+  if (!c0 || c0.canvas.width !== w || c0.canvas.height !== rows) {
+    const canvas: HTMLCanvasElement | OffscreenCanvas =
+      typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, rows) : Object.assign(document.createElement('canvas'), { width: w, height: rows })
+    stripSurface = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null
+    if (!stripSurface) throw new Error('texture strip: no 2D context')
+  }
+  const c = stripSurface!
+  c.imageSmoothingEnabled = false
+  c.setTransform(1, 0, 0, 1, 0, 0)
+  c.clearRect(0, 0, w, rows)
+  if (flip) c.setTransform(1, 0, 0, -1, 0, rows)
+  c.drawImage(img, 0, y, w, rows, 0, 0, w, rows)
+  const px = c.getImageData(0, 0, w, rows).data
+  return new Uint8Array(px.buffer, px.byteOffset, px.byteLength)
+}
+
+function makeStrip(width: number, height: number, data: Uint8Array): TexStrip {
+  const s: TexStrip = { width, height, data, close: () => void (s.data = null) }
+  return s
+}
+
 async function fetchDecode(url: string, signal?: AbortSignal): Promise<ImageBitmap> {
   const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`Texture ${url}: HTTP ${res.status}`)
@@ -273,10 +314,11 @@ if (typeof location !== 'undefined' && (/[?&](q|s)=/.test(location.search) || /^
 
 /**
  * Upload one strip straight into the destination texture (bound through three's state cache, unpack state set
- * through it too, so three's own later uploads see what is really set). ImageBitmaps carry their orientation and
- * alpha handling; the strip was cut flipped, as GL rows run south → north. The last strip generates the mip chain.
+ * through it too, so three's own later uploads see what is really set). The strip's bytes were cut already flipped
+ * (GL rows run south → north) and are copied by the call itself. The last strip generates the mip chain.
  */
-function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: ImageBitmap, y: number, last: boolean) {
+function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: TexStrip, y: number, last: boolean) {
+  if (!strip.data) throw new Error('texture strip already released')
   const g = gl.getContext() as WebGL2RenderingContext
   const props = gl.properties.get(dst) as { __webglTexture?: WebGLTexture }
   if (!props.__webglTexture) gl.initTexture(dst)
@@ -290,7 +332,7 @@ function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: ImageBitmap, y: num
   state.pixelStorei(g.UNPACK_ROW_LENGTH, 0)
   state.pixelStorei(g.UNPACK_SKIP_PIXELS, 0)
   state.pixelStorei(g.UNPACK_SKIP_ROWS, 0)
-  g.texSubImage2D(g.TEXTURE_2D, 0, 0, y, strip.width, strip.height, g.RGBA, g.UNSIGNED_BYTE, strip)
+  g.texSubImage2D(g.TEXTURE_2D, 0, 0, y, strip.width, strip.height, g.RGBA, g.UNSIGNED_BYTE, strip.data)
   if (last) g.generateMipmap(g.TEXTURE_2D)
   if (import.meta.env.DEV) {
     const err = g.getError()
@@ -434,11 +476,11 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       const cut = async (i: number) => {
         const y = i * STRIP_ROWS
         const rows = Math.min(STRIP_ROWS, H - y)
-        const strip = await createImageBitmap(full, 0, H - y - rows, W, rows, { ...BITMAP_OPTS, imageOrientation: 'flipY' })
+        const strip = makeStrip(W, rows, stripBytes(full, H - y - rows, rows, true))
         pending.add(strip)
         return strip
       }
-      const done = (strip: ImageBitmap) => {
+      const done = (strip: TexStrip) => {
         pending.delete(strip)
         strip.close()
       }

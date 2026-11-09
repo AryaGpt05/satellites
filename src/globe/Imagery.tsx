@@ -117,8 +117,11 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     tex.anisotropy = rt.tier.maxAnisotropy
     tex.needsUpdate = true
     gl.initTexture(tex)
-    e.bitmap.close()
+    // iOS WebKit copies an ImageBitmap upload later in the GPU process: closing it right after the call can hand the
+    // GPU recycled memory (stale frames on the globe). Release it a few frames later instead.
+    const bmp = e.bitmap
     e.bitmap = undefined
+    setTimeout(() => bmp.close(), 1000)
     e.tex = tex
     e.state = 'ready'
     if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
