@@ -12,7 +12,11 @@
  *    in one tick net out to one history move (search mode → results moves nothing), and when that move lands the app
  *    is asked to rewrite the address bar for what is on screen (`onSettled`), whatever an earlier write left on the
  *    entry it lands on;
- *  - the app's own moves never go below this load's first entry, so the app itself never navigates off the site.
+ *  - the app's own moves never go below this load's first entry, so the app itself never navigates off the site;
+ *  - history.go is relative and resolved when the browser gets to it, so the app's moves run from a fresh task (after
+ *    a traversal the user already queued has landed), one at a time; a user move that lands while one is queued is
+ *    read once the app's has landed too, and entries are put above the user's so the app's lands back on it; a move
+ *    that never lands is given up after MOVE_TIMEOUT_MS and the stack lines up with where the browser is.
  * Layers stack in their drawn order (results < pass < search < lightbox < share < about), not in the order they opened:
  * a pass a share link selects while About is up goes under About, so Back closes what is on top.
  * A deep or share link opens straight onto results: when those results actually open, a landing entry is slipped in
@@ -42,6 +46,11 @@ export interface LayerToken {
 export interface BackStackOptions {
   /** Runs the batched history move after the current tick's opens and closes (a microtask in the browser). */
   schedule: (fn: () => void) => void
+  /**
+   * A timer (setTimeout in the browser); returns its cancel. The app's own history.go runs from a fresh task, after
+   * any traversal the user already queued has landed, and an app move that never lands is given up after a timeout.
+   */
+  later?: (fn: () => void, ms: number) => () => void
   /** This tab's id (sessionStorage): entries stamped by this tab, in this load or an earlier one, are ours. */
   sid: string
   /** A deep link's first layer ('results'): when it opens on this tab's first entry, a landing goes under it. */
@@ -64,6 +73,8 @@ export interface BackStack {
 }
 
 export const MARK = 'watched-layer'
+/** An app move that has not landed by then was dropped (or is lost behind a long task): line up with the browser. */
+export const MOVE_TIMEOUT_MS = 1000
 
 /** Drawn order of the layers, bottom first: a layer opens beneath any open layer drawn above it. Unknown names go on top. */
 export const LAYER_RANK: Readonly<Record<string, number>> = { results: 0, pass: 1, search: 2, lightbox: 3, share: 4, about: 5 }
@@ -93,18 +104,62 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
   if (!found) h.replaceState(stamped(h.state, o.sid, 0), '')
   /** A deep link on the base entry: its results open over a slipped-in landing */
   let slip = o.deep !== undefined && cur === 0 ? o.deep : undefined
-  /** Depth our own history.go is on its way to: until its popstate lands, nothing else moves the history */
-  let inFlight: number | null = null
-  /** A change arrived while a move was in flight: flush again when it lands */
+  const later = o.later ?? ((fn: () => void, ms: number) => {
+    const t = setTimeout(fn, ms)
+    return () => clearTimeout(t)
+  })
+  /** App moves (history.go) not landed yet, the delta they still carry, and the depth they land on */
+  let outstanding = 0
+  let outstandingDelta = 0
+  let expected = 0
+  /** A user traversal landed while an app move was outstanding: read it once that has landed */
+  let userMoved = false
+  let cancelTimeout: (() => void) | null = null
+  /** Timeouts in a row: after the second, stop issuing moves the browser keeps dropping */
+  let timeouts = 0
+  /** A move waiting for its fresh task */
+  let movePending = false
+  /** A change arrived while a move was outstanding: flush again when it lands */
   let dirty = false
   let scheduled = false
 
   /** Layers holding an entry of their own */
   const owned = () => stack.reduce((n, e) => n + (e.own ? 1 : 0), 0)
+  const depthOf = (state: unknown) => stampOf(state, o.sid)?.d ?? 0
+
+  /** Issue the move down to what is open, from a fresh task: by then a traversal the user queued has landed. */
+  const move = () => {
+    movePending = false
+    if (outstanding > 0) {
+      dirty = true
+      return
+    }
+    const target = owned()
+    if (target >= cur || timeouts >= 2) return
+    // Never below the base (target ≥ 0): the app never navigates off the site itself.
+    const delta = target - cur
+    outstanding++
+    outstandingDelta += delta
+    expected = target
+    cur = target
+    cancelTimeout?.()
+    cancelTimeout = later(onTimeout, MOVE_TIMEOUT_MS)
+    h.go(delta)
+  }
+  const onTimeout = () => {
+    cancelTimeout = null
+    if (outstanding === 0) return
+    // Dropped, or lost behind a long task: line up with where the browser actually is.
+    timeouts++
+    outstanding = 0
+    outstandingDelta = 0
+    userMoved = false
+    traverse(depthOf(h.state))
+  }
 
   const flush = () => {
     scheduled = false
-    if (inFlight !== null) {
+    if (outstanding > 0) {
       dirty = true
       return
     }
@@ -114,12 +169,9 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
       for (let d = cur + 1; d <= target; d++) h.pushState(stamped(null, o.sid, d), '')
       cur = target
       o.onSettled?.()
-    } else if (target < cur) {
-      // Never below the base (target ≥ 0): the app never navigates off the site itself.
-      inFlight = target
-      const n = cur - target
-      cur = target
-      h.go(-n)
+    } else if (target < cur && !movePending) {
+      movePending = true
+      later(move, 0)
     }
   }
   const change = () => {
@@ -133,6 +185,22 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
       o.onSettled?.()
       if (owned() !== cur) change()
     })
+
+  /** The browser is at depth d, whoever moved it there: close layers above it; a Forward into a dead entry is undone. */
+  const traverse = (d: number): string[] => {
+    cur = d
+    adoptable = 0
+    const closedNames: string[] = []
+    while (owned() > d) {
+      const top = stack.pop()!
+      top.token.popped = true
+      top.close()
+      closedNames.push(top.token.name)
+    }
+    // d above what is open (a Forward into an entry whose layer is gone): settle's change takes it back down.
+    settle()
+    return closedNames
+  }
 
   return {
     open(name, close) {
@@ -164,11 +232,16 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
       if (!token.popped && e.own) change()
     },
     onPop(state) {
-      const d = stampOf(state, o.sid)?.d ?? 0
-      if (inFlight !== null) {
-        const mine = d === inFlight
-        inFlight = null
-        if (mine) {
+      const d = depthOf(state)
+      if (outstanding > 0) {
+        if (d === expected && !userMoved) {
+          // Ours landed.
+          outstanding--
+          outstandingDelta = 0
+          if (outstanding > 0) return []
+          cancelTimeout?.()
+          cancelTimeout = null
+          timeouts = 0
           settle()
           if (dirty) {
             dirty = false
@@ -176,27 +249,28 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
           }
           return []
         }
-        // The user moved while ours was in flight: read it as theirs, from where the browser is now.
-        dirty = false
+        if (d === expected && userMoved) {
+          // Ours landed back on the user's entry: now read their move.
+          outstanding = 0
+          outstandingDelta = 0
+          userMoved = false
+          cancelTimeout?.()
+          cancelTimeout = null
+          timeouts = 0
+          dirty = false
+          return traverse(d)
+        }
+        // The user's traversal landed first; ours is still queued and will resolve from here. Put entries above so
+        // it lands back on this one (instead of below it, or off the site), and read the user's move then.
+        const k = -outstandingDelta
+        for (let i = 1; i <= k; i++) h.pushState(stamped(null, o.sid, d + i), '')
+        expected = d
+        cur = d
+        userMoved = true
+        return []
       }
-      cur = d
-      adoptable = 0
-      const closedNames: string[] = []
-      if (d > owned()) {
-        // Forward into an entry whose layer is gone: undo the move, open nothing.
-        inFlight = owned()
-        cur = owned()
-        h.go(owned() - d)
-        return closedNames
-      }
-      while (owned() > d) {
-        const top = stack.pop()!
-        top.token.popped = true
-        top.close()
-        closedNames.push(top.token.name)
-      }
-      settle()
-      return closedNames
+      timeouts = 0 // the browser is traversing again: the app's moves may be tried again
+      return traverse(d)
     },
     reconcile() {
       if (owned() !== cur) change()
@@ -276,6 +350,10 @@ export function backStack(): BackStack | null {
   }
   instance = createBackStack(h, {
     schedule: (fn) => queueMicrotask(fn),
+    later: (fn, ms) => {
+      const t = setTimeout(fn, ms)
+      return () => clearTimeout(t)
+    },
     sid: tabId(),
     deep: deep ? 'results' : undefined,
     onSettled: () => settledListener?.(),

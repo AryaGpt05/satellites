@@ -20,7 +20,7 @@ import { Hud } from '@/ui/hud'
 import { Landing } from '@/ui/landing'
 import { prefersReducedMotion } from '@/ui/system'
 import { exitBootCurtain } from './bootCurtain'
-import { afterLandingEntrance, boot, loadEngine, resetToLanding, retryReport, runReport, writeUrl } from './controller'
+import { afterLandingEntrance, boot, isSharePending, loadEngine, resetToLanding, retryReport, runReport, writeUrl } from './controller'
 import { ErrorNotice } from './ErrorNotice'
 import s from './App.module.css'
 
@@ -129,8 +129,9 @@ const closeAbout = () => useApp.getState().setAboutOpen(false)
 function writeUrlNow() {
   const st = useApp.getState()
   if (st.place && (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error')) writeUrl(st.place, st.phase === 'results' ? st.selectedPassId : undefined)
-  // The landing: a clean address, except a share link still being looked up (?s=: it opens when it answers).
-  else if (st.phase === 'idle' && !/[?&]s=/.test(location.search)) history.replaceState(history.state, '', location.pathname)
+  // The landing: a clean address, except a share link still being looked up (?s=: it opens when it answers). From the
+  // controller's state, not the address: a landing the visitor comes back to after their own search is clean.
+  else if (st.phase === 'idle' && !isSharePending()) history.replaceState(history.state, '', location.pathname)
 }
 /** Back out of a pass to the list (as the panel's "All passes"): live time, the camera back on the place. */
 function closePass() {

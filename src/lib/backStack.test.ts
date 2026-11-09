@@ -2,26 +2,23 @@ import { describe, expect, it } from 'vitest'
 import { createBackStack, resolveTabId, stampOf, type BackStack, type HistoryLike } from './backStack'
 
 /**
- * A session history for one tab, asynchronous like a browser's: `go` picks its target entry when called and lands it
- * (with a popstate carrying that entry's state) in a later task, `deliver()`. A pushState in between lands as browsers
- * do: the traversal still goes to the entry it picked. Moving below the first entry would leave the site: counted
- * when the APP does it (`leftSite`); a user Back there does nothing (first entry in the tab).
+ * A session history for one tab, asynchronous like a browser's: a traversal (`go`, or the user's Back / Forward) is
+ * queued, and resolved RELATIVE TO THE ENTRY CURRENT WHEN IT IS PROCESSED (`deliver()`, a later task), landing with a
+ * popstate carrying that entry's state. One the user queued earlier is processed first (`jumpFirst`); an app move can
+ * be lost (`dropApp`). Moving below the first entry leaves the site: counted when the APP's move does it
+ * (`leftSite`); a user Back there does nothing (first entry in the tab). Out of range above: nothing happens.
  */
 function fakeHistory(first = '/') {
   type Entry = { state: unknown; url: string }
   const entries: Entry[] = [{ state: null, url: first }]
   let index = 0
   let onPop: ((state: unknown) => void) | null = null
-  const pending: Entry[] = []
+  const pending: { delta: number; byApp: boolean }[] = []
   const log = { leftSite: 0, gos: [] as number[], pops: 0 }
-  const traverse = (delta: number, byApp: boolean) => {
-    const to = index + delta
-    if (to < 0) {
-      if (byApp) log.leftSite++
-      return
-    }
-    if (to >= entries.length || delta === 0) return
-    pending.push(entries[to])
+  const traverse = (delta: number, byApp: boolean, first = false) => {
+    if (delta === 0) return
+    if (first) pending.unshift({ delta, byApp })
+    else pending.push({ delta, byApp })
   }
   const h = {
     get state() {
@@ -42,15 +39,27 @@ function fakeHistory(first = '/') {
     },
     /** The user's Back / Forward / long-press jump */
     jump: (delta: number) => traverse(delta, false),
+    /** A user move queued before the app's queued ones (pressed during a long task) */
+    jumpFirst: (delta: number) => traverse(delta, false, true),
+    /** The browser drops the app's queued move */
+    dropApp() {
+      const i = pending.findIndex((t) => t.byApp)
+      if (i >= 0) pending.splice(i, 1)
+    },
+    queued: () => pending.length,
     back: () => traverse(-1, false),
     forward: () => traverse(1, false),
     /** Land the traversals in flight (a later task). */
     deliver() {
       let moved = false
       while (pending.length) {
-        const target = pending.shift()!
-        const i = entries.indexOf(target)
-        if (i < 0) continue
+        const t = pending.shift()!
+        const i = index + t.delta
+        if (i < 0) {
+          if (t.byApp) log.leftSite++
+          continue
+        }
+        if (i >= entries.length) continue
         index = i
         log.pops++
         onPop?.(entries[index].state)
@@ -76,6 +85,22 @@ type FakeHistory = ReturnType<typeof fakeHistory>
  */
 function load(h: FakeHistory, opts: { deep?: boolean; place?: string; pass?: string } = {}) {
   const micro: (() => void)[] = []
+  let clock = 0
+  const timers: { at: number; fn: () => void; live: boolean }[] = []
+  const later = (fn: () => void, ms: number) => {
+    const t = { at: clock + ms, fn, live: true }
+    timers.push(t)
+    return () => void (t.live = false)
+  }
+  /** Run the timers due by now (in order), once */
+  const runDue = () => {
+    const due = timers.filter((t) => t.live && t.at <= clock).sort((a, b) => a.at - b.at)
+    for (const t of due) {
+      t.live = false
+      t.fn()
+    }
+    return due.length > 0
+  }
   const app = { place: opts.place ?? '', pass: opts.pass ?? '' }
   const appUrl = () => (app.place ? `/?q=${app.place}${app.pass ? `&p=${app.pass}` : ''}` : '/')
   const writeUrl = () => h.replaceState(h.state, '', appUrl())
@@ -83,6 +108,7 @@ function load(h: FakeHistory, opts: { deep?: boolean; place?: string; pass?: str
   const tokens = new Map<string, ReturnType<BackStack['open']>>()
   const s: BackStack = createBackStack(h, {
     schedule: (fn) => void micro.push(fn),
+    later,
     sid: 'tab1',
     deep: opts.deep ? 'results' : undefined,
     onSettled: writeUrl,
@@ -111,15 +137,34 @@ function load(h: FakeHistory, opts: { deep?: boolean; place?: string; pass?: str
     close(name)
     s.closed(tokens.get(name)!)
   }
-  /** Run microtasks and deliver traversals until nothing is left (the tick and the tasks after it). */
+  const endTick = () => {
+    while (micro.length) micro.splice(0).forEach((f) => f())
+  }
+  /** Run microtasks, deliver traversals and run zero-delay tasks until nothing is left (the tick and the tasks after it). */
   const settle = () => {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 50; i++) {
       const ran = micro.length > 0
-      micro.splice(0).forEach((f) => f())
-      if (!h.deliver() && !ran && micro.length === 0) return
+      endTick()
+      const moved = h.deliver()
+      endTick()
+      const timed = runDue()
+      if (!moved && !ran && !timed && micro.length === 0) return
     }
   }
-  return { s, open, uiClose, closed, app, appUrl, settle, endTick: () => micro.splice(0).forEach((f) => f()) }
+  /** Time passes (the move timeout) */
+  const elapse = (ms: number) => {
+    clock += ms
+    runDue()
+    settle()
+  }
+  /** The app's own tasks only (microtasks and zero-delay timers), no traversal delivered */
+  const appTasks = () => {
+    for (let i = 0; i < 10; i++) {
+      endTick()
+      if (!runDue() && micro.length === 0) return
+    }
+  }
+  return { s, open, uiClose, closed, app, appUrl, settle, elapse, appTasks, endTick }
 }
 
 describe('back stack: Back closes the top layer, never leaves the site', () => {
@@ -557,3 +602,124 @@ describe('tab id (F4: storage blocked)', () => {
     expect(win.name).toBe('someone-else')
   })
 })
+
+describe('back stack: user traversals racing the app’s own moves (history.go resolves when the browser gets to it)', () => {
+  it('the app’s move waits for a fresh task: a Back the user already queued lands first and is read as theirs', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, closed, settle, endTick } = load(h)
+    open('results')
+    open('pass')
+    settle()
+    uiClose('pass') // "All passes"…
+    h.back() // …and Back, pressed during the same long task
+    endTick() // the tick's batched flush runs before the browser gets to the Back
+    expect(h.log.gos).toEqual([]) // no go yet: it waits for a fresh task, behind the user's Back
+    settle()
+    expect(h.log.leftSite).toBe(0)
+    expect(closed).toEqual([]) // the Back landed on the list's entry: nothing more closed
+    expect(s.names()).toEqual(['results'])
+    expect(h.index()).toBe(1)
+    expect(h.url()).toBe('/?q=paris')
+  })
+
+  it('a user Back processed before the app’s queued move: the app’s lands back on the user’s entry, never off the site', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, settle, appTasks } = load(h)
+    open('results')
+    open('pass')
+    settle()
+    uiClose('pass')
+    uiClose('results') // New search: both close, one go(-2)
+    appTasks()
+    expect(h.log.gos).toEqual([-2])
+    h.jumpFirst(-1) // a Back pressed before it, processed first
+    settle()
+    expect(h.log.leftSite).toBe(0)
+    expect(s.names()).toEqual([])
+    expect(h.index()).toBe(0)
+    expect(h.url()).toBe('/')
+  })
+
+  it('a user Forward processed before the app’s queued move: read once it lands, nothing reopens', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, closed, settle, appTasks } = load(h)
+    open('results')
+    settle()
+    open('pass')
+    settle()
+    h.back() // pass closes; its entry is a dead Forward now
+    settle()
+    uiClose('results') // New search: go(-1)
+    appTasks()
+    h.jumpFirst(1) // Forward, processed first
+    settle()
+    expect(h.log.leftSite).toBe(0)
+    expect(closed).toEqual(['pass'])
+    expect(s.names()).toEqual([])
+    expect(h.index()).toBe(0)
+    expect(h.url()).toBe('/')
+  })
+
+  it('Forward into a dead entry, then Back, both landing before the undo: the undo is not issued (no leaving)', () => {
+    const h = fakeHistory()
+    const { s, open, settle, endTick } = load(h)
+    open('results')
+    settle()
+    h.back()
+    settle()
+    expect(h.index()).toBe(0)
+    h.forward()
+    h.back()
+    // the browser processes both before the app's next task
+    h.deliver()
+    endTick()
+    h.deliver()
+    settle()
+    expect(h.log.leftSite).toBe(0)
+    expect(h.log.gos).toEqual([])
+    expect(h.index()).toBe(0)
+    expect(s.names()).toEqual([])
+  })
+
+  it('a dropped go(): opens are held, then the timeout lines the stack up with the browser', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, settle, appTasks, elapse } = load(h)
+    open('results')
+    settle()
+    uiClose('results')
+    appTasks()
+    expect(h.log.gos).toEqual([-1])
+    h.dropApp()
+    open('results') // a new search while the move is outstanding: held
+    settle()
+    expect(h.index()).toBe(1)
+    elapse(1000)
+    // the browser never left entry 1, and results are open again: they own it
+    expect(s.names()).toEqual(['results'])
+    expect(h.index()).toBe(1)
+    // and the stack works again: Back closes the results
+    h.back()
+    settle()
+    expect(s.names()).toEqual([])
+    expect(h.index()).toBe(0)
+    open('results')
+    settle()
+    expect(h.index()).toBe(1)
+  })
+
+  it('a dropped go() with nothing reopened: the timeout retries the move down', () => {
+    const h = fakeHistory()
+    const { s, open, uiClose, settle, appTasks, elapse } = load(h)
+    open('results')
+    settle()
+    uiClose('results')
+    appTasks()
+    h.dropApp()
+    elapse(1000)
+    expect(h.log.gos).toEqual([-1, -1])
+    expect(h.index()).toBe(0)
+    expect(s.names()).toEqual([])
+    expect(h.log.leftSite).toBe(0)
+  })
+})
+
