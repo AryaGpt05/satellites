@@ -93,6 +93,19 @@
   vertical-align: -1px;
   overflow: visible;
 }
+.mark {
+  /* The wordmark's slot: exactly the SVG's box. The loading screen's wordmark glides onto it (src/app/bootCurtain.ts);
+     it stays hidden until that lands (html[data-boot] is removed in that frame). */
+  display: inline-flex;
+  line-height: 0;
+}
+:global(html[data-boot]) .mark {
+  visibility: hidden;
+}
+.versionWrap {
+  display: inline-flex;
+  align-items: center;
+}
 .version {
   margin-left: 1.1em;
   color: var(--bone-3);

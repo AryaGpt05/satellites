@@ -15,10 +15,10 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType 
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import type { ResultsViewProps } from '@/ui/results'
-import { isStacked } from '@/lib/layout'
 import { Hud } from '@/ui/hud'
-import { BootScreen, Landing } from '@/ui/landing'
+import { Landing } from '@/ui/landing'
 import { prefersReducedMotion } from '@/ui/system'
+import { exitBootCurtain } from './bootCurtain'
 import { afterLandingEntrance, boot, loadEngine, resetToLanding, retryReport, runReport, writeUrl } from './controller'
 import { ErrorNotice } from './ErrorNotice'
 import s from './App.module.css'
@@ -125,23 +125,14 @@ const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<Re
 })
 const closeAbout = () => useApp.getState().setAboutOpen(false)
 
-/** Landing entrance delay after `prev` (K5): it starts after the boot curtain, quickly after a results exit. */
+/**
+ * Landing entrance delay after `prev` (K5). After boot it starts as the loading screen's ink is half gone
+ * (bootCurtain: the ink fades 120 → 680 ms), quickly after a results exit.
+ */
 function enterDelayAfter(prev: Phase): number {
   if (prefersReducedMotion()) return 0
-  if (prev === 'boot') return isStacked(window.innerWidth, window.innerHeight) ? 560 : 380
+  if (prev === 'boot') return 380
   return 160
-}
-
-/**
- * index.html paints a static copy of the boot screen's first frame at HTML arrival (K3). React's boot screen
- * replaces it pixel-for-pixel in this commit; only the wordmark copy stays a moment longer, until the HUD's
- * own wordmark has wiped in underneath it (480 ms), so nothing blinks.
- */
-function retireStaticBoot() {
-  const el = document.getElementById('boot-static')
-  if (!el) return
-  el.setAttribute('data-live', '')
-  setTimeout(() => el.remove(), 640)
 }
 
 export default function Main() {
@@ -149,7 +140,10 @@ export default function Main() {
   const error = useApp((st) => st.error)
   const about = useApp((st) => st.aboutOpen)
 
-  useLayoutEffect(retireStaticBoot, [])
+  // The loading screen (index.html) leaves in the commit that mounts what boot led to, before its first paint.
+  useLayoutEffect(() => {
+    if (phase !== 'boot') exitBootCurtain()
+  }, [phase])
 
   useEffect(() => {
     void boot()
@@ -235,7 +229,6 @@ export default function Main() {
         {phase === 'error' && <ErrorNotice message={error} onRetry={retryReport} onBack={resetToLanding} />}
       </div>
       <Hud onAbout={openAbout} />
-      {phase === 'boot' && <BootScreen />}
       {about && AboutPage ? <AboutPage onClose={closeAbout} /> : null}
     </div>
   )
