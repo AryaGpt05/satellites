@@ -299,6 +299,50 @@ export function canUpload(rt: GlobeRuntime, now: number): boolean {
 
 const BITMAP_OPTS: ImageBitmapOptions = { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }
 
+/**
+ * One upload strip: RGBA bytes the strip owns (never an ImageBitmap: see textureDecode.worker.ts, the iPhone globe
+ * bug). `close()` drops the reference (kept so callers release strips the same way whatever backs them).
+ */
+export interface TexStrip {
+  width: number
+  height: number
+  data: Uint8Array | null
+  close(): void
+}
+
+const makeStrip = (width: number, height: number, data: Uint8Array): TexStrip => {
+  const s: TexStrip = {
+    width,
+    height,
+    data,
+    close: () => {
+      s.data = null
+    },
+  }
+  return s
+}
+
+/** Main-thread fallback of the worker's strip cut (same bytes, same flip). */
+let fallbackSurface: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null
+function stripBytesHere(img: ImageBitmap, y: number, rows: number, flip: boolean): Uint8Array {
+  const w = img.width
+  const c0 = fallbackSurface
+  if (!c0 || c0.canvas.width !== w || c0.canvas.height !== rows) {
+    const canvas: HTMLCanvasElement | OffscreenCanvas =
+      typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, rows) : Object.assign(document.createElement('canvas'), { width: w, height: rows })
+    fallbackSurface = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null
+    if (!fallbackSurface) throw new Error('texture strip: no 2D context')
+  }
+  const c = fallbackSurface!
+  c.imageSmoothingEnabled = false
+  c.setTransform(1, 0, 0, 1, 0, 0)
+  c.clearRect(0, 0, w, rows)
+  if (flip) c.setTransform(1, 0, 0, -1, 0, rows)
+  c.drawImage(img, 0, y, w, rows, 0, 0, w, rows)
+  const px = c.getImageData(0, 0, w, rows).data
+  return new Uint8Array(px.buffer, px.byteOffset, px.byteLength)
+}
+
 /** A decoded map, ready to be cut into upload strips. */
 export interface DecodedMap {
   width: number
@@ -306,11 +350,14 @@ export interface DecodedMap {
   /** True when strips are cut in the worker (free for the main thread), false on the main-thread fallback. */
   offThread: boolean
   /** Source rows [y, y + rows), flipped vertically unless `flip` is false (Earth maps: GL rows run south → north). */
-  strip(y: number, rows: number, flip?: boolean): Promise<ImageBitmap>
+  strip(y: number, rows: number, flip?: boolean): Promise<TexStrip>
   close(): void
 }
 
-type WorkerReply = { op: 'decoded'; req: number; width: number; height: number } | { op: 'strip'; req: number; bitmap: ImageBitmap } | { op: 'error'; req: number; message: string }
+type WorkerReply =
+  | { op: 'decoded'; req: number; width: number; height: number }
+  | { op: 'strip'; req: number; width: number; height: number; data: Uint8Array }
+  | { op: 'error'; req: number; message: string }
 
 class WorkerGone extends Error {
   constructor() {
@@ -331,10 +378,7 @@ function worker(): Worker | null {
     w.onmessage = (ev: MessageEvent<WorkerReply>) => {
       const m = ev.data
       const r = replies.get(m.req)
-      if (!r) {
-        if (m.op === 'strip') m.bitmap.close()
-        return
-      }
+      if (!r) return // an unclaimed strip's bytes are simply dropped
       replies.delete(m.req)
       if (m.op === 'error') r.reject(new Error(m.message))
       else r.resolve(m)
@@ -380,7 +424,7 @@ async function decodeBlob(blob: Blob): Promise<DecodedMap> {
           if (!live) throw new WorkerGone()
           const m = await ask(live, { op: 'strip', id, y, rows, flip })
           if (m.op !== 'strip') throw new Error('texture strip: unexpected reply')
-          return m.bitmap
+          return makeStrip(m.width, m.height, m.data)
         },
         close: () => decodeWorker?.postMessage({ op: 'close', id }),
       }
@@ -393,7 +437,7 @@ async function decodeBlob(blob: Blob): Promise<DecodedMap> {
     width: full.width,
     height: full.height,
     offThread: false,
-    strip: (y, rows, flip = true) => createImageBitmap(full, 0, y, full.width, rows, flip ? { ...BITMAP_OPTS, imageOrientation: 'flipY' } : BITMAP_OPTS),
+    strip: async (y, rows, flip = true) => makeStrip(full.width, rows, stripBytesHere(full, y, rows, flip)),
     close: () => full.close(),
   }
 }
@@ -497,10 +541,12 @@ if (typeof location !== 'undefined' && bitmapsSupported()) {
 
 /**
  * Upload one strip straight into the destination texture (bound through three's state cache, unpack state set
- * through it too, so three's own later uploads see what is really set). ImageBitmaps carry their orientation and
- * alpha handling; the strip was cut flipped, as GL rows run south → north. The last strip generates the mip chain.
+ * through it too, so three's own later uploads see what is really set). The strip's bytes were cut already flipped
+ * where needed (GL rows run south → north) and are copied by the call itself, so the strip may be dropped at once.
+ * The last strip generates the mip chain.
  */
-export function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: ImageBitmap, y: number, last: boolean) {
+export function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: TexStrip, y: number, last: boolean) {
+  if (!strip.data) throw new Error('texture strip already released')
   const g = gl.getContext() as WebGL2RenderingContext
   const props = gl.properties.get(dst) as { __webglTexture?: WebGLTexture }
   if (!props.__webglTexture) gl.initTexture(dst)
@@ -514,7 +560,7 @@ export function uploadStrip(gl: WebGLRenderer, dst: Texture, strip: ImageBitmap,
   state.pixelStorei(g.UNPACK_ROW_LENGTH, 0)
   state.pixelStorei(g.UNPACK_SKIP_PIXELS, 0)
   state.pixelStorei(g.UNPACK_SKIP_ROWS, 0)
-  g.texSubImage2D(g.TEXTURE_2D, 0, 0, y, strip.width, strip.height, g.RGBA, g.UNSIGNED_BYTE, strip)
+  g.texSubImage2D(g.TEXTURE_2D, 0, 0, y, strip.width, strip.height, g.RGBA, g.UNSIGNED_BYTE, strip.data)
   if (last) g.generateMipmap(g.TEXTURE_2D)
   if (import.meta.env.DEV) {
     const err = g.getError()
@@ -691,7 +737,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
         pending.add(strip)
         return strip
       }
-      const done = (strip: ImageBitmap) => {
+      const done = (strip: TexStrip) => {
         pending.delete(strip)
         strip.close()
       }

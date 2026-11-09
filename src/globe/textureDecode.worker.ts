@@ -6,13 +6,19 @@
  * of every pixel: 11–42 ms per 2048×256 strip on the main thread of a 4× throttled phone) touches the main thread.
  * The main thread only uploads the strips it receives (texSubImage2D).
  *
+ * Strips leave as plain RGBA BYTES (an ArrayBuffer, transferred), never as ImageBitmaps. On iOS WebKit an ImageBitmap
+ * cut from another one can share its backing store, and texSubImage2D(ImageBitmap) is copied later in the GPU
+ * process: closing the source (or the strip) right after the call let that memory be recycled before the copy ran,
+ * and the iPhone's day / night maps came up holding stale rendered frames (space, satellite dots, a smaller globe)
+ * wrapped around the planet. Bytes are copied synchronously by texSubImage2D, so nothing outlives its owner.
+ *
  *   in:  { op: 'decode', id, req, blob }        decode and keep the bitmap as image `id`
  *        { op: 'strip', id, req, y, rows, flip } source rows [y, y + rows) of image `id`, flipped vertically
  *                                               when `flip` (the Earth maps: GL rows run south → north; regional
  *                                               images keep row 0 = north)
  *        { op: 'close', id }                    release image `id`
  *   out: { op: 'decoded', req, width, height }
- *        { op: 'strip', req, bitmap }           (transferred)
+ *        { op: 'strip', req, width, height, data } (data: RGBA bytes, transferred)
  *        { op: 'error', req, message }
  */
 const ctx = self as unknown as DedicatedWorkerGlobalScope
@@ -23,6 +29,26 @@ type In =
   | { op: 'decode'; id: number; req: number; blob: Blob }
   | { op: 'strip'; id: number; req: number; y: number; rows: number; flip: boolean }
   | { op: 'close'; id: number }
+
+/** One reusable 2D surface per strip size (the maps are opaque, so the canvas' premultiplication is lossless). */
+let surface: OffscreenCanvasRenderingContext2D | null = null
+
+/** Source rows [y, y + rows) of `img` as RGBA bytes, flipped vertically when `flip`. */
+function stripBytes(img: ImageBitmap, y: number, rows: number, flip: boolean): Uint8Array {
+  const w = img.width
+  if (!surface || surface.canvas.width !== w || surface.canvas.height !== rows) {
+    surface = new OffscreenCanvas(w, rows).getContext('2d', { willReadFrequently: true, alpha: true })
+    if (!surface) throw new Error('texture strip: no 2D context')
+  }
+  const c = surface
+  c.imageSmoothingEnabled = false
+  c.setTransform(1, 0, 0, 1, 0, 0)
+  c.clearRect(0, 0, w, rows)
+  if (flip) c.setTransform(1, 0, 0, -1, 0, rows)
+  c.drawImage(img, 0, y, w, rows, 0, 0, w, rows)
+  const px = c.getImageData(0, 0, w, rows).data
+  return new Uint8Array(px.buffer, px.byteOffset, px.byteLength)
+}
 
 ctx.onmessage = async (ev: MessageEvent<In>) => {
   const m = ev.data
@@ -40,8 +66,8 @@ ctx.onmessage = async (ev: MessageEvent<In>) => {
     }
     const full = images.get(m.id)
     if (!full) throw new Error(`texture image ${m.id} is gone`)
-    const strip = await createImageBitmap(full, 0, m.y, full.width, m.rows, m.flip ? { ...OPTS, imageOrientation: 'flipY' } : OPTS)
-    ctx.postMessage({ op: 'strip', req: m.req, bitmap: strip }, [strip])
+    const data = stripBytes(full, m.y, m.rows, m.flip)
+    ctx.postMessage({ op: 'strip', req: m.req, width: full.width, height: m.rows, data }, [data.buffer])
   } catch (err) {
     ctx.postMessage({ op: 'error', req: m.req, message: err instanceof Error ? err.message : String(err) })
   }
