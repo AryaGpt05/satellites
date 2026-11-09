@@ -22,9 +22,12 @@ describe('opt-outs', () => {
   it('sends from the live site', () => expect(telemetryAllowed(live)).toBe(true))
   it('never under automation (navigator.webdriver)', () => expect(telemetryAllowed({ ...live, webdriver: true })).toBe(false))
   it('never on dev builds', () => expect(telemetryAllowed({ ...live, dev: true })).toBe(false))
-  it('never on local hosts', () => {
-    for (const hostname of ['localhost', '127.0.0.1', '[::1]', '0.0.0.0', 'mac.local', 'app.localhost']) expect(telemetryAllowed({ ...live, hostname })).toBe(false)
+  it('only on the production hosts: never local builds or Vercel previews', () => {
+    expect(telemetryAllowed({ ...live, hostname: 'watched.earth' })).toBe(true)
+    for (const hostname of ['localhost', '127.0.0.1', '[::1]', 'mac.local', 'overflight-git-x-dev-armaans-projects.vercel.app', 'evil.watched.earth.example'])
+      expect(telemetryAllowed({ ...live, hostname })).toBe(false)
   })
+  it('a tab opened with ?noanalytics=1 stays out after the URL changes', () => expect(telemetryAllowed({ ...live, search: '?q=1,2&n=x', optedOut: true })).toBe(false))
   it('never with ?noanalytics=1', () => {
     expect(telemetryAllowed({ ...live, search: '?noanalytics=1' })).toBe(false)
     expect(telemetryAllowed({ ...live, search: '?q=1,2&noanalytics=1' })).toBe(false)
@@ -50,8 +53,8 @@ describe('coarsening', () => {
     expect(cellOf(91, 0)).toBeUndefined()
     expect(cellOf(NaN, 0)).toBeUndefined()
   })
-  const place = (label: string, sublabel?: string, source: Place['source'] = 'search') => ({ label, sublabel, source })
-  const region = (p: ReturnType<typeof place>) => regionLabel(p, cityLevelLabel)
+  const place = (label: string, sublabel?: string, source: Place['source'] = 'search', streetLevel?: boolean) => ({ label, sublabel, source, streetLevel })
+  const region = (p: ReturnType<typeof place>, shared = false) => regionLabel(p, cityLevelLabel, { shared })
   it('a city keeps its region and country', () => expect(region(place('Waterloo', 'Ontario, Canada'))).toBe('Waterloo, Ontario, Canada'))
   it('a typed street address is saved as its city', () => {
     expect(region(place('200 University Ave W', 'Waterloo, Ontario, Canada'))).toBe('Waterloo, Ontario, Canada')
@@ -62,7 +65,20 @@ describe('coarsening', () => {
     expect(region(place('43.4723°N 80.5449°W'))).toBeUndefined()
     expect(region(place('Home', 'N2L 3G1, Waterloo, Ontario'))).toBe('Home, Waterloo, Ontario')
   })
-  it('near me uses only the city from the reverse geocode', () => expect(region(place('Lester Street', 'Waterloo, Ontario, Canada', 'geolocation'))).toBe('Waterloo, Ontario, Canada'))
+  it('street results the geocoder flags are saved as their city, in any language', () => {
+    for (const street of ['Kalverstraat', 'Drottninggatan', 'Königsallee', 'Nevsky Prospekt', 'Strøget', 'Broadway', 'Avenue des Champs-Élysées'])
+      expect(region(place(street, 'Amsterdam, North Holland, Netherlands', 'search', true))).toBe('Amsterdam, North Holland, Netherlands')
+  })
+  it('the word-list backstop catches unflagged street names', () => {
+    for (const street of ['Kalverstraat', 'Drottninggatan', 'Königsallee', 'Boulevard Saint-Germain', 'Nevsky Prospekt'])
+      expect(region(place(street, 'Somewhere, Region, Country'))).toBe('Somewhere, Region, Country')
+  })
+  it('near me keeps the settlement the reverse geocoder named (label = city, sublabel = region)', () =>
+    expect(region(place('Waterloo', 'Ontario, Canada', 'geolocation'))).toBe('Waterloo, Ontario, Canada'))
+  it('a deep link that is not a share keeps no free text', () => {
+    expect(region(place('my house', undefined, 'url'))).toBeUndefined()
+    expect(region(place('Waterloo', undefined, 'url'), true)).toBe('Waterloo')
+  })
   it('named places and cities named St. stay', () => {
     expect(region(place('Pyramids of Giza', 'Giza, Egypt'))).toBe('Pyramids of Giza, Giza, Egypt')
     expect(region(place('St. Louis', 'Missouri, United States'))).toBe('St. Louis, Missouri, United States')
@@ -121,16 +137,16 @@ describe('batching', () => {
     expect(sent[2][1]).toBe(true)
   })
 
-  it('drops undefined / non-finite props, dedupes a share fallback, enriches', () => {
+  it('drops undefined / non-finite props, counts every share press, enriches', () => {
     const sent: string[] = []
     _testing({ allowed: true, sender: (b) => sent.push(b), ctx: {}, sid: 'sid_abcdefghijklmnop' })
     setEnricher((_t, p) => (p.norad === 60989 ? { ...p, sat: 'Sentinel-2C' } : p))
     track('results', { sats: 3, ms: NaN, partial: undefined })
     track('share_action', { action: 'copy_image', norad: 60989 })
-    track('share_action', { action: 'save_png', norad: 60989 }) // copy image fell back to a download
+    track('share_action', { action: 'x', norad: 60989 }) // a second, separate press
     flush()
     const ev = JSON.parse(sent[0]).events
-    expect(ev).toHaveLength(2)
+    expect(ev).toHaveLength(3)
     expect(ev[0].p).toEqual({ sats: 3 })
     expect(ev[1].p).toEqual({ action: 'copy_image', norad: 60989, sat: 'Sentinel-2C' })
   })
@@ -155,5 +171,16 @@ describe('derived events', () => {
     expect(searchSource({ place: p('geolocation') })).toBe('near_me')
     expect(searchSource({ place: p('url') })).toBe('deep_link')
     expect(searchSource({ place: p('url'), shared: { id: 'abcdefgh', placeLabel: 'x', lat: 0, lon: 0 } })).toBe('share_link')
+  })
+})
+
+describe('the geocoder flags street-level results (src/imagery/geocode.ts)', () => {
+  const f = (properties: Record<string, string>) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [4.89, 52.37] }, properties }) as never
+  it('streets, houses and buildings are street-level; cities and landmarks are not', async () => {
+    const { photonToPlace } = await import('@/imagery/geocode')
+    expect(photonToPlace(f({ name: 'Kalverstraat', osm_key: 'highway', osm_value: 'pedestrian', type: 'street', city: 'Amsterdam', country: 'Netherlands' }))?.streetLevel).toBe(true)
+    expect(photonToPlace(f({ housenumber: '12', street: 'Damrak', city: 'Amsterdam', osm_key: 'place', osm_value: 'house', type: 'house' }))?.streetLevel).toBe(true)
+    expect(photonToPlace(f({ name: 'Amsterdam', osm_key: 'place', osm_value: 'city', type: 'city', country: 'Netherlands' }))?.streetLevel).toBeUndefined()
+    expect(photonToPlace(f({ name: 'Rijksmuseum', osm_key: 'tourism', osm_value: 'museum', type: 'house', city: 'Amsterdam' }))?.streetLevel).toBe(true)
   })
 })

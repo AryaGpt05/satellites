@@ -32,7 +32,7 @@ export function ActivityChart({ series, bucket }: { series: [number, number, num
   const plotW = Math.max(0, w - right)
   const plotH = H - top - bottom
   const n = series.length
-  const max = niceMax(Math.max(1, ...series.map((s) => Math.max(s[1], s[3]))))
+  const max = niceMax(Math.max(1, ...series.map((s) => Math.max(s[1], s[2], s[3]))))
   const bw = n ? plotW / n : 0
   const gap = bw > 6 ? 1.5 : bw > 3 ? 1 : 0
   const y = (v: number) => top + plotH - (v / max) * plotH
@@ -130,10 +130,11 @@ function tickIndexes(ts: number[], bucket: 'hour' | 'day', want: number): number
 
 // ── Ranked list ─────────────────────────────────────────────────────────────────────────────
 
-export function RankList({ rows, max = 8, label, empty = 'Nothing yet', accent = false }: { rows: Ranked | undefined; max?: number; label?: (v: string) => ReactNode; empty?: string; accent?: boolean }) {
+/** `total`: the whole dimension (the RPC's dimTotals), so a share is of everything, not of the top 15. */
+export function RankList({ rows, total, max = 8, label, empty = 'Nothing yet', accent = false }: { rows: Ranked | undefined; total?: number; max?: number; label?: (v: string) => ReactNode; empty?: string; accent?: boolean }) {
   const list = (rows ?? []).filter(([v]) => v !== '').slice(0, max)
   if (!list.length) return <p className="a-empty">{empty}</p>
-  const total = (rows ?? []).reduce((a, r) => a + r[1], 0)
+  total = Math.max(total ?? 0, (rows ?? []).reduce((a, r) => a + r[1], 0))
   const top = list[0][1]
   return (
     <ol className="a-rank">
@@ -211,9 +212,9 @@ export function WorldMap({ cells }: { cells: Ranked | undefined }) {
 
 // ── Split bar (device classes, share actions) ───────────────────────────────────────────────
 
-export function Split({ rows, names }: { rows: Ranked | undefined; names?: Record<string, string> }) {
+export function Split({ rows, names, total: whole }: { rows: Ranked | undefined; names?: Record<string, string>; total?: number }) {
   const list = (rows ?? []).filter(([v]) => v)
-  const total = list.reduce((a, r) => a + r[1], 0)
+  const total = Math.max(whole ?? 0, list.reduce((a, r) => a + r[1], 0))
   if (!total) return <p className="a-empty">Nothing yet</p>
   return (
     <div className="a-split">

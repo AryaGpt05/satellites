@@ -3,9 +3,9 @@
  * the admin_stats RPC, which only answers for the admin's email (checked in the database).
  * DEV only: /admin?mock=1 renders a fixture without signing in (src/admin/fixture.ts).
  */
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Wordmark } from '@/ui/system/Wordmark'
-import { RANGES, currentSession, fetchStats, sendMagicLink, signOut, supabase, type AdminStats, type Range } from './api'
+import { RANGES, currentSession, fetchStats, sendMagicLink, signOut, supabase, takeAuthError, verifyCode, type AdminStats, type Range } from './api'
 import { ActivityChart, Funnel, RankList, Split, WorldMap } from './charts'
 import { ACTION_NAMES, DEVICE_NAMES, SOURCE_NAMES, VERDICT_NAMES, countryName, fmtAgo, fmtInt, fmtPct, fmtSec, fmtStamp } from './format'
 
@@ -17,6 +17,9 @@ type View =
 
 const MOCK = import.meta.env.DEV ? new URLSearchParams(location.search).has('mock') : false
 const RANGE_KEY = 'watched-admin.range'
+/** A used or expired link comes back with an error in the URL: read once, before the auth client starts, and shown
+ *  instead of a blank form. */
+const LINK_ERROR = takeAuthError() ?? undefined
 
 function initialRange(): Range {
   try {
@@ -38,7 +41,7 @@ export function Admin() {
   // Session (or the fixture)
   useEffect(() => {
     if (import.meta.env.DEV && MOCK) {
-      setView({ kind: 'ready', email: 'a585gupt@uwaterloo.ca', mock: true })
+      setView({ kind: 'ready', email: 'owner@example.com', mock: true })
       return
     }
     const sb = supabase()
@@ -46,24 +49,29 @@ export function Admin() {
       setView({ kind: 'signed-out', error: 'Supabase is not configured for this build.' })
       return
     }
-    void currentSession().then((s) => setView(s ? { kind: 'ready', email: s.user.email } : { kind: 'signed-out' }))
+    void currentSession().then((s) => setView(s ? { kind: 'ready', email: s.user.email } : { kind: 'signed-out', error: LINK_ERROR }))
     const { data } = sb.auth.onAuthStateChange((_e, s) => {
       setView((v) => (s ? (v.kind === 'ready' || v.kind === 'denied' ? v : { kind: 'ready', email: s.user.email }) : { kind: 'signed-out' }))
     })
     return () => data.subscription.unsubscribe()
   }, [])
 
+  // Only the latest request may land: a slow answer for an earlier range must not overwrite a newer one.
+  const latest = useRef(0)
   const load = useCallback(
     async (r: Range) => {
+      const id = ++latest.current
       setBusy(true)
       setErr(null)
       if (import.meta.env.DEV && MOCK) {
         const { mockStats } = await import('./fixture')
+        if (id !== latest.current) return
         setStats(mockStats(r))
         setBusy(false)
         return
       }
       const res = await fetchStats(r)
+      if (id !== latest.current) return
       setBusy(false)
       if (res.ok) setStats(res.stats)
       else if (res.denied) setView((v) => ({ kind: 'denied', email: v.kind === 'ready' ? v.email : undefined, message: res.message }))
@@ -116,8 +124,19 @@ export function Admin() {
         </>
       }
     >
-      {err && <p className="a-error">Couldn’t load the stats: {err}</p>}
-      {stats ? <Dashboard s={stats} busy={busy} onRefresh={() => void load(range)} /> : <p className="a-empty a-pad">Loading…</p>}
+      {err && (
+        <p className="a-error">
+          Couldn’t load the stats: {err}{' '}
+          <button type="button" className="a-link" onClick={() => void load(range)} disabled={busy}>
+            Retry
+          </button>
+        </p>
+      )}
+      {stats ? (
+        <Dashboard s={stats} busy={busy} onRefresh={() => void load(range)} />
+      ) : (
+        !err && <p className="a-empty a-pad">Loading…</p>
+      )}
     </Shell>
   )
 }
@@ -153,6 +172,7 @@ function RangePicker({ value, onChange }: { value: Range; onChange: (r: Range) =
 
 function SignIn({ sent, error, onSent }: { sent?: string; error?: string; onSent: (email: string) => void }) {
   const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
   const [pending, setPending] = useState(false)
   const [msg, setMsg] = useState<string | null>(error ?? null)
   const submit = async (e: FormEvent) => {
@@ -162,23 +182,41 @@ function SignIn({ sent, error, onSent }: { sent?: string; error?: string; onSent
     setPending(true)
     const problem = await sendMagicLink(v)
     setPending(false)
-    if (problem) setMsg(problem)
-    else onSent(v)
+    setMsg(problem)
+    if (!problem) onSent(v)
+  }
+  const submitCode = async (e: FormEvent) => {
+    e.preventDefault()
+    const c = code.replace(/\s+/g, '')
+    if (!sent || !/^\d{6,10}$/.test(c)) return setMsg('Enter the code from the email.')
+    setPending(true)
+    const problem = await verifyCode(sent, c)
+    setPending(false)
+    setMsg(problem) // success: the auth listener switches to the stats
   }
   return (
     <Shell>
       <section className="a-gate">
         <p className="a-label">SIGN IN</p>
         {sent ? (
-          <>
+          <form onSubmit={submitCode} className="a-form">
             <h1 className="a-gate-h">Check your inbox.</h1>
             <p className="a-gate-p">
-              A sign-in link is on its way to <span className="a-mono">{sent}</span>. Open it on this device; it brings you back here.
+              A sign-in email is on its way to <span className="a-mono">{sent}</span>. Open its link on this device, or, if the email shows a code, type it here.
             </p>
-          </>
+            <label className="a-label" htmlFor="a-code">
+              CODE
+            </label>
+            <input id="a-code" className="a-input a-input-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="12345678" />
+            <button type="submit" className="a-btn a-btn-primary" disabled={pending}>
+              {pending ? 'Checking…' : 'Sign in'}
+            </button>
+            {msg && <p className="a-error">{msg}</p>}
+          </form>
         ) : (
           <form onSubmit={submit} className="a-form">
             <h1 className="a-gate-h">Stats are for the owner.</h1>
+            {msg && <p className="a-error">{msg}</p>}
             <label className="a-label" htmlFor="a-email">
               EMAIL
             </label>
@@ -186,7 +224,6 @@ function SignIn({ sent, error, onSent }: { sent?: string; error?: string; onSent
             <button type="submit" className="a-btn a-btn-primary" disabled={pending}>
               {pending ? 'Sending…' : 'Send sign-in link'}
             </button>
-            {msg && <p className="a-error">{msg}</p>}
           </form>
         )}
       </section>
@@ -280,7 +317,7 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
           <p className="a-note">Sessions that reached each step. The last column is the share of the step before.</p>
         </Section>
         <Section n={4} title="HOW PEOPLE SEARCH">
-          <RankList rows={s.top['search.source']} label={(x) => SOURCE_NAMES[x] ?? x} />
+          <RankList rows={s.top['search.source']} total={t.search} label={(x) => SOURCE_NAMES[x] ?? x} />
         </Section>
       </div>
 
@@ -289,10 +326,10 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
           <WorldMap cells={s.top['search.cell']} />
           <div className="a-places-lists">
             <Panel title="TOP PLACES">
-              <RankList rows={s.top['search.label']} max={10} accent />
+              <RankList rows={s.top['search.label']} total={t.search} max={10} accent />
             </Panel>
             <Panel title="TOP COUNTRIES SEARCHED">
-              <RankList rows={s.top['search.country']} max={8} label={countryName} />
+              <RankList rows={s.top['search.country']} total={t.search} max={8} label={countryName} />
             </Panel>
           </div>
         </div>
@@ -301,13 +338,13 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
       <Section n={6} title="SATELLITES">
         <div className="a-grid3">
           <Panel title="MOST OPENED">
-            <RankList rows={s.top['pass_open.sat']} />
+            <RankList rows={s.top['pass_open.sat']} total={t.pass_open} />
           </Panel>
           <Panel title="MOST SHARED">
-            <RankList rows={s.top['share_action.sat']} accent />
+            <RankList rows={s.top['share_action.sat']} total={t.share_action} accent />
           </Panel>
           <Panel title="PASS OPENS BY VERDICT">
-            <Split rows={s.top['pass_open.verdict']} names={VERDICT_NAMES} />
+            <Split rows={s.top['pass_open.verdict']} total={t.pass_open} names={VERDICT_NAMES} />
           </Panel>
         </div>
       </Section>
@@ -315,19 +352,19 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
       <Section n={7} title="SHARING & AUDIENCE">
         <div className="a-grid3">
           <Panel title="SHARE ACTIONS">
-            <Split rows={s.top['share_action.action']} names={ACTION_NAMES} />
+            <Split rows={s.top['share_action.action']} total={t.share_action} names={ACTION_NAMES} />
           </Panel>
           <Panel title="DEVICES">
-            <Split rows={s.top['session.device']} names={DEVICE_NAMES} />
+            <Split rows={s.top['session.device']} total={t.session} names={DEVICE_NAMES} />
           </Panel>
           <Panel title="VISITOR COUNTRIES" note="From Vercel's edge; the IP itself is never stored.">
-            <RankList rows={s.top['session.country']} max={6} label={countryName} />
+            <RankList rows={s.top['session.country']} total={t.session} max={6} label={countryName} />
           </Panel>
           <Panel title="REFERRERS">
-            <RankList rows={s.top['session.ref']} max={6} empty="No referrers yet" />
+            <RankList rows={s.top['session.ref']} total={t.session} max={6} empty="No referrers yet" />
           </Panel>
           <Panel title="UTM · SOURCE / MEDIUM / CAMPAIGN">
-            <RankList rows={s.top['session.utm']} max={6} empty="No tagged links yet" />
+            <RankList rows={s.top['session.utm']} total={t.session} max={6} empty="No tagged links yet" />
           </Panel>
           <Panel title="SPEED">
             <dl className="a-facts">

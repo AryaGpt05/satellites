@@ -62,9 +62,10 @@ export function mockStats(range: Range, now = Date.now()): AdminStats {
   }
   const funnel = { search: Math.round(sessions * 0.78), results: Math.round(sessions * 0.74), pass_open: Math.round(sessions * 0.41), lightbox_open: Math.round(sessions * 0.22), share_open: Math.round(shares * 1.2), share_action: Math.round(shares * 0.85) }
   const minsAgo = (m: number) => now - m * 60e3
-  return {
+  const out: AdminStats = {
     range,
     generatedAt: now,
+    dimTotals: {},
     bucket: hourly ? 'hour' : 'day',
     totals: {
       session: sessions,
@@ -112,4 +113,6 @@ export function mockStats(range: Range, now = Date.now()): AdminStats {
       { t: minsAgo(611), where: 'window', msg: 'ResizeObserver loop completed with undelivered notifications.' },
     ],
   }
+  for (const [k, rows] of Object.entries(out.top)) out.dimTotals[k] = Math.round(rows.reduce((a, r) => a + r[1], 0) * 1.08)
+  return out
 }

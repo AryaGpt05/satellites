@@ -16,7 +16,7 @@ export default defineConfig({
   publicDir: false,
   build: {
     target: 'es2022',
-    sourcemap: true,
+    sourcemap: false, // nothing of the admin page's source is published
     emptyOutDir: false, // dist/ already holds the app
     rolldownOptions: {
       input: { admin: fileURLToPath(new URL('./admin.html', import.meta.url)) },

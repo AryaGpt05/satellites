@@ -655,6 +655,7 @@ a {
 }
 .a-input {
   font: inherit;
+  font-size: 16px; /* iOS zooms into inputs under 16px */
   color: var(--bone);
   background: var(--ink-1);
   border: 1px solid var(--line-strong);
@@ -746,4 +747,10 @@ a {
   .a-sec {
     margin-bottom: var(--s-6);
   }
+}
+.a-input-code {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
 }

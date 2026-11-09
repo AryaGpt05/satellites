@@ -8,8 +8,10 @@
  *  - Never an IP (the relay reads only Vercel's derived country header), never a full referrer (host only).
  *  - Error messages lose URLs and decimal numbers before they leave the browser (the server masks them again).
  *
- * Off (nothing is queued or sent) under automation (`navigator.webdriver`), on dev builds and local hosts, and
- * with `?noanalytics=1`. `track()` is safe to call from anywhere, any time: it never throws.
+ * Off (nothing is queued or sent) under automation (`navigator.webdriver`), on dev builds, on any host but the
+ * production ones (previews and local builds write nothing), and for the rest of the tab once a page was opened
+ * with `?noanalytics=1` (src/app/telemetryDeps.ts records that before the app can rewrite the URL).
+ * `track()` is safe to call from anywhere, any time: it never throws.
  *
  * The module has no side effects at import, and no imports: the share sheet (results chunk) and the lazy
  * src/app/telemetry.ts both use it, and an import of an app module from here would make Rolldown re-split the
@@ -44,22 +46,26 @@ export interface TelemetryEnv {
   dev?: boolean
   hostname?: string
   search?: string
+  /** `?noanalytics=1` was seen earlier in this tab (sessionStorage, written at boot) */
+  optedOut?: boolean
   /** Build-time VITE_TELEMETRY_E2E=1 (end-to-end checks of a local build only; never set on Vercel): ignore webdriver + host. */
   e2e?: boolean
 }
 
 // ── Opt-outs ────────────────────────────────────────────────────────────────────────────────
 
-const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1|0\.0\.0\.0|.*\.local|.*\.localhost)$/i
+/** Only the production site counts: Vercel previews and local builds never write into the stats. */
+export const PRODUCTION_HOSTS: readonly string[] = ['www.watched.earth', 'watched.earth']
+export const OPT_OUT_KEY = 'watched.noanalytics'
+export const OPT_OUT_RE = /[?&]noanalytics=1(?:&|$)/
 
-/** False for bots, dev builds, local hosts, and `?noanalytics=1`. */
+/** False for bots, dev builds, non-production hosts, and tabs opened with `?noanalytics=1`. */
 export function telemetryAllowed(env: TelemetryEnv = currentEnv()): boolean {
   if (env.dev) return false
-  if (/[?&]noanalytics=1(?:&|$)/.test(env.search ?? '')) return false
+  if (env.optedOut || OPT_OUT_RE.test(env.search ?? '')) return false
   if (env.e2e) return true
   if (env.webdriver) return false
-  if (!env.hostname || LOCAL_HOST.test(env.hostname)) return false
-  return true
+  return !!env.hostname && PRODUCTION_HOSTS.includes(env.hostname.toLowerCase())
 }
 
 function currentEnv(): TelemetryEnv {
@@ -69,7 +75,16 @@ function currentEnv(): TelemetryEnv {
     dev: !!import.meta.env?.DEV,
     hostname: location.hostname,
     search: location.search,
+    optedOut: readOptOut(),
     e2e: import.meta.env?.VITE_TELEMETRY_E2E === '1',
+  }
+}
+
+function readOptOut(): boolean {
+  try {
+    return sessionStorage.getItem(OPT_OUT_KEY) === '1'
+  } catch {
+    return false
   }
 }
 
@@ -94,27 +109,36 @@ export function cellOf(lat: number, lon: number): string | undefined {
  */
 const STREET_SUFFIX = /\s(street|st|road|rd|avenue|ave|drive|dr|lane|ln|boulevard|blvd|way|crescent|cres|terrace|highway|hwy|parkway|pkwy|strasse|straße|gasse|weg)\b\.?/i
 const STREET_PREFIX = /^(rue|calle|via|viale|avenida|av\.|chemin|rua|carrer|ulica|ul\.)\s/i
-const streetish = (s: string) => STREET_SUFFIX.test(s) || STREET_PREFIX.test(s) || /straße$|strasse$|gasse$/i.test(s)
+const STREET_WORD_END = /(straat|gracht|gatan|gata|gade|vej|veien|allee|allée|strasse|straße|gasse|weg|prospekt|utca|ulitsa|caddesi|sokak)$/i
+const STREET_START = /^(avenue|boulevard|bd|avinguda|piazza|praça|plaza|plac|ulitsa)\s/i
+/** A backstop for geocoder results not flagged `streetLevel`. */
+const streetish = (s: string) => STREET_SUFFIX.test(s) || STREET_PREFIX.test(s) || STREET_START.test(s) || STREET_WORD_END.test(s.trim())
 
 /**
- * City / region level: "Waterloo, Ontario, Canada". A typed street address (or a street, or a
- * near-me reverse geocode) is saved as its city (`cityLevel` is src/lib/backend.ts `cityLevelLabel`,
- * passed in), followed by the region parts of the sublabel. Parts with digits (postcodes, house
- * numbers, coordinates) are dropped.
+ * City / region level: "Waterloo, Ontario, Canada". Anything finer never leaves the browser:
+ *  - a street, house or address result (`place.streetLevel`, flagged by the geocoder, or a street-like name)
+ *    is saved as its city (the first part of the sublabel);
+ *  - a typed address with digits falls back to its city through `cityLevel` (src/lib/backend.ts `cityLevelLabel`);
+ *  - a deep link's `n=` is free text anyone could type, so a link that isn't a share keeps only the region
+ *    parts the geocoder gave (usually none: the cell alone is stored).
+ * Near me keeps the settlement the reverse geocoder named (it never names a street). Parts with digits
+ * (postcodes, house numbers, coordinates) are dropped everywhere.
  */
 export function regionLabel(
-  place: Pick<Place, 'label' | 'sublabel' | 'source'>,
+  place: Pick<Place, 'label' | 'sublabel' | 'source' | 'streetLevel'>,
   cityLevel: (p: Pick<Place, 'label' | 'sublabel'>) => string | undefined,
+  opts: { shared?: boolean } = {},
 ): string | undefined {
   const parts = (place.sublabel ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s && !/\d/.test(s))
-  const specific = place.source === 'geolocation' || streetish(place.label ?? '')
-  const city = specific ? parts[0] : cityLevel(place)
-  if (!city) return parts.length ? clip(parts.join(', '), 120) : undefined
-  const rest = parts.filter((p) => p.toLowerCase() !== city.toLowerCase())
-  return clip([city, ...rest].join(', '), 120)
+  const join = (xs: string[]) => (xs.length ? clip(xs.join(', '), 120) : undefined)
+  if (place.source === 'url' && !opts.shared) return join(parts)
+  const street = place.streetLevel || streetish(place.label ?? '')
+  const city = street ? parts[0] : cityLevel(place)
+  if (!city || /\d/.test(city)) return join(street ? parts.slice(1) : parts)
+  return join([city, ...parts.filter((p) => p.toLowerCase() !== city.toLowerCase())])
 }
 
 /** phone / tablet / desktop from the viewport and the primary pointer. */
@@ -199,8 +223,6 @@ export const ENDPOINT = '/api/e'
 const MAX_BATCH = 50
 const FLUSH_MS = 4000
 const MAX_QUEUE = 200
-/** Share sheet fallbacks (copy image → save, native → copy) would count one press twice. */
-const SHARE_DEDUPE_MS = 1500
 
 type Sender = (body: string, beacon: boolean) => void
 type Enricher = (type: EventType, p: Props) => Props
@@ -208,10 +230,16 @@ type Enricher = (type: EventType, p: Props) => Props
 let allowed: boolean | undefined
 let queue: Queued[] = []
 let timer: ReturnType<typeof setTimeout> | undefined
-let lastShareAt = -Infinity
 let enricher: Enricher | undefined
 let sender: Sender = defaultSender
 let ctxCache: Record<string, string> | undefined
+/** Captured at boot (src/app/telemetryDeps.ts): the referrer and query the visit arrived with, before any
+ *  redirect (/s/<id> → /?s=<id>) or URL rewrite lost them. */
+let arrival: { referrer: string; search: string } | undefined
+
+export function setArrival(a: { referrer: string; search: string }): void {
+  arrival = a
+}
 
 function isAllowed(): boolean {
   if (allowed === undefined) {
@@ -229,10 +257,6 @@ export function track(type: EventType, p: Props = {}): void {
   try {
     if (!isAllowed()) return
     const now = Date.now()
-    if (type === 'share_action') {
-      if (now - lastShareAt < SHARE_DEDUPE_MS) return
-      lastShareAt = now
-    }
     const props = enricher ? enricher(type, p) : p
     const clean: Props = {}
     for (const [k, v] of Object.entries(props)) if (v !== undefined && v !== '' && !(typeof v === 'number' && !Number.isFinite(v))) clean[k] = v
@@ -255,9 +279,9 @@ function context(): Record<string, string> {
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
   const ctx: Record<string, string> = {
     device: deviceClass(innerWidth, innerHeight, coarse),
-    ...utmOf(location.search),
+    ...utmOf(arrival?.search ?? location.search),
   }
-  const ref = referrerHost(document.referrer, location.hostname)
+  const ref = referrerHost(arrival?.referrer ?? document.referrer, location.hostname)
   if (ref) ctx.ref = ref
   const v = String(import.meta.env?.VITE_APP_VERSION ?? '').slice(0, 24)
   if (/^[A-Za-z0-9._-]+$/.test(v)) ctx.v = v
@@ -319,7 +343,6 @@ export function _testing(opts: { allowed?: boolean; sender?: Sender; ctx?: Recor
   ctxCache = opts.ctx
   sid = opts.sid
   queue = []
-  lastShareAt = -Infinity
   enricher = undefined
   if (timer !== undefined) clearTimeout(timer)
   timer = undefined

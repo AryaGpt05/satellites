@@ -428,8 +428,8 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   }
 
   // ── actions ─────────────────────────────────────────────────────────────────────────────
-  const copy = async () => {
-    track('share_action', { action: 'copy_link', norad: summary ? undefined : pass?.norad })
+  const copy = async (tracked: unknown = true) => {
+    if (tracked !== false) track('share_action', { action: 'copy_link', norad: summary ? undefined : pass?.norad })
     const pending = ensureLink()
     let ok = false
     if (linkNow.current) ok = await writeText(linkNow.current)
@@ -474,8 +474,8 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
     })
   }
 
-  const download = async () => {
-    track('share_action', { action: 'save_png', norad: summary ? undefined : pass?.norad })
+  const download = async (tracked: unknown = true) => {
+    if (tracked !== false) track('share_action', { action: 'save_png', norad: summary ? undefined : pass?.norad })
     try {
       const blob = await startPng().promise
       const a = document.createElement('a')
@@ -499,7 +499,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': j.blob ?? j.promise })])
       showFlash('image')
     } catch {
-      void download()
+      void download(false) // the same press, falling back: not a second share
     }
   }
 
@@ -529,7 +529,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
       const name = err instanceof Error || err instanceof DOMException ? err.name : ''
       if (name === 'AbortError') return // the person cancelled
       // NotAllowedError (gesture spent / blocked) or TypeError (data refused): put the link on the clipboard.
-      void copy()
+      void copy(false) // the same press, falling back: not a second share
     })
   }
 

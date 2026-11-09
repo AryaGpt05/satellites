@@ -36,6 +36,10 @@ export function relayBody(raw: string, country: string | null): string | null {
 export async function handleEvents(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
   const done = (status = 204) => new Response(null, { status, headers: { 'cache-control': 'no-store' } })
+  // Preview deployments share the production database: only production writes (the client also sends nothing
+  // off the production hosts). Outside Vercel (VERCEL_ENV unset: local checks) the relay works as configured.
+  const env = process.env.VERCEL_ENV
+  if (env && env !== 'production') return done()
   const len = Number(request.headers.get('content-length') ?? 0)
   if (len > MAX_BYTES) return done(413)
   const raw = await request.text().catch(() => '')

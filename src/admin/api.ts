@@ -18,6 +18,8 @@ export interface AdminStats {
   bucket: 'hour' | 'day'
   /** Event counts by type, plus `session` (tabs) */
   totals: Record<string, number>
+  /** Sum over every value of each top-list dimension ('search.label' → searches with a label), for percentages */
+  dimTotals: Record<string, number>
   /** Distinct tabs (per day, summed) that reached each stage */
   funnel: Record<string, number>
   /** [bucket start ms, searches, shares, sessions] */
@@ -55,6 +57,31 @@ export async function sendMagicLink(email: string): Promise<string | null> {
   return error ? error.message : null
 }
 
+/** The code from the same email (Microsoft 365 Safe Links can open, and so use up, the link before you do). */
+export async function verifyCode(email: string, token: string): Promise<string | null> {
+  const sb = supabase()
+  if (!sb) return 'Supabase is not configured for this build.'
+  const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' })
+  return error ? error.message : null
+}
+
+/**
+ * A failed sign-in link lands here as /admin#error=access_denied&error_code=otp_expired&error_description=…
+ * (or ?error=… for the code flow). Returns the readable message and removes it from the address bar.
+ */
+export function takeAuthError(): string | null {
+  const params = [new URLSearchParams(location.hash.replace(/^#/, '')), new URLSearchParams(location.search)]
+  for (const p of params) {
+    const desc = p.get('error_description') ?? p.get('error')
+    if (!desc) continue
+    history.replaceState(null, '', location.pathname)
+    const code = p.get('error_code')
+    if (code === 'otp_expired') return 'That sign-in link has expired or was already used (some mail scanners open links before you do). Send a new one; if the email shows a code, type that instead.'
+    return desc.replace(/\+/g, ' ')
+  }
+  return null
+}
+
 export async function signOut(): Promise<void> {
   await supabase()?.auth.signOut()
 }
@@ -89,6 +116,7 @@ export function parseStats(v: unknown): AdminStats | null {
     generatedAt: num(v.generatedAt),
     bucket: v.bucket === 'day' ? 'day' : 'hour',
     totals: rec(v.totals),
+    dimTotals: rec(v.dimTotals),
     funnel: rec(v.funnel),
     series: Array.isArray(v.series) ? v.series.filter(Array.isArray).map((s) => [num(s[0]), num(s[1]), num(s[2]), num(s[3])] as [number, number, number, number]) : [],
     top,

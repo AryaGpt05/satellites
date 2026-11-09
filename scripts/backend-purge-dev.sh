@@ -4,7 +4,7 @@
 #   scripts/backend-purge-dev.sh              rows written by ?sandbox=backend and backend-verify.sh,
 #                                             tagged by label ("… (sandbox)", "Overflight sandbox",
 #                                             "Overflight verify"); nothing else is touched
-#   scripts/backend-purge-dev.sh --all --yes  EVERYTHING (all lookups, shares, stats): run once
+#   scripts/backend-purge-dev.sh --all --yes  EVERYTHING (all lookups, shares, stats, in-app events): run once
 #                                             before launch, since dev servers share this database
 set -euo pipefail
 REF="${SUPABASE_PROJECT_REF:-etiebfmgepkcewkkbxwi}"
@@ -27,7 +27,8 @@ select (select count(*) from public.shares) as shares_left, (select count(*) fro
 
 if [[ "${1:-}" == "--all" ]]; then
   if [[ "${2:-}" != "--yes" ]]; then echo "refusing: --all deletes every lookup and share; pass --all --yes" >&2; exit 2; fi
-  SQL="truncate public.lookups, public.lookup_cells, public.lookup_days, public.shares, public.stats_cache restart identity;
+  SQL="truncate public.lookups, public.lookup_cells, public.lookup_days, public.shares, public.stats_cache,
+  public.events, public.event_sessions, public.event_days, public.event_rolled restart identity;
 select (select count(*) from public.shares) as shares_left, (select count(*) from public.lookups) as lookups_left;"
 fi
 

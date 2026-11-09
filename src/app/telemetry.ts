@@ -11,7 +11,7 @@
  */
 import type { AppState } from '@/state/store'
 import type { Report } from '@/types'
-import { cellOf, flush, regionLabel, scrubMessage, setEnricher, startTelemetry, track, type Props } from '@/lib/telemetry'
+import { cellOf, flush, regionLabel, scrubMessage, setArrival, setEnricher, startTelemetry, track, type Props } from '@/lib/telemetry'
 import type * as Deps from './telemetryDeps'
 
 /** Handed in by src/main.tsx (src/app/telemetryDeps.ts): this chunk imports no app module itself, so adding it
@@ -61,7 +61,8 @@ function passProps(st: AppState): Props {
 
 let installed = false
 
-export function initTelemetry({ useApp, getSatInfo, cityLevelLabel }: TelemetryDeps): void {
+export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: TelemetryDeps): void {
+  setArrival(arrival)
   if (installed || !startTelemetry()) return
   installed = true
 
@@ -73,21 +74,18 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel }: TelemetryD
     return p
   })
 
-  const q = location.search
-  track('view', { entry: /[?&]s=|^\/s\//.test(q + location.pathname) ? 'share_link' : /[?&]q=/.test(q) ? 'deep_link' : 'landing' })
+  track('view', { entry: arrival.entry })
 
   // ── store ───────────────────────────────────────────────────────────────────────────────
-  let search: { place: object; t0?: number; first: boolean; final: boolean } | undefined
-  let lastPlace: object | undefined
+  let search: { place: object; t0?: number; catchUp: boolean; first: boolean; final: boolean } | undefined
 
-  const onSearch = (st: AppState, t0: number | undefined) => {
+  /** `retry`: the same place ran again straight out of the error phase (the notice's Retry). */
+  const onSearch = (st: AppState, t0: number | undefined, retry = false, catchUp = false) => {
     const place = st.place!
-    const retry = place === lastPlace
-    lastPlace = place
-    search = { place, t0, first: false, final: false }
+    search = { place, t0, catchUp, first: false, final: false }
     track('search', {
       source: retry ? 'retry' : searchSource(st),
-      label: regionLabel(place, cityLevelLabel),
+      label: regionLabel(place, cityLevelLabel, { shared: !!st.shared }),
       cell: cellOf(place.lat, place.lon),
       country: /^[a-z]{2}$/i.test(place.countryCode ?? '') ? place.countryCode!.toLowerCase() : undefined,
     })
@@ -96,19 +94,21 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel }: TelemetryD
   const onReport = (st: AppState) => {
     const r = st.report
     if (!search || !r || st.phase !== 'results') return
-    const ms = search.t0 !== undefined ? Math.round(performance.now() - search.t0) : undefined
+    // Loaded after the results were up (a deep link during boot): time them by the controller's marks, not now.
+    const since = (mark?: number) => (search!.t0 !== undefined && mark !== undefined && mark >= search!.t0 ? Math.round(mark - search!.t0) : undefined)
+    const now = performance.now()
     if (!search.first) {
       search.first = true
-      track('results', { ...reportCounts(r), ms })
+      track('results', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('results')) : since(now) })
     }
     if (!search.final && !r.partial) {
       search.final = true
-      track('results_final', { ...reportCounts(r), ms })
+      track('results_final', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('final-report')) : since(now) })
     }
   }
 
   const onChange = (st: AppState, prev: AppState) => {
-    if (st.phase === 'computing' && prev.phase !== 'computing' && st.place) onSearch(st, performance.now())
+    if (st.phase === 'computing' && prev.phase !== 'computing' && st.place) onSearch(st, performance.now(), prev.phase === 'error' && st.place === prev.place)
     if (st.report !== prev.report || (st.phase === 'results' && prev.phase !== 'results')) onReport(st)
     // A pass the controller preselects lands with the report (or the phase) in one update: not an "open".
     if (st.selectedPassId && st.selectedPassId !== prev.selectedPassId && st.report === prev.report && st.phase === prev.phase && st.phase === 'results')
@@ -120,7 +120,7 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel }: TelemetryD
   // Whatever happened before this module loaded (a deep link computes during boot).
   const now = useApp.getState()
   if ((now.phase === 'computing' || now.phase === 'results') && now.place) {
-    onSearch(now, lastMark('run-report'))
+    onSearch(now, lastMark('run-report'), false, true)
     onReport(now)
   } else if (now.phase === 'error') track('error', { where: 'phase', msg: scrubMessage(now.error ?? 'error') })
   useApp.subscribe(onChange)
@@ -130,7 +130,8 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel }: TelemetryD
   let overlay = root.dataset.overlay
   new MutationObserver(() => {
     const next = root.dataset.overlay
-    if (next === 'lightbox' && overlay !== 'lightbox') track('lightbox_open', passProps(useApp.getState()))
+    // Only from no overlay: About closing over the lightbox hands 'lightbox' back, which is not a new open.
+    if (next === 'lightbox' && overlay === undefined) track('lightbox_open', passProps(useApp.getState()))
     overlay = next
   }).observe(root, { attributes: true, attributeFilter: ['data-overlay'] })
 
