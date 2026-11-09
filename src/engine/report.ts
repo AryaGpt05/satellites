@@ -42,7 +42,7 @@
  * by rule at the budget (see weather.ts), so the headline doesn't depend on how fast GIBS answered.
  */
 import { MS_PER_DAY } from '@/lib/geo'
-import { ensureTz, searchCapturesDetailed, sentinel2PlanCovers, spotCloud } from '@/imagery'
+import { ensureTz, searchCapturesDetailed, sentinel2PlanCovers, spotCheck } from '@/imagery'
 import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } from '@/types'
 import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
 import { satrecFor } from './sgp4'
@@ -58,8 +58,12 @@ const isDetailedCapture = (c: Capture) => c.collection === 'sentinel-2-l2a' || c
 
 /**
  * Read the cloud class at the place for the clearest detailed scenes (lowest scene cloud first), in
- * parallel, and write it to `capture.spot`. Resolves within `budgetMs`; an unanswered check leaves
- * `spot` undefined. Never rejects.
+ * parallel, and write it to `capture.spot` (and the clear share of the photo's square to `capture.clearFraction`).
+ * Resolves within `budgetMs`; an unanswered check leaves `spot` undefined. Never rejects.
+ *
+ * An answer that comes after the budget is dropped: the captures are shared by the partial and the final report, and
+ * what they rank on (the lead photo, the globe's cover decal, the summary card's best look) must not change between
+ * the two. The answer is not lost: spotCheck keeps it, so the pass view still reads it (spotCloud).
  */
 function checkSpots(captures: Capture[], place: LatLon, budgetMs: number, signal?: AbortSignal): Promise<void> {
   const picks = captures
@@ -67,20 +71,27 @@ function checkSpots(captures: Capture[], place: LatLon, budgetMs: number, signal
     .sort((a, b) => (a.cloudCoverPct ?? 101) - (b.cloudCoverPct ?? 101) || b.datetime - a.datetime)
     .slice(0, SPOT_CANDIDATES)
   if (!picks.length) return Promise.resolve()
+  let open = true
   const all = Promise.all(
     picks.map((c) =>
       Promise.resolve()
-        .then(() => spotCloud(c, place, signal))
+        .then(() => spotCheck(c, place, signal))
         .then(
-          (spot) => {
+          ({ spot, clearFraction }) => {
+            if (!open) return
             // 'unknown' says nothing: leave the field for "not checked / no answer".
             if (spot && spot !== 'unknown') c.spot = spot
+            if (clearFraction !== undefined) c.clearFraction = clearFraction
           },
           () => undefined,
         ),
     ),
   )
-  return waitAtMost(all, budgetMs, signal).catch(() => undefined)
+  return waitAtMost(all, budgetMs, signal)
+    .catch(() => undefined)
+    .finally(() => {
+      open = false
+    })
 }
 
 export interface ReportOptions {

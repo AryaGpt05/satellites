@@ -170,6 +170,8 @@ describe('decal and scan geometry', () => {
           gsdM: gsd[collection],
           spot: collection.startsWith('gibs') ? undefined : spots[Math.floor(rnd() * spots.length)],
           cloudCoverPct: rnd() < 0.2 ? undefined : Math.round(rnd() * 100),
+          clearFraction: collection.startsWith('gibs') || rnd() < 0.4 ? undefined : Math.round(rnd() * 100) / 100,
+          sunElevationDeg: Math.round(rnd() * 50),
           datetime: 0,
         }
       })
@@ -179,6 +181,7 @@ describe('decal and scan geometry', () => {
         verdict: rnd() < 0.85 ? 'imaged' : 'likely',
         captureId: c.id,
         sunElevationDeg: Math.round(rnd() * 60) - 5,
+        offNadirDeg: Math.round(rnd() * 150) / 10,
       }))
       const r = { partial: false, passes, captures, geo: [] } as unknown as Report
       const look = pickBestLook(r)

@@ -1,10 +1,12 @@
 /**
  * The photos of a report, in the one order every view uses (owner requests B1 + D1, final):
  *
- *   #1  the COVER ("Closest look"): the most zoomed-in CLEAR photo of the window: among captures that are
- *       not clouded (spot ≠ cloud and scene cloud < 70 %), the smallest gsdM (Sentinel-2 10 m beats
- *       Landsat 30 m beats VIIRS 375 m), then the clearest spot (clear > cirrus > unknown > shadow > cloud),
- *       then the newest.
+ *   #1  the COVER ("Closest look"): the most zoomed-in CLEAR photo of the window (Sentinel-2 10 m beats Landsat
+ *       30 m beats VIIRS 375 m). What counts as clear, and how equally zoomed-in photos are ranked, is
+ *       src/lib/clarity.ts (shared with the globe's cover prefetch): not clouded over (spot ≠ cloud and scene
+ *       cloud < 70 %) and, where the archive's per-pixel mask was read, at least 60 % of the photo's square
+ *       showing the ground; ties go to the clear spot, the clearer square, the higher sun, the straighter view,
+ *       then the newest. With no clear photo, a partly clear one leads the same way.
  *       · no clear DETAILED photo in the window → `report.clearCover` (the last clear Sentinel-2 / Landsat
  *         look from before the window; no pass, never counted), labelled "Last clear look";
  *       · no clear image at all → the least cloudy detailed capture, labelled "Clouded over";
@@ -18,6 +20,7 @@
  * Pure: unit-tested in lib.test.ts.
  */
 import type { Capture, Pass, Report, SpotCloud } from '@/types'
+import { pickLead, SPOT_RANK as CLARITY_SPOT_RANK, type Ranked } from '@/lib/clarity'
 import { isClouded } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDetailed, type CropSpec } from './captures'
 
@@ -48,7 +51,7 @@ export interface PhotoSet {
 export type PhotoFilter = 'all' | 'detailed' | 'weather'
 
 /** Spot clarity rank (owner B1): clear > cirrus > unknown > shadow > cloud. */
-export const SPOT_RANK: Record<SpotCloud, number> = { clear: 0, cirrus: 1, unknown: 2, shadow: 3, cloud: 4 }
+export const SPOT_RANK: Record<SpotCloud, number> = CLARITY_SPOT_RANK
 
 /** Sun high enough that a daily true-colour mosaic shows the ground, not twilight. */
 const MOSAIC_MIN_SUN_DEG = 10
@@ -60,24 +63,14 @@ function toPhoto(capture: Capture, pass?: Pass): Photo {
   return { key: capture.id, capture, pass, kind: mosaic ? 'mosaic' : 'detailed', clouded: !mosaic && isClouded(capture) }
 }
 
-/** Most zoomed in, then clearest spot, then newest. */
-function byCloseness(a: Photo, b: Photo): number {
-  return (
-    a.capture.gsdM - b.capture.gsdM ||
-    SPOT_RANK[a.capture.spot ?? 'unknown'] - SPOT_RANK[b.capture.spot ?? 'unknown'] ||
-    tOf(b) - tOf(a)
-  )
-}
-
-/** Least cloudy first: the spot, then the scene cloud (unknown counts as 50 %), then sharper, then newer. */
-function byCloud(a: Photo, b: Photo): number {
-  return (
-    SPOT_RANK[a.capture.spot ?? 'unknown'] - SPOT_RANK[b.capture.spot ?? 'unknown'] ||
-    (a.capture.cloudCoverPct ?? 50) - (b.capture.cloudCoverPct ?? 50) ||
-    a.capture.gsdM - b.capture.gsdM ||
-    tOf(b) - tOf(a)
-  )
-}
+/** A photo as the lead ranking (src/lib/clarity.ts) sees it. */
+const ranked = (p: Photo): Ranked & { photo: Photo } => ({
+  photo: p,
+  capture: p.capture,
+  t: tOf(p),
+  sunDeg: p.pass?.sunElevationDeg,
+  offNadirDeg: p.pass?.offNadirDeg,
+})
 
 /** Weather mosaics carry no per-pixel cloud: the sharpest, then a well-lit day, then the newest. */
 function byMosaic(a: Photo, b: Photo): number {
@@ -101,10 +94,8 @@ function windowPhotos(report: Pick<Report, 'passes' | 'captures'>): Photo[] {
 
 /** The cover among the window's photos only (no clear cover): what pickBestLook returns. */
 export function windowCover(photos: Photo[]): { photo: Photo; why: CoverKind } | undefined {
-  const detailed = photos.filter((p) => p.kind === 'detailed')
-  const clear = detailed.filter((p) => !p.clouded)
-  if (clear.length) return { photo: [...clear].sort(byCloseness)[0], why: 'closest' }
-  if (detailed.length) return { photo: [...detailed].sort(byCloud)[0], why: 'clouded' }
+  const lead = pickLead(photos.filter((p) => p.kind === 'detailed').map(ranked))
+  if (lead) return { photo: lead.item.photo, why: lead.tier === 2 ? 'clouded' : 'closest' }
   const mosaics = photos.filter((p) => p.kind === 'mosaic')
   if (mosaics.length) return { photo: [...mosaics].sort(byMosaic)[0], why: 'closest' }
   return undefined

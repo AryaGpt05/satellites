@@ -205,6 +205,11 @@ export interface Capture {
   sourceUrl?: string
   /** Classification at the searched place; filled by the engine for best-look candidates */
   spot?: SpotCloud
+  /**
+   * Share (0..1) of the photo's square that shows the ground, from the archive's own per-pixel classification
+   * (cloud and cloud shadow 0, thin cirrus ½); filled with `spot`. Ranks the lead photo (results lib/photos.ts).
+   */
+  clearFraction?: number
 }
 
 /** Geostationary imagers that see the place continuously. */

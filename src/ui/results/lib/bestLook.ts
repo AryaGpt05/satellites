@@ -12,6 +12,7 @@
  * Pure: unit-tested in lib.test.ts; the controller calls it (via bestLookImageUrl) to preload the hero.
  */
 import type { Capture, GeoWatcher, Pass, Report, SpotCloud } from '@/types'
+import { isCloudedOver } from '@/lib/clarity'
 import { orderPhotos, windowCover } from './photos'
 
 export type BestLook =
@@ -21,12 +22,12 @@ export type BestLook =
 /** Primary clarity class of a capture's spot classification. */
 const SPOT_CLASS: Record<SpotCloud, number> = { clear: 0, cirrus: 0, unknown: 1, shadow: 2, cloud: 3 }
 
-/** Scene cloud cover ≥ this (or cloud at the spot) means the picture is mostly cloud. */
-export const CLOUDED_PCT = 70
+/** Scene cloud cover ≥ this (or cloud at the spot) means the picture is mostly cloud (src/lib/clarity.ts). */
+export { CLOUDED_PCT } from '@/lib/clarity'
 
 /** The capture shows mostly cloud: label it honestly, never as a bright unexplained square (decision #2). */
 export function isClouded(c: Pick<Capture, 'spot' | 'cloudCoverPct'>): boolean {
-  return c.spot === 'cloud' || (c.cloudCoverPct ?? 0) >= CLOUDED_PCT
+  return isCloudedOver(c)
 }
 
 /** Comparator for imaged passes: clearest first (see the rank above). */

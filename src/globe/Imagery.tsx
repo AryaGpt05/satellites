@@ -22,14 +22,14 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
 import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector4, type Texture, type WebGLRenderer } from 'three'
-import { gibsWmsUrl } from '@/imagery'
+import { gibsWmsUrl, isTonedUrl } from '@/imagery'
 import { bboxAround, EARTH_RADIUS_KM } from '@/lib/geo'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { CaptureCollection } from '@/types'
 import { captureOf, coverPass, decalSpecFor, decalUrl } from './acquisition'
 import { kmPerTexel } from './framing'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
-import { canUpload, decodeImageUrl, uploadStrip } from './textures'
+import { canUpload, decodeImageBlob, decodeImageUrl, uploadStrip } from './textures'
 
 /** The context basemap: half size (km) and the GIBS layer (static; any TIME answers the same composite). */
 const CTX_HALF_KM = 360
@@ -104,8 +104,17 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     const entry = e
     log('load', url)
     // One CORS request per URL for the session (globe-only crops: the panel never asks for these sizes); decoded and
-    // cut into strips in the texture worker, so the main thread only ever uploads.
-    decodeImageUrl(url)
+    // cut into strips in the texture worker, so the main thread only ever uploads. Sentinel-2 / Landsat crops are toned
+    // first in the imagery module's pixels worker (the same global curve the panel's photo of that capture uses); that
+    // loader is imported when the first decal needs it, so the globe's first-screen download never carries it. One
+    // retry after a short pause, as decodeImageUrl and the panel's preloadImage do (PC's tiler 5xxs on a cold scene).
+    const toned = () => import('@/imagery/image').then((m) => m.tonedImageBlob(url))
+    const decoded = isTonedUrl(url)
+      ? toned()
+          .catch(() => new Promise<void>((r) => setTimeout(r, 700 + Math.random() * 500)).then(toned))
+          .then(decodeImageBlob)
+      : decodeImageUrl(url)
+    decoded
       .then(async (img) => {
         try {
           const n = Math.ceil(img.height / PATCH_STRIP_ROWS)

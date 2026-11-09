@@ -10,7 +10,15 @@
  * share on a 32 px decode, and hand back the image bytes, so the caller shows a picture known to have pixels
  * without ever drawing the full image on the main thread (createImageBitmap(HTMLImageElement) there cost 2–27 ms
  * per GIBS image on a phone).
+ *
+ * `fetchTonedHere` does the same for every Sentinel-2 / Landsat photo (owner rules a, b, d): fetch the encoded
+ * render (api/_lib/tone.ts), decode it, apply the photo's one global curve + light sharpening, encode it again
+ * (JPEG for display, PNG for "Download image") and hand back the bytes. The curve is measured once per capture and
+ * place (on the first crop close to native resolution) and reused by its other sizes, so the card, the lightbox's
+ * sharper render and the download match exactly. `fetchMaskHere` reads the cloud mask both the curve and the spot
+ * check use (one request per capture and place, shared).
  */
+import { canShareCurve, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams } from '../../api/_lib/tone'
 
 export interface Pixels {
   data: Uint8ClampedArray
@@ -134,4 +142,159 @@ export async function fetchCheckedImageHere(url: string, signal?: AbortSignal): 
     noData = undefined // no decoder or 2D context here: trust the picture
   }
   return { status: res.status, contentType, blob, noData }
+}
+
+// ── Cloud masks and toned photos (Sentinel-2 / Landsat) ───────────────────────────────────────
+
+/** The outcome of fetching a cloud mask (an HTTP error is a value here, not a throw). */
+export interface MaskFetch {
+  status: number
+  body?: string
+  mask?: ToneMask
+}
+
+/** Masks by URL, shared by the spot check and the photos' curve (one request each per session). */
+const masks = /* @__PURE__ */ new Map<string, Promise<MaskFetch>>()
+const MASKS_MAX = 96
+
+/**
+ * An answer worth asking again: the archive's server trouble (5xx, e.g. PC's 504 "upstream request timeout" on a cold
+ * scene), a timeout or rate limit. Any other status (a 404 off the scene) is the archive's final word.
+ */
+export const isTransientStatus = (status: number) => status >= 500 || status === 408 || status === 429
+
+/**
+ * Fetch and parse a cloud mask (tone.ts maskUrl), once per session. Rejects on network failure; neither that nor a
+ * transient HTTP answer is kept, so the spot check's retry and later callers ask again.
+ */
+export function fetchMaskHere(url: string): Promise<MaskFetch> {
+  let p = masks.get(url)
+  if (!p) {
+    const req = (async (): Promise<MaskFetch> => {
+      const res = await fetch(url)
+      if (!res.ok) return { status: res.status, body: await res.text().catch(() => undefined) }
+      return { status: res.status, mask: maskFromResponse(url, await res.arrayBuffer()) }
+    })()
+    p = req
+    const forget = () => {
+      if (masks.get(url) === req) masks.delete(url)
+    }
+    req.then((r) => {
+      if (isTransientStatus(r.status)) forget()
+    }, forget)
+    masks.set(url, req)
+    if (masks.size > MASKS_MAX) masks.delete(masks.keys().next().value as string)
+  }
+  return p
+}
+
+/** A photo's mask for its curve: whatever the archive answers within `ms`, else none (the curve then uses every pixel). */
+function maskWithin(p: Promise<MaskFetch>, ms: number): Promise<ToneMask | null> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), ms)
+    p.then(
+      (r) => {
+        clearTimeout(t)
+        resolve(r.mask ?? null)
+      },
+      () => {
+        clearTimeout(t)
+        resolve(null)
+      },
+    )
+  })
+}
+
+/**
+ * One macrotask: the tone step pauses here every ~12 ms, so the worker answers other requests mid-photo (a message
+ * channel, not setTimeout: nested timers are clamped to 4 ms).
+ */
+function pause(): Promise<void> {
+  if (typeof MessageChannel === 'undefined') return new Promise((r) => setTimeout(r, 0))
+  return new Promise((resolve) => {
+    const ch = new MessageChannel()
+    ch.port1.onmessage = () => {
+      ch.port1.close()
+      resolve()
+    }
+    ch.port2.postMessage(0)
+  })
+}
+
+/** Curves by capture and place (tone.ts TonePlan.key), measured on the first crop close to native resolution. */
+const curves = /* @__PURE__ */ new Map<string, ToneParams>()
+const CURVES_MAX = 128
+const MASK_WAIT_MS = 8_000
+const JPEG_QUALITY = 0.92
+
+/** The curve a capture's photos share at a place, once one has been measured (tests, diagnostics). */
+export const sharedCurve = (key: string): ToneParams | undefined => curves.get(key)
+
+type Canvas2D = { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D }
+
+function canvas2d(w: number, h: number): Canvas2D | null {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(w, h)
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    return ctx ? { canvas, ctx } : null
+  }
+  if (typeof document === 'undefined') return null
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  return ctx ? { canvas, ctx } : null
+}
+
+function encode(c: Canvas2D, type: string): Promise<Blob> {
+  if ('convertToBlob' in c.canvas) return c.canvas.convertToBlob({ type, quality: JPEG_QUALITY })
+  const el = c.canvas as HTMLCanvasElement
+  return new Promise((resolve, reject) => el.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), type, JPEG_QUALITY))
+}
+
+/**
+ * Fetch a Sentinel-2 / Landsat crop (the encoded render) and tone it in this thread: the capture's shared curve, or a
+ * new one measured with its mask (shared, ≤ 8 s); the curve + sharpening; then the bytes, as JPEG (`fmt` 'jpeg', for
+ * display) or PNG (the lossless download). A URL that is not an encoded render is returned as fetched.
+ *
+ * Only a crop close to native resolution measured WITH its mask sets the shared curve (a curve measured without one
+ * counts cloud in its white point: the next size measures again). A coarse crop (thumbnail, globe decal) never asks
+ * for a mask of its own: it uses the shared curve when there is one, else measures its own with whatever mask is
+ * already fetched or on its way (the spot check's).
+ */
+export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jpeg' | 'png' = 'jpeg'): Promise<CheckedImage> {
+  const plan = tonePlanForUrl(url)
+  const shares = plan ? canShareCurve(plan) : false
+  const pending = plan ? (shares ? fetchMaskHere(plan.maskUrl) : masks.get(plan.maskUrl)) : undefined
+  pending?.catch(() => undefined)
+  const res = await fetch(url, { signal })
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!res.ok || !contentType.startsWith('image/')) {
+    await res.body?.cancel().catch(() => undefined)
+    return { status: res.status, contentType }
+  }
+  const src = await res.blob()
+  if (!plan) return { status: res.status, contentType, blob: src }
+  const bmp = await createImageBitmap(src, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width, height } = bmp
+  const c = canvas2d(width, height)
+  if (!c) {
+    bmp.close()
+    throw new Error('2D canvas unavailable')
+  }
+  c.ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  const img = c.ctx.getImageData(0, 0, width, height)
+  let known = curves.get(plan.key)
+  const mask = known || !pending ? null : await maskWithin(pending, MASK_WAIT_MS)
+  known ??= curves.get(plan.key) // measured by another size while this one waited for the mask
+  const used = await toneCropAsync(img.data, width, height, plan, mask, known, pause)
+  // The first curve measured with its mask wins: a size toned at the same time keeps what it showed, later ones reuse it.
+  if (!known && shares && mask && !curves.has(plan.key)) {
+    curves.set(plan.key, used)
+    if (curves.size > CURVES_MAX) curves.delete(curves.keys().next().value as string)
+  }
+  c.ctx.putImageData(img, 0, 0)
+  const type = fmt === 'png' ? 'image/png' : 'image/jpeg'
+  return { status: res.status, contentType: type, blob: await encode(c, type) }
 }

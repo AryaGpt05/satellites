@@ -637,6 +637,23 @@ describe('photos: one order everywhere (owner B1 + D1)', () => {
   const cap = (id: string, over: Partial<Capture> = {}): Capture => ({ ...s2, id, itemId: id, ...over })
   const mos = (id: string, gsdM: number): Capture => ({ ...viirs, id, itemId: id, gsdM })
 
+  it('what counts as clear comes from the photo square: a partly clear Sentinel-2 photo yields to a clear Landsat one', () => {
+    const s2 = cap('S', { spot: 'clear', cloudCoverPct: 30, clearFraction: 0.42 })
+    const ls = cap('L', { collection: 'landsat-c2-l2', gsdM: 30, spot: 'clear', cloudCoverPct: 10, clearFraction: 0.97 })
+    const passes = [pass({ captureId: 'S', tClosest: 200 }), pass({ captureId: 'L', tClosest: 100 })]
+    const set = orderPhotos({ captures: [s2, ls], passes })
+    expect(set.photos.map((p) => p.key)).toEqual(['L', 'S'])
+    expect(set.cover?.why).toBe('closest')
+    expect(set.photos[1].clouded).toBe(false) // still listed, not labelled clouded
+    // Two clear Sentinel-2 photos: the clearer square wins over the newer one, the higher sun over the newer one.
+    const a = cap('A', { spot: 'clear', clearFraction: 0.99 })
+    const b = cap('B', { spot: 'clear', clearFraction: 0.72 })
+    expect(orderPhotos({ captures: [a, b], passes: [pass({ captureId: 'A', tClosest: 1 }), pass({ captureId: 'B', tClosest: 2 })] }).photos[0].key).toBe('A')
+    const lowSun = pass({ captureId: 'A', tClosest: 5, sunElevationDeg: 18 })
+    const highSun = pass({ captureId: 'B', tClosest: 1, sunElevationDeg: 31 })
+    const even = [cap('A', { spot: 'clear', clearFraction: 1 }), cap('B', { spot: 'clear', clearFraction: 1 })]
+    expect(orderPhotos({ captures: even, passes: [lowSun, highSun] }).photos[0].key).toBe('B')
+  })
   it('the cover is the most zoomed-in clear photo, then every other photo newest first', () => {
     const a = cap('A', { spot: 'clear', cloudCoverPct: 10 })
     const b = cap('B', { spot: 'cloud', cloudCoverPct: 90 })

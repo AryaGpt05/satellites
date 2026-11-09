@@ -4,15 +4,23 @@
  * it falls back to when module workers or OffscreenCanvas are unavailable (tests, old engines, CSP) or the
  * worker fails to start (its requests in flight are re-run here).
  * `fetchCheckedImage(url)` (I-1): the same for a GIBS photo the panel shows: its bytes plus its no-data share.
+ * `fetchToned(url)`: a Sentinel-2 / Landsat photo toned in the worker (its bytes, re-encoded). `fetchMask(url)`: a
+ * capture's cloud mask (the spot check; the worker keeps it for the photos' curve).
  *
  * Abort semantics match fetch: aborting `signal` rejects at once with the signal's reason and aborts the
  * worker's request. A network failure rejects with a TypeError, as fetch does (withRetry retries those).
  */
-import { fetchCheckedImageHere, fetchPixelsHere, type CheckedImage, type PixelFetch } from './pixels'
+import { fetchCheckedImageHere, fetchMaskHere, fetchPixelsHere, fetchTonedHere, type CheckedImage, type MaskFetch, type PixelFetch } from './pixels'
 import { abortReason } from './net'
 
-type Kind = 'fetch' | 'image'
-const HERE: Record<Kind, (url: string, signal?: AbortSignal) => Promise<unknown>> = { fetch: fetchPixelsHere, image: fetchCheckedImageHere }
+type Kind = 'fetch' | 'image' | 'tone' | 'tone-png' | 'mask'
+const HERE: Record<Kind, (url: string, signal?: AbortSignal) => Promise<unknown>> = {
+  fetch: fetchPixelsHere,
+  image: fetchCheckedImageHere,
+  tone: (url, signal) => fetchTonedHere(url, signal, 'jpeg'),
+  'tone-png': (url, signal) => fetchTonedHere(url, signal, 'png'),
+  mask: (url) => fetchMaskHere(url),
+}
 
 interface Pending {
   kind: Kind
@@ -83,6 +91,16 @@ export function fetchCheckedImage(url: string, signal?: AbortSignal): Promise<Ch
   return request<CheckedImage>('image', url, signal)
 }
 
+/** Fetch a Sentinel-2 / Landsat crop and tone it (api/_lib/tone.ts), in the pixels worker when possible. */
+export function fetchToned(url: string, signal?: AbortSignal, fmt: 'jpeg' | 'png' = 'jpeg'): Promise<CheckedImage> {
+  return request<CheckedImage>(fmt === 'png' ? 'tone-png' : 'tone', url, signal)
+}
+
+/** A capture's cloud mask (tone.ts maskUrl), fetched once per session in the pixels worker when possible. */
+export function fetchMask(url: string, signal?: AbortSignal): Promise<MaskFetch> {
+  return request<MaskFetch>('mask', url, signal)
+}
+
 function request<T>(kind: Kind, url: string, signal?: AbortSignal): Promise<T> {
   const w = getWorker()
   if (!w) return HERE[kind](url, signal) as Promise<T>
@@ -103,6 +121,6 @@ function request<T>(kind: Kind, url: string, signal?: AbortSignal): Promise<T> {
       resolve: (r) => (done(), resolve(r as T)),
       reject: (e) => (done(), reject(e)),
     })
-    w.postMessage({ type: kind, id, url })
+    w.postMessage(kind === 'tone-png' ? { type: 'tone', id, url, fmt: 'png' } : { type: kind, id, url })
   })
 }

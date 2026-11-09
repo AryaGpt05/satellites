@@ -11,16 +11,21 @@
  *    error, so this is the only reliable way to tell an empty frame from a real one. The fetch
  *    and decode run in a worker (pixelsClient.ts) when the browser allows.
  *
+ *  - Sentinel-2 / Landsat photos (the encoded render, api/_lib/tone.ts) are never shown as they come: the pixels
+ *    worker fetches them, applies the photo's one global curve + light sharpening and hands back the bytes, and
+ *    the element shows those (a blob: URL), exactly as for GIBS. Every view, the share card and the download use
+ *    the same toned pixels (owner rules a, b, d).
+ *
  * All images are requested with `crossOrigin="anonymous"`: every archive we use sends
  * `Access-Control-Allow-Origin: *`, and CORS-clean pixels can be read back (probe, canvas
  * reveal) or uploaded as WebGL textures. Consumers rendering `<img>` should set the same
  * `crossOrigin` so the browser reuses the decoded image instead of fetching it again.
  */
-import { GIBS_WMS } from './endpoints'
+import { GIBS_WMS, isTonedUrl } from './endpoints'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
 import { measureNoData } from './pixels'
-import { fetchCheckedImage, fetchPixels } from './pixelsClient'
+import { fetchCheckedImage, fetchPixels, fetchToned } from './pixelsClient'
 
 export { decodeImagePixels, measureNoData } from './pixels'
 
@@ -68,6 +73,38 @@ async function loadGibs(url: string, timeoutMs: number): Promise<HTMLImageElemen
   return loadOnce(URL.createObjectURL(checked.blob), timeoutMs)
 }
 
+/**
+ * The toned bytes of a Sentinel-2 / Landsat crop (pixels worker): JPEG for display, PNG for a lossless download.
+ * Rejects on HTTP or network failure and on timeout.
+ */
+export async function tonedImageBlob(url: string, opts: { signal?: AbortSignal; timeoutMs?: number; fmt?: 'jpeg' | 'png' } = {}): Promise<Blob> {
+  const timeoutMs = opts.timeoutMs ?? IMAGE_TIMEOUT_MS
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), timeoutMs)
+  const onAbort = () => ctl.abort()
+  opts.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    const r = await fetchToned(url, ctl.signal, opts.fmt ?? 'jpeg')
+    if (!r.blob) throw new HttpError(r.status, url)
+    return r.blob
+  } catch (err) {
+    if (ctl.signal.aborted && !opts.signal?.aborted) throw new Error(`Image timed out after ${Math.round(timeoutMs / 1000)} s`)
+    throw err
+  } finally {
+    clearTimeout(timer)
+    opts.signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+/**
+ * A Sentinel-2 / Landsat photo for display: toned in the pixels worker, then decoded from those bytes (a blob: URL,
+ * `img.decode()` off the main thread). The object URL is never revoked: the element and its clones use it all session.
+ */
+async function loadToned(url: string, timeoutMs: number): Promise<HTMLImageElement> {
+  const blob = await tonedImageBlob(url, { timeoutMs })
+  return loadOnce(URL.createObjectURL(blob), timeoutMs)
+}
+
 function loadOnce(url: string, timeoutMs: number): Promise<HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image()
@@ -100,6 +137,7 @@ function loadOnce(url: string, timeoutMs: number): Promise<HTMLImageElement> {
  * Load and decode an image, with one retry for transient failures (PC's tiler occasionally
  * 5xxs on a cold scene). Cached by URL; failures are not cached.
  *
+ * Sentinel-2 / Landsat crops are toned first (see the header), so the element's `src` is a blob: URL too.
  * NASA GIBS images are also checked (in the pixels worker, I-1): an all-black response is GIBS saying
  * "no data" with a 200, so it rejects with `EmptyImageError` (no retry, see there) rather than resolving a
  * black square. Show the resolved element (or a clone: same `src`), never a fresh `<img src={url}>`: a
@@ -109,7 +147,9 @@ function loadOnce(url: string, timeoutMs: number): Promise<HTMLImageElement> {
  */
 export function preloadImage(url: string, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<HTMLImageElement> {
   const timeoutMs = opts.timeoutMs ?? IMAGE_TIMEOUT_MS
-  const load = () => (isGibsUrl(url) && typeof URL.createObjectURL === 'function' ? loadGibs(url, timeoutMs) : loadOnce(url, timeoutMs))
+  const blobs = typeof URL.createObjectURL === 'function'
+  const load = () =>
+    blobs && isGibsUrl(url) ? loadGibs(url, timeoutMs) : blobs && isTonedUrl(url) ? loadToned(url, timeoutMs) : loadOnce(url, timeoutMs)
   const p = memoAsync(imageCache, url, async () => {
     try {
       return await load()

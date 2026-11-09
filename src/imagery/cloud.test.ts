@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Capture } from '@/types'
-import { classifyQaPixel, classifyScl, classifySclArea, spotAreaQuery, spotCloud, spotCloudQuery } from './cloud'
+import { maskFromResponse, maskCellAt } from '../../api/_lib/tone'
+import { maskNpy } from '../../api/_lib/npyTesting'
+import { classifyQaArea, classifyQaPixel, classifyScl, classifySclArea, spotCheck, spotCloud, spotFromMask, spotMaskQuery } from './cloud'
 
 const WATERLOO = { lat: 43.4723, lon: -80.5449 }
 
@@ -55,45 +57,58 @@ describe('classifiers', () => {
   })
 })
 
-describe('spot cloud queries', () => {
-  it('reads SCL for Sentinel-2 and qa_pixel for Landsat; nothing for GIBS', () => {
-    expect(spotCloudQuery(cap({}), WATERLOO)!.url).toBe(
-      'https://planetarycomputer.microsoft.com/api/data/v1/item/point/-80.544900,43.472300?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&assets=SCL',
-    )
-    expect(spotCloudQuery(cap({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_019030_20261022_02_T1' }), WATERLOO)!.url).toContain('&assets=qa_pixel')
-    expect(spotCloudQuery(cap({ provider: 'gibs', collection: 'gibs-viirs-noaa20', itemId: 'L@2026-11-07' }), WATERLOO)).toBeNull()
-    expect(spotCloudQuery(cap({ provider: 'earth-search', itemId: 'S2B_T17TNJ_20261106T161753_L2A' }), WATERLOO)).toBeNull()
+describe('the mask query', () => {
+  it('reads SCL for Sentinel-2 and qa_pixel for Landsat over the photo square around the rounded place; nothing for GIBS', () => {
+    const url = spotMaskQuery(cap({}), WATERLOO)!.url
+    // ±5 km around 43.47, -80.54 (the place rounded to 0.01°), 64 px, raw classes as numpy.
+    expect(url).toMatch(/\/item\/bbox\/-80\.6\d+,43\.42\d+,-80\.4\d+,43\.51\d+\/64x64\.npy\?/)
+    expect(url).toContain('collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&assets=SCL')
+    expect(spotMaskQuery(cap({}), { lat: 43.4701, lon: -80.5401 })!.url).toBe(url) // same rounded place, same mask
+    expect(spotMaskQuery(cap({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_019030_20261022_02_T1' }), WATERLOO)!.url).toContain('&assets=qa_pixel')
+    expect(spotMaskQuery(cap({ provider: 'gibs', collection: 'gibs-viirs-noaa20', itemId: 'L@2026-11-07' }), WATERLOO)).toBeNull()
+    expect(spotMaskQuery(cap({ provider: 'earth-search', itemId: 'S2B_T17TNJ_20261106T161753_L2A' }), WATERLOO)).toBeNull()
   })
 
-  it('reads the 1 km SCL box for Planetary Computer Sentinel-2 items only', () => {
-    const url = spotAreaQuery(cap({}), WATERLOO)!.url
-    expect(url).toMatch(/\/item\/bbox\/-80\.55\d+,43\.46\d+,-80\.53\d+,43\.47\d+\/10x10\.png\?/)
-    expect(url).toContain('item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803')
-    expect(url).toContain('assets=SCL')
-    expect(spotAreaQuery(cap({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_019030_20261022_02_T1' }), WATERLOO)).toBeNull()
-    expect(spotAreaQuery(cap({ provider: 'gibs', collection: 'gibs-viirs-noaa20', itemId: 'L@2026-11-07' }), WATERLOO)).toBeNull()
+  it('classifies the 1 km box around the exact place by majority', () => {
+    const url = spotMaskQuery(cap({}), WATERLOO)!.url
+    const probe = maskFromResponse(url, maskNpy(64, 64, () => 4))
+    const at = maskCellAt(probe, WATERLOO.lon, WATERLOO.lat)
+    const [cx, cy] = [at % 64, Math.floor(at / 64)]
+    // Cloud only within 2 cells of the place: the 1 km box (~6 cells across) is mostly cloud.
+    const near = maskFromResponse(url, maskNpy(64, 64, (x, y) => (Math.abs(x - cx) <= 2 && Math.abs(y - cy) <= 2 ? 9 : 4)))
+    expect(spotFromMask(near, WATERLOO)).toBe('cloud')
+    // The same cloud 10 cells away: clear at the place.
+    const far = maskFromResponse(url, maskNpy(64, 64, (x, y) => (Math.abs(x - cx - 10) <= 2 && Math.abs(y - cy) <= 2 ? 9 : 4)))
+    expect(spotFromMask(far, WATERLOO)).toBe('clear')
+    // No data around the place: unknown.
+    const edge = maskFromResponse(url, maskNpy(64, 64, () => 4, (x) => x > cx + 8))
+    expect(spotFromMask(edge, WATERLOO)).toBe('unknown')
+    expect(classifyQaArea([21824, 21824, 22280])).toBe('clear')
+    expect(classifyQaArea([22280, 22280, 21824])).toBe('cloud')
   })
 })
 
-describe('spotCloud', () => {
+describe('spotCheck', () => {
   afterEach(() => vi.unstubAllGlobals())
+  const npyResponse = (body: Uint8Array<ArrayBuffer>) => new Response(body, { headers: { 'content-type': 'application/x-binary' } })
 
-  it('classifies and caches the point value', async () => {
-    const f = vi.fn(async () => Response.json({ coordinates: [-80.5449, 43.4723], values: [9.0], band_names: ['SCL_b1'] }))
+  it('reads the spot and the clear share from one cached mask', async () => {
+    // Left quarter cloud (SCL 9), the rest vegetation: the place (centre) is clear, 75 % of the square is.
+    const f = vi.fn(async () => npyResponse(maskNpy(64, 64, (x) => (x < 16 ? 9 : 4))))
     vi.stubGlobal('fetch', f)
     const c = cap({ itemId: 'S2B_MSIL2A_20261106T161449_R140_T17TNJ_20261106T195148' })
-    expect(await spotCloud(c, WATERLOO)).toBe('cloud')
-    expect(await spotCloud(c, WATERLOO)).toBe('cloud')
+    expect(await spotCheck(c, WATERLOO)).toEqual({ spot: 'clear', clearFraction: 0.75 })
+    expect(await spotCloud(c, WATERLOO)).toBe('clear')
     expect(f).toHaveBeenCalledTimes(1)
   })
 
   it('answers unknown for GIBS without a request, and when the place is off the scene', async () => {
-    const f = vi.fn(async () => Response.json({ detail: 'Point is outside dataset bounds' }, { status: 500 }))
+    const f = vi.fn(async () => Response.json({ detail: 'does not intersect' }, { status: 404 }))
     vi.stubGlobal('fetch', f)
     expect(await spotCloud(cap({ provider: 'gibs', collection: 'gibs-modis-terra' }), WATERLOO)).toBe('unknown')
     expect(f).not.toHaveBeenCalled()
     const off = cap({ collection: 'landsat-c2-l2', itemId: 'LC08_L2SP_019030_20261014_02_T2' })
-    expect(await spotCloud(off, { lat: 43.4723, lon: -70.5449 })).toBe('unknown')
+    expect(await spotCheck(off, { lat: 43.4723, lon: -70.5449 })).toEqual({ spot: 'unknown' })
     const calls = f.mock.calls.length
     expect(await spotCloud(off, { lat: 43.4723, lon: -70.5449 })).toBe('unknown')
     expect(f.mock.calls.length).toBe(calls) // cached

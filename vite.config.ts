@@ -101,8 +101,9 @@ export default defineConfig({
             // SGP4 (satellite.js and the engine modules over it) is needed by the globe and the report engine,
             // never by the first screen: keep it out of the shared chunk the shell loads (K3).
             { name: 'sgp4', test: SGP4_MODULES, includeDependenciesRecursively: false },
-            // Image loading and pixel probes run once a search starts: their own chunk, not the landing's.
-            { name: 'image', test: /src[\\/]imagery[\\/](image|pixels|pixelsClient)\.ts$/, includeDependenciesRecursively: false },
+            // Image loading, pixel probes and the photos' tone (api/_lib/tone.ts; its URL half, toneRender.ts, stays
+            // with the endpoints) run once a search starts: their own chunk, not the landing's.
+            { name: 'image', test: /src[\\/]imagery[\\/](image|pixels|pixelsClient)\.ts$|api[\\/]_lib[\\/]tone\.ts$/, includeDependenciesRecursively: false },
           ],
         },
       },

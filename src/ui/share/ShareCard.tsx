@@ -8,11 +8,14 @@
  * around the rounded share point: opaque from the first frame, no "Acquiring" wait. Otherwise (the
  * picture isn't in memory yet: a summary's closest look, a recipient's first look) the pass geometry shows
  * while the picture loads, then the picture fades in over it.
+ *
+ * The picture is always the results' decoded photo (loadPhoto), shown by its element's own `src`: for Sentinel-2 /
+ * Landsat that is the toned photo (a blob: URL of the bytes the pixels worker toned), so the preview shows exactly
+ * the pixels of the pass view and of the downloaded PNG, never the raw archive render.
  */
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { isImageCached } from '@/imagery'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { cx, Wordmark } from '@/ui/system'
-import { decodedPhoto } from '../results/images'
+import { decodedPhoto, loadPhoto } from '../results/images'
 import {
   CARD_COLOR,
   CARD_FS,
@@ -140,8 +143,8 @@ function ImagePlateView({ plate }: { plate: ImagePlate }) {
   const urls = [plate.source?.url, plate.imageUrl].filter((u, i, a): u is string => !!u && a.indexOf(u) === i)
   const key = urls.join('|')
   const initial = (): { key: string; at: number; state: ImgState; instant: boolean; settled: boolean } => {
-    // Decoded this session (the results' photo cache, or the imagery loader's): shown in the first frame.
-    const cached = !!urls[0] && (!!decodedPhoto(urls[0]) || isImageCached(urls[0]))
+    // Decoded this session (the results' photo cache): shown in the first frame.
+    const cached = !!urls[0] && !!decodedPhoto(urls[0])
     return { key, at: 0, state: urls.length ? (cached ? 'ok' : 'loading') : 'err', instant: cached, settled: cached }
   }
   const [img, setImg] = useState(initial)
@@ -149,6 +152,21 @@ function ImagePlateView({ plate }: { plate: ImagePlate }) {
   const imgRef = useRef<HTMLImageElement>(null)
   const url = urls[img.at]
   const rect = plate.source && url === plate.source.url ? plate.source : undefined
+  // The decoded photo's own src (toned bytes for Sentinel-2 / Landsat), once the shared loader has it.
+  const [loaded, setLoaded] = useState<{ url: string; src: string } | null>(null)
+  const src = (url && decodedPhoto(url)?.src) || (loaded && loaded.url === url ? loaded.src : undefined)
+
+  useEffect(() => {
+    if (!url || src) return
+    let alive = true
+    loadPhoto(url).then(
+      (el) => alive && setLoaded({ url, src: el.src }),
+      () => alive && setImg((v) => (v.key !== key ? v : v.at + 1 < urls.length ? { ...v, at: v.at + 1, state: 'loading', instant: false } : { ...v, state: 'err' })),
+    )
+    return () => {
+      alive = false
+    }
+  }, [url, src, key, urls.length])
 
   // "Cached" can also mean still in flight (the pass view asked for it a moment ago): if the element
   // isn't decoded yet, show the geometry until it is, then fade the picture in.
@@ -179,18 +197,20 @@ function ImagePlateView({ plate }: { plate: ImagePlate }) {
     <div className={s.plate}>
       {img.settled ? null : <PlanView plan={plate.fallback} loading leaving={img.state === 'ok'} />}
       <div className={cx(s.picture, img.state === 'ok' && (img.instant ? s.pictureNow : s.pictureOn))} onTransitionEnd={onFaded}>
-        <img
-          ref={imgRef}
-          key={url}
-          crossOrigin="anonymous"
-          decoding={img.instant ? 'sync' : 'async'}
-          src={url}
+        {src ? (
+          <img
+            ref={imgRef}
+            key={url}
+            crossOrigin="anonymous"
+            decoding={img.instant ? 'sync' : 'async'}
+            src={src}
           alt=""
-          className={rect ? s.cut : s.img}
-          style={style}
-          onLoad={onLoad}
-          onError={onError}
-        />
+            className={rect ? s.cut : s.img}
+            style={style}
+            onLoad={onLoad}
+            onError={onError}
+          />
+        ) : null}
         {plate.clouded ? (
           <>
             <div className={s.veil} />
