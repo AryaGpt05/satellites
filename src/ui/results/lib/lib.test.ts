@@ -133,7 +133,7 @@ describe('copy', () => {
     expect(h.zeroReason).toBeUndefined()
   })
 
-  it('owner F: "N satellites flew over" counts every distinct satellite with a pass, never a geostationary one', () => {
+  it('owner F: "N satellites watched" counts every distinct satellite with a pass, never a geostationary one', () => {
     const geoMeta = (n: number): SatMeta => (n === 99999 ? { norad: n, name: 'GOES-19', category: 'weather-geo' } : meta(n))
     const report = {
       captures: [s2],
@@ -146,8 +146,8 @@ describe('copy', () => {
       ],
     }
     expect(headline(report, geoMeta).flewOver).toBe(2)
-    expect(flewOverPhrase(1)).toBe('1 satellite flew over')
-    expect(flewOverPhrase(256)).toBe('256 satellites flew over')
+    expect(flewOverPhrase(1)).toBe('1 satellite watched')
+    expect(flewOverPhrase(256)).toBe('256 satellites watched')
   })
 
   it('owner F: the photos line, exact strings', () => {

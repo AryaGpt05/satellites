@@ -1,5 +1,5 @@
 /**
- * 01 / SUMMARY pieces: the headline ("In the last 7 days, 256 satellites flew over Waterloo."), the second
+ * 01 / SUMMARY pieces: the headline ("In the last 7 days, 256 satellites watched Waterloo."), the second
  * line ("27 photos were made public."), readouts per verdict (each jumps to its group in the list) and the
  * report's caveats. Owner request F: these are the final words; every place that says it uses these helpers.
  *
@@ -42,7 +42,7 @@ function PlaceName({ label }: { label: string }) {
 }
 
 /**
- * The headline sentence: "In the last 7 days, **256 satellites flew over** *Waterloo*." `compact` is the phone
+ * The headline sentence: "In the last 7 days, **256 satellites watched** *Waterloo*." `compact` is the phone
  * sheet header style. `enter` plays the line wipe of the results handoff (first appearance per report only).
  */
 export function Headline({ model, compact = false, enter = false }: { model: ResultsModel; compact?: boolean; enter?: boolean }) {
@@ -53,13 +53,13 @@ export function Headline({ model, compact = false, enter = false }: { model: Res
   const body: ReactNode =
     n === 0 ? (
       <>
-        No satellite we track flew over <PlaceName label={label} /> {weekWord(model)}.
+        No satellite we track watched <PlaceName label={label} /> {weekWord(model)}.
       </>
     ) : (
       <>
         {windowPhrase(model)},{' '}
         <strong>
-          <span className={s.numDisplay}>{int(n)}</span> {n === 1 ? 'satellite' : 'satellites'} flew over
+          <span className={s.numDisplay}>{int(n)}</span> {n === 1 ? 'satellite' : 'satellites'} watched
         </strong>{' '}
         <PlaceName label={label} />.
       </>
@@ -214,7 +214,7 @@ export function headlineText(model: ResultsModel): string {
   const { head, report } = model
   const n = head.flewOver
   const label = report.place.label
-  const first = n === 0 ? `No satellite we track flew over ${label} ${weekWord(model)}.` : `${windowPhrase(model)}, ${flewOverPhrase(n)} ${label}.`
+  const first = n === 0 ? `No satellite we track watched ${label} ${weekWord(model)}.` : `${windowPhrase(model)}, ${flewOverPhrase(n)} ${label}.`
   const second = model.archiveFailed ? ARCHIVE_DOWN_LINE : photosLine(head.images, { partial: !!report.partial, week: weekWord(model) })
   return plain([first, ' ', second])
 }
