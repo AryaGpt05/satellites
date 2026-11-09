@@ -66,3 +66,19 @@ Plus Playwright's iPhone SE (375×667), iPhone 14 (390×844), iPhone 14 Pro Max 
 12. Suggestions show "6 MATCHES" but only 5 rows; the 6th is under a fade with no scroll hint.
 13. Keyboard on Android (layout resizes): the landing flips to the short-landscape layout as soon as the keyboard opens, because `orientation: landscape` matches once height < width, and the typed text re-rendered as "Par". Base the short-landscape layout on `screen.orientation` or `visualViewport`, not the shrunken layout viewport.
 14. The globe on phones: framing in the band above the sheet is good at all portrait sizes. At 375 the globe is small (about 210 px). The satellite dot size reads fine. No artifacts in Chromium; the iPhone artifact is PR #2.
+
+## Status after Phase B (re-measured on integration @ c3e7a73, exact viewports)
+
+| # | item | status |
+|---|---|---|
+| 1 | Back leaves the site | **fixed**: back stack (src/lib/backStack.ts); a deep or share link's Back lands on the landing |
+| 2 | 375×667 pass view | **fixed**: "Share" ≤ 400 px; the flight snap clears the scrubber (232 px band kept) |
+| 3 | landscape | round 3b fixed the layouts at the real 844×390 (Playwright's 750 px preset was under the stacked breakpoint); the acquisition countdown still ran off the left edge: **fixed** (wraps in the free band) |
+| 4 | no way out of empty search mode | **fixed**: Cancel, plus the back gesture |
+| 5 | chips run off the right edge | kept: round 3b made it a deliberate swipe row with a 28 px fade; wrapping costs ~48 px of globe at 375. Owner's call |
+| 6 | two back controls in the pass view | kept: the labelled one (top) and the thumb-reach one (footer); Back works too |
+| 7 | targets < 44 px | resolved by 3b: hit-tested, every target is ≥ 44 px (the grip, filter tabs and credit extend their hit areas) |
+| 8 | lightbox caption separators | resolved by 3b |
+| 9 | HUD collision at 375 | **fixed**: half tracking ≤ 380 px |
+| 10 | share card cloud note | kept (not the removed verdict row) |
+| 12–13 | "6 matches" / Android keyboard flip | not reproducible on real browsers (Chrome Android resizes the visual viewport only) |
