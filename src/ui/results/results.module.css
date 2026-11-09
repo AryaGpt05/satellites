@@ -1048,7 +1048,8 @@
   min-width: 0;
 }
 @media (max-width: 400px) {
-  .ctaLead {
+  .ctaLead,
+  .ctaTail {
     display: none;
   }
 }

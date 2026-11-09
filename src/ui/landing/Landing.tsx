@@ -25,6 +25,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type C
 import { flushSync } from 'react-dom'
 import { DUR, EASE } from '@/lib/ease'
 import { SHORT_LANDSCAPE_QUERY, isStacked } from '@/lib/layout'
+import { useBackLayer } from '@/lib/backStack'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import {
@@ -182,6 +183,14 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
     searchingRef.current = false
     setSearching(false)
   }
+  /** Out of search mode: the field lets go of focus (the keyboard drops) and the hero comes back. */
+  const cancelSearch = () => {
+    const el = document.activeElement as HTMLElement | null
+    if (el && searchRef.current?.contains(el)) el.blur()
+    leaveSearch()
+  }
+  // Phones: the back gesture leaves search mode (the field and the keyboard), not the site (src/lib/backStack.ts).
+  useBackLayer('search', searching && liftable, cancelSearch)
   // A layout change mid-search (a tablet rotated): take up the new layout's search mode, or leave it.
   const wasLiftable = useRef(liftable)
   useLayoutEffect(() => {
@@ -332,7 +341,18 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
               liftedBy={() => (searchingRef.current && !liftable ? liftRef.current : 0)}
               statusOverride={locate.state.kind === 'locating' ? <LocatingStatus state={locate.state} /> : undefined}
               idleTrailing={
-                locating ? (
+                searching && liftable && !locating ? (
+                  // Phones, search mode with nothing typed: an obvious way back out (the back gesture works too).
+                  <button
+                    type="button"
+                    className={s.locateInline}
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={cancelSearch}
+                    aria-label="Cancel search"
+                  >
+                    Cancel
+                  </button>
+                ) : locating ? (
                   <button
                     type="button"
                     className={s.locateInline}

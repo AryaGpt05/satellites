@@ -111,7 +111,7 @@ function predictSnaps(key: string, reportKey: string, vh: number, reduced: boole
   // A pass opens at its flight snap (reduced motion: the image snap at once), as the selection effect below sets.
   const index = reduced ? 1 : 0
   if (m && m.vh === vh) return { snaps: sheetMemo[kind]?.vh === vh ? m.snaps : [m.snaps[0], vh * 0.7, TOP], index }
-  return { snaps: [Math.min(vh * 0.4, FLIGHT_EST_PX + safeBottomPx), vh * 0.7, TOP], index }
+  return { snaps: [Math.min(Math.max(vh * 0.4, vh - 232), FLIGHT_EST_PX + safeBottomPx), vh * 0.7, TOP], index }
 }
 
 
@@ -340,7 +340,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       if (mobile && shownReportKey) sheetMemo.overview = { key: shownReportKey, vh, snaps: list }
       return list
     }
-    const flight = Math.min(geo.top + geo.foot + 2, vh * 0.4)
+    // The flight snap shows the whole pass header (title, date, scrubber) over the footer. On a short phone (375×667)
+    // the header wraps taller than 40 % of the screen and the scrubber went under the footer: like the overview's
+    // peek, it may rise past 40 % as long as a 232 px band (HUD + globe) stays above the sheet.
+    const flight = Math.min(geo.top + geo.foot + 2, Math.max(vh * 0.4, vh - 232))
     const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 8 + geo.foot : vh * 0.7
     // R2R3: on a short phone the globe band above the sheet would be under ~120 px: the image step goes to
     // the top snap (the sheet meets the HUD band; the globe is simply out of view).
@@ -994,9 +997,14 @@ function DetailFooter({
           {shareIcon}
         </>
       ) : (
-        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label={compact ? 'Share this pass' : undefined}>
+        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label="Share this pass">
           <Glyph name="share" size={14} />
-          {compact ? 'Share' : 'Share this pass'}
+          {/* "Share this pass" where it fits; "Share" on narrow phones (≤ 400 px: it was cut to "SHARE THIS PAS"). */}
+          {compact ? 'Share' : (
+            <>
+              Share<span className={s.ctaTail}> this pass</span>
+            </>
+          )}
         </Button>
       )}
       {replay}

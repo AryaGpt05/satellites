@@ -29,6 +29,7 @@ import { PushbroomReveal } from './PushbroomReveal'
 import { Reticle } from './Reticle'
 import { coordsOf, seenKeyOf } from './PhotoFrame'
 import { selectQuietly } from './actions'
+import { useBackLayer } from '@/lib/backStack'
 import { coverPinKey, pinnedOrder, useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
 import { Img } from './Img'
@@ -292,6 +293,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
       }),
     )
   }, [items, from, reduced, id])
+  // The back gesture closes the viewer, shrinking back like the × (src/lib/backStack.ts).
+  useBackLayer('lightbox', true, close)
 
   // ── navigate ────────────────────────────────────────────────────────────────────────────
   // The index moves at once (the counter, the metadata and the filmstrip follow in the same frame); the strip then

@@ -12,6 +12,7 @@
  *             on an empty frame while the chunk downloads (R2K4)
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { backStack, watchLayer } from '@/lib/backStack'
 import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import type { ResultsViewProps } from '@/ui/results'
@@ -124,6 +125,14 @@ const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<Re
   return <View onBack={resetToLanding} onRetry={retryReport} onSearch={searchFromPanel} />
 })
 const closeAbout = () => useApp.getState().setAboutOpen(false)
+/** Back out of a pass to the list (as the panel's "All passes"): live time, the camera back on the place. */
+function closePass() {
+  const st = useApp.getState()
+  st.selectPass(undefined)
+  st.setTimeMode('live')
+  st.setSimTime(Date.now())
+  if (st.place) st.setCamera({ kind: 'place', lat: st.place.lat, lon: st.place.lon })
+}
 
 /**
  * Landing entrance delay after `prev` (K5). After boot the kicker starts at 200 ms and the headline's first line
@@ -185,6 +194,21 @@ export default function Main() {
       }),
     [],
   )
+
+  // The back gesture / browser Back closes the top layer (src/lib/backStack.ts): the results of a search (back to the
+  // landing) and an open pass (back to the list) are store layers; the photo viewer, the share sheet, About and the
+  // phone's search mode register themselves.
+  useEffect(() => {
+    if (!backStack()) return
+    const sub = useApp.subscribe
+    const get = useApp.getState
+    const offResults = watchLayer(sub, get, 'results', (st) => st.phase === 'computing' || st.phase === 'results' || st.phase === 'error', resetToLanding)
+    const offPass = watchLayer(sub, get, 'pass', (st) => st.phase === 'results' && !!st.selectedPassId, closePass)
+    return () => {
+      offResults()
+      offPass()
+    }
+  }, [])
 
   // Global keys: Esc backs out, "?" opens About.
   useEffect(() => {
