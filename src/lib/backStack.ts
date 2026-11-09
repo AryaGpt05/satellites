@@ -224,6 +224,9 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
     o.schedule(() => {
       o.onSettled?.()
       if (owned() !== cur) change()
+      // A traversal that needed no further move leaves nothing to undo: the next close from the UI moves in its own
+      // tick again (a Back right after it must not be lost, as on 72f00ca).
+      else afterTraversal = false
     })
 
   /** The browser is at depth d, whoever moved it there: close layers above it; a Forward into a dead entry is undone. */

@@ -985,3 +985,29 @@ describe.each(MODELS)('races under the %s history model (CR-3)', (model) => {
     expect(s.names()).toEqual(model === 'callTime' ? ['results', 'pass'] : ['results'])
   })
 })
+
+describe('a Back that closed a layer leaves no stale after-traversal flag (final review F1)', () => {
+  it('Back closes the viewer; then "All passes" moves in its own tick, and a Back right after closes the results', () => {
+    for (const chromium of [true, false]) {
+      const h = fakeHistory('/', { chromium })
+      const { s, open, uiClose, closed, settle, endTick } = load(h)
+      open('results')
+      open('pass')
+      open('lightbox')
+      settle()
+      h.back() // the swipe closes the photo viewer (no app move needed)
+      settle()
+      expect(closed).toEqual(['lightbox'])
+      h.log.gos.length = 0
+      uiClose('pass') // "All passes"…
+      endTick() // …moves in its own tick
+      expect(h.log.gos).toEqual([-1])
+      h.back() // …and a Back right after it
+      settle()
+      expect(closed).toEqual(['lightbox', 'results'])
+      expect(s.names()).toEqual([])
+      expect(h.index()).toBe(0)
+      expect(h.log.leftSite).toBe(0)
+    }
+  })
+})

@@ -324,7 +324,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
       <span className={s.position} aria-label={`Pass ${index + 1} of ${lane.length} of this kind`}>
         {index + 1}
         {/* A big lane on a narrow phone (V1: "1350 / 1362" crowded the row): the position alone. */}
-        <span className={cx(lane.length >= 100 && s.positionTotalLong)}> / {lane.length}</span>
+        <span className={cx(lane.length >= 1000 && s.positionTotalLong)}> / {lane.length}</span>
       </span>
       <button type="button" className={s.stepBtn} onClick={() => step(-1)} disabled={index <= 0} aria-label="Previous pass of this kind" aria-keyshortcuts="ArrowLeft" title="Previous (←)">
         <Mark name="chevron-left" size={12} />
