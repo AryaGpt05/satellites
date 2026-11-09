@@ -442,3 +442,18 @@
     animation-duration: 160ms;
   }
 }
+
+/* Touch (U-6): "Replay this pass" in the metadata strip takes a 44 px tap without a taller strip. */
+@media (pointer: coarse) {
+  .replay {
+    position: relative;
+  }
+  .replay::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -6px;
+    bottom: -6px;
+  }
+}

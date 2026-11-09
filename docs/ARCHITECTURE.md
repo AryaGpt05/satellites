@@ -1,4 +1,4 @@
-# Overflight: architecture and module contracts
+# Watched: architecture and module contracts
 
 **Product:** enter a place → see every satellite that passed over it in the last 7 days, with the real
 images they took. A 3D globe shows the real sun, the real catalog (~17k objects), and each pass replayed.
@@ -30,7 +30,7 @@ Read first: `docs/DESIGN.md` (non-negotiable art direction), `src/types.ts` (sha
 | **engine** | `src/engine/**`, `src/sandbox/engine.tsx` | catalog, profiles, propagation, passes, geostationary, report orchestration, GPU element buffer |
 | **imagery** | `src/imagery/**`, `src/sandbox/imagery.tsx` | STAC + GIBS captures, crop URLs, spot cloud check, geocoding, tz |
 | **globe** | `src/globe/**`, `src/sandbox/globe.tsx` | `<GlobeCanvas/>` and the whole 3D scene |
-| **ui-shell** | `src/ui/hud/**`, `src/ui/landing/**`, `src/ui/pages/**`, `src/ui/system/**` (may ADD components), `src/sandbox/shell.tsx` | bezel, corner readouts, boot screen, hero, search field, about page |
+| **ui-shell** | `src/ui/hud/**`, `src/ui/landing/**`, `src/ui/pages/**`, `src/ui/system/**` (may ADD components), `src/sandbox/shell.tsx` | bezel, corner readouts, hero, search field, about page (the loading screen is index.html + `src/app/bootCurtain.ts`) |
 | **ui-results** | `src/ui/results/**`, `src/ui/share/**`, `src/sandbox/results.tsx` | progress readout, results panel, timeline, pass list and detail, pushbroom reveal, share |
 | **backend** | `api/**`, `supabase/**`, `vercel.json`, `src/lib/backend.ts` | DB schema and RPCs, OG share images, share pages, stats |
 | integrator | `src/app/**`, `src/main.tsx`, `src/types.ts`, `src/state/**`, `src/lib/geo.ts`, `package.json`, `docs/**` | composition |
@@ -65,11 +65,23 @@ export interface ElementBuffer {
   norad: Int32Array
 }
 export function buildElementBuffer(cat: LoadedCatalog): ElementBuffer
-export function computeReport(place: Place, opts?: { days?: number; now?: number; onProgress?: (e: ProgressEvent) => void; signal?: AbortSignal }): Promise<Report>
+export function computeReport(place: Place, opts?: ReportOptions): Promise<EngineReport>
+// ReportOptions: days, now, signal, budgetMs, and the callbacks
+//   onProgress(e)    progress events (many per frame: the controller writes one per frame)
+//   onArchive(caps)  the Sentinel-2/Landsat scenes, as soon as the archive answers (the controller warms the likely hero)
+//   onCover(c)       the clear cover (owner D), as soon as it is found; often before the partial report (R-M1)
+//   onPartial(r)     everything but the GIBS mosaic matches; sent once more with its clearCover if that is found
+//                    before the final report
+//   onUpdate(r)      after the final report: background patches (GIBS stragglers, a late clear cover); counts only go up
+// EngineReport = Report + notes, partial, timings, coverPending (the week needs a clear cover and it is still being
+// checked: a later report carries it or says there is none) and finalDueAt (partial reports: when the final is due)
 export function profileFor(norad: number): SatProfile | undefined
 ```
 The shader must reproduce: ECI position from Kepler + J2 secular drift, then ECI → ECEF via GMST (`src/lib/geo.ts gmst`), then ECEF → world (`ecefToWorld`).
 `computeReport` runs pass prediction in Web Worker(s) and calls the imagery module for captures. It must finish in **under 4 s** on a laptop for a 7-day window, streaming `ProgressEvent`s.
+The pass-worker pool (`src/engine/pool.ts`) runs hardwareConcurrency − 1 workers, at most 4 on desktops and 2 on phones,
+all from ONE fetch of the worker script (a build shares the self-contained bundle through a blob: URL; constructing N
+module workers from the script's URL at once fetches it N times).
 
 ### imagery → `src/imagery/index.ts`
 ```ts
@@ -83,6 +95,9 @@ export function locateMe(): Promise<LatLon>
 export function timeZoneAt(lat: number, lon: number): string
 export function preloadImage(url: string): Promise<HTMLImageElement>
 ```
+`preloadImage` decodes off the main thread and caches by URL. Show the element it resolves with (or a clone): for a NASA
+GIBS image its `src` is a blob: URL of the bytes the pixels worker fetched and checked for GIBS's all-black "no data"
+answer (I-1: no full-size draw or read-back on the main thread), so a fresh `<img src={url}>` would download it again.
 
 ### globe → `src/globe/index.ts`
 `export function GlobeCanvas(props: { className?: string }): JSX.Element`: a full-bleed canvas that reads the store. It renders:
@@ -94,7 +109,30 @@ fully uploaded and swapped in, or at first light when the tier plan has no such 
 It must also accept the engine's `ElementBuffer` (loaded internally via `loadCatalog` + `buildElementBuffer`).
 
 ### ui-shell → `src/ui/hud/index.ts`, `src/ui/landing/index.ts`, `src/ui/pages/index.ts`
-`<Hud/>` (bezel plus corner readouts, always mounted; its lines enter when boot ends), the loading screen (static HTML in index.html, the centred wordmark; `src/app/bootCurtain.ts` glides it onto the HUD's wordmark when the phase leaves `boot`), `<Landing onSubmit={(place: Place) => void}/>` (phase `idle` / `locating`), `<AboutPage onClose/>`.
+`<Hud/>` (bezel plus corner readouts, always mounted; its lines enter when boot ends), `<Landing onSubmit={(place: Place) => void}/>` (phase `idle` / `locating`), `<AboutPage onClose/>`.
+
+### The loading screen (integrator: `index.html`, `src/app/bootCurtain.ts`, `src/app/Main.tsx`)
+The only loading screen is static HTML: `index.html`'s `#boot-static`, the serif wordmark centred on ink with a breathing
+full stop, painted before any script runs (DESIGN §10). React never renders a boot screen. Contract:
+- `<html data-boot>` is set in index.html and stays until the curtain lands. While it is there the HUD keeps its own
+  wordmark (`[data-hud-wordmark]`) hidden (`visibility: hidden`), and its lines sit settled under the ink.
+- Main calls `exitBootCurtain()` in the layout effect of the commit where the phase leaves `boot` (landing, computing
+  panel, or fault notice), before that commit paints. It measures the HUD's wordmark and glides the centred one onto it
+  (transform only, 760 ms), fades the ink (opacity, 120 → 680 ms), then in one task removes `data-boot` and
+  `#boot-static`: the HUD's wordmark appears on the very pixels the glide landed on. Reduced motion: a 200 ms fade.
+  If the HUD's wordmark can't be measured, it is shown at once and the centred one fades with the ink.
+- `dropBootCurtain()` removes it immediately (dev sandboxes). Nothing may set the phase back to `boot` after it has
+  left: a retry of the catalog (controller `retryCatalog`) loads it behind the fault notice instead.
+- Boot leaves no sooner than 650 ms after navigation start and once the globe's first light and the first faces are
+  in, never later than 12 s; deep and share links wait up to 1.2 s more for the sharp day map (R2K2).
+
+### Overlays over the globe: `<html data-overlay>`
+A full-screen overlay that covers the globe sets `document.documentElement.dataset.overlay` to `'lightbox'`, `'about'`
+or `'share'` while it is open, and deletes it as soon as its close animation STARTS (so the globe renders a fresh frame
+behind the exit). The globe owns the reader (R3-16): while the attribute is set it pauses (or drops to ≤ 2 fps), and it
+renders a fresh frame in the same frame the attribute goes, with no stale frame or flash. Writers: the Lightbox, the
+About page (it restores an earlier `'lightbox'` value on close), and the share sheet on stacked layouts only (the
+desktop and landscape-phone share dialogs leave the globe visible around them, so they don't set it).
 
 ### ui-results → `src/ui/results/index.ts`, `src/ui/share/index.ts`
 `<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>`.
@@ -115,7 +153,7 @@ It must also accept the engine's `ElementBuffer` (loaded internally via `loadCat
   `controller.readUrlTarget` re-centres the 7-day window on `t` when `t` is more than 6 days old.
 
 ## App flow (integrator)
-`boot` (textures + catalog) → `idle` (hero + search over the spinning globe) → `locating` → `computing`
+`boot` (the wordmark; textures, fonts; the catalog loads in parallel) → `idle` (hero + search over the spinning globe) → `locating` → `computing`
 (camera flies to place; progress readouts) → `results` (panel + timeline; selecting a pass frames it and replays the
 swath sweep; captured images reveal pushbroom-style) → share.
 URL state: `/?q=<lat>,<lon>&n=<label>` deep-links straight to results; adding `&p=<passId>` and the optional pass facts

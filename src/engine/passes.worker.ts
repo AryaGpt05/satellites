@@ -14,6 +14,8 @@ export interface WorkerRequest {
 }
 
 export type WorkerResponse =
+  /** Sent once, when the script has loaded (before any request) */
+  | { type: 'ready' }
   | { type: 'progress'; chunkId: number; done: number }
   /** Passes without their tracks, plus all the chunk's tracks in one transferable buffer (see tracks.ts) */
   | { type: 'result'; chunkId: number; passes: BarePass[]; tracks: PackedTracks; ms: number }
@@ -47,3 +49,5 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
     } satisfies WorkerResponse)
   }
 }
+
+ctx.postMessage({ type: 'ready' } satisfies WorkerResponse)

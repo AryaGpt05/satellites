@@ -5,12 +5,15 @@
  *   1. Speculatively, at the start of the report (in parallel with the main archive search), list the newest
  *      nearly cloud-free scenes (scene cloud < 20 %, filtered server-side) of the 60 days before the window.
  *      Two small STAC requests; nothing else is spent until the window's own photos are known.
- *   2. Only when the window has no clear detailed photo (the results' rule: not clouded = spot ≠ cloud and
- *      scene cloud < 70 %), read the cloud class at the spot for the newest candidates, a few at a time, and
- *      keep the newest that is clear (or thin cirrus) right at the place.
+ *   2. When the window has no clear detailed photo (the results' rule: not clouded = spot ≠ cloud and scene
+ *      cloud < 70 %), read the cloud class at the spot for the newest candidates, a few at a time, and keep the
+ *      newest that is clear (or thin cirrus) right at the place. R-M1: this starts as soon as the window's own
+ *      SCENES say so (`scenesLackClearPhoto`: at once when every scene is clouded over, else after their spot
+ *      checks), in parallel with the pass search, so the cover is usually known before the first results. The
+ *      report confirms the need on the matched passes (`needsClearCover`) before it carries the cover.
  *
- * It never holds the first results: the report carries it once it is known (usually the final report), and a
- * late answer arrives as a background update. It has no pass and never counts toward the window's numbers.
+ * It never holds the first results: the report carries it once it is known (usually already the partial one), and
+ * a late answer arrives as a background update. It has no pass and never counts toward the window's numbers.
  */
 import { MS_PER_DAY } from '@/lib/geo'
 import { searchClearScenes, spotCloud } from '@/imagery'
@@ -43,6 +46,15 @@ export function needsClearCover(passes: readonly Pick<Pass, 'verdict' | 'capture
   return true
 }
 
+/**
+ * The same rule on the window's scenes alone, before any pass is matched (every archive scene of the window is of
+ * the place, so it nearly always ends up as an imaged pass's photo): true when none of them is a clear detailed
+ * photo. Unchecked spots count as clear, so it can only turn true once the spot checks say "cloud".
+ */
+export function scenesLackClearPhoto(captures: readonly Capture[]): boolean {
+  return !captures.some((c) => isDetailed(c) && !isCloudedCapture(c))
+}
+
 export interface ClearCoverDeps {
   search: (place: LatLon, start: number, end: number, signal?: AbortSignal) => Promise<Capture[]>
   spot: (capture: Capture, place: LatLon, signal?: AbortSignal) => Promise<SpotCloud>
@@ -70,23 +82,42 @@ export async function pickClearCover(
     .slice(0, MAX_CHECKS)
   for (let i = 0; i < cands.length; i += CHECKS_PER_ROUND) {
     const round = cands.slice(i, i + CHECKS_PER_ROUND)
-    const spots = await Promise.all(
-      round.map((c) =>
-        spot(c, place, signal).catch((e: unknown): SpotCloud => {
-          if (isAbort(e) || signal?.aborted) throw e
-          return 'unknown'
-        }),
-      ),
-    )
-    const k = spots.findIndex((s) => s === 'clear' || s === 'cirrus')
-    if (k >= 0) return { ...round[k], spot: spots[k] }
+    const answers: (SpotCloud | undefined)[] = round.map(() => undefined)
+    // R-M1: settle as soon as the answer is known: the newest clear candidate, once every newer one has answered
+    // (not clear). A slow check of an OLDER candidate no longer holds the cover back.
+    const k = await new Promise<number>((resolve, reject) => {
+      let left = round.length
+      const decide = () => {
+        for (let j = 0; j < round.length; j++) {
+          const a = answers[j]
+          if (a === undefined) return // a newer candidate is still being checked
+          if (a === 'clear' || a === 'cirrus') return resolve(j)
+        }
+        if (left === 0) resolve(-1)
+      }
+      round.forEach((c, j) => {
+        spot(c, place, signal)
+          .catch((e: unknown): SpotCloud => {
+            if (isAbort(e) || signal?.aborted) throw e
+            return 'unknown'
+          })
+          .then((a) => {
+            answers[j] = a
+            left--
+            decide()
+          }, reject)
+      })
+    })
+    if (k >= 0) return { ...round[k], spot: answers[k] }
   }
   return undefined
 }
 
 export interface ClearCoverLeg {
-  /** Resolve the clear cover (spot checks start only now). Never rejects except on abort. */
+  /** Resolve the clear cover (spot checks start on the first call; later calls share it). Never rejects except on abort. */
   pick: () => Promise<Capture | undefined>
+  /** Whether pick() has been called (the spot checks are under way or done). */
+  readonly started: boolean
 }
 
 /** Scene lists by place and window start: an archive retry of the same report reuses them. */
@@ -113,5 +144,19 @@ export function startClearCover(place: LatLon, windowStart: number, signal?: Abo
     }
   }
   const listed = scenes
-  return { pick: () => listed.then((list) => pickClearCover(list, place, windowStart, deps.spot, signal)) }
+  let picked: Promise<Capture | undefined> | undefined
+  return {
+    pick: () =>
+      (picked ??= listed.then((list) => {
+        try {
+          performance.mark('overflight:engine-cover-listed')
+        } catch {
+          /* no User Timing */
+        }
+        return pickClearCover(list, place, windowStart, deps.spot, signal)
+      })),
+    get started() {
+      return picked !== undefined
+    },
+  }
 }

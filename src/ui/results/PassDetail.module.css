@@ -132,7 +132,8 @@
   .link::after {
     content: '';
     position: absolute;
-    inset: -4px 0;
+    /* 37 px drawn + 2 × 5: a 47 px target (U-3: ≥ 44 with room to spare) */
+    inset: -5px 0;
   }
 }
 .link:disabled {

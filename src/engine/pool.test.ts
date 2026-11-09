@@ -85,6 +85,24 @@ describe('pass worker pool', () => {
     for (let i = 1; i < progress.length; i++) expect(progress[i]).toBeGreaterThanOrEqual(progress[i - 1])
   })
 
+  it('caps phones at two workers, desktops at four (G-M2)', async () => {
+    const pool = await freshPool('ok')
+    vi.stubGlobal('navigator', { hardwareConcurrency: 8 })
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: /coarse/.test(q) }))
+    expect(pool.poolSize()).toBe(2)
+    vi.stubGlobal('matchMedia', () => ({ matches: false }))
+    expect(pool.poolSize()).toBe(4)
+  })
+
+  it('queues work while the workers start, instead of running it on the main thread', async () => {
+    const pool = await freshPool('ok')
+    const p = pool.runPassSearch(targets, query)
+    // Nothing ran here synchronously: every chunk went to a worker.
+    const passes = await p
+    expect(passes.length).toBe(reference)
+    expect(FakeWorker.served.flat().length).toBe(targets.length)
+  })
+
   it('falls back to the main thread when the worker module fails to load', async () => {
     const pool = await freshPool('fail-load')
     const passes = await pool.runPassSearch(targets, query)

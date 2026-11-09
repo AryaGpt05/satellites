@@ -16,8 +16,8 @@
  * (with the grip on phones) overlays the top of the sheet, and the body is laid out from the sheet's top,
  * drawn below the header with a transform and shortened by the same amount, written in the frame the
  * header's height changes. So a header that changes height costs a transform (compositor), never a
- * shift of the content under it. For callers that measure, `bodyEl.offsetTop` still reports where the
- * body starts (the header's height), as it did when the header was in flow.
+ * shift of the content under it. Callers that measure where the body starts read the header container's
+ * height (the body's previous sibling); the body's own offsetTop is 0.
  *
  * Usage:
  *   <Sheet label="Passes" header={<h2>…</h2>} snaps={[0.3, 0.62, 0.92]} defaultSnap={1}>
@@ -582,7 +582,7 @@ function CloseButton({ label, onClose }: { label: string; onClose: () => void })
  *    the next frame, before its layout, so no observer of the body sees it resized inside its own
  *    delivery (that would end the frame on a ResizeObserver loop error, R3-12).
  *
- * `body.offsetTop` reports the header's height, where the body starts, as it did with the header in flow.
+ * Where the body starts is the header container's height (the body's previous sibling): measure that.
  */
 function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefObject<HTMLDivElement | null>, mobile: boolean, present: boolean) {
   useLayoutEffect(() => {
@@ -596,7 +596,6 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
     let h = measure()
     place(h)
     size(h)
-    Object.defineProperty(body, 'offsetTop', { configurable: true, get: () => head.offsetHeight })
     let raf = 0
     // Element and class changes only: text-only updates (a ticking readout's textContent, a caret mirror)
     // rarely change the height and are left to the ResizeObserver below, so they never force a layout here.
@@ -636,7 +635,6 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
       mo?.disconnect()
       ro?.disconnect()
       cancelAnimationFrame(raf)
-      delete (body as { offsetTop?: number }).offsetTop
       place(0)
       size(0)
     }

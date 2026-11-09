@@ -69,6 +69,37 @@ describe('pickClearCover', () => {
     expect(scenes.every((c) => c.spot === undefined)).toBe(true)
   })
 
+  it('answers as soon as the newest clear candidate is known, without waiting on older checks (R-M1)', async () => {
+    let releaseOld!: () => void
+    const old = new Promise<void>((r) => (releaseOld = r))
+    const spot = vi.fn(async (c: Capture): Promise<SpotCloud> => {
+      if (c.itemId === scenes[0].itemId) return 'clear'
+      await old // the older candidates' checks hang
+      return 'clear'
+    })
+    const got = await pickClearCover(scenes, WATERLOO, WINDOW_START, spot)
+    expect(got?.itemId).toBe(scenes[0].itemId)
+    releaseOld()
+    // …but a newer candidate still being checked is always waited for (it would win if clear).
+    let releaseNewest!: () => void
+    const newest = new Promise<void>((r) => (releaseNewest = r))
+    const order: string[] = []
+    const spot2 = vi.fn(async (c: Capture): Promise<SpotCloud> => {
+      if (c.itemId === scenes[0].itemId) {
+        await newest
+        order.push('newest')
+        return 'cloud'
+      }
+      order.push(c.itemId)
+      return 'clear'
+    })
+    const p = pickClearCover(scenes, WATERLOO, WINDOW_START, spot2)
+    await new Promise((r) => setTimeout(r, 10))
+    releaseNewest()
+    expect((await p)?.itemId).toBe(scenes[1].itemId)
+    expect(order[order.length - 1]).toBe('newest')
+  })
+
   it('tries a second round, and gives up after eight checks', async () => {
     const spot = vi.fn(async (): Promise<SpotCloud> => 'cloud')
     expect(await pickClearCover(scenes, WATERLOO, WINDOW_START, spot)).toBeUndefined()

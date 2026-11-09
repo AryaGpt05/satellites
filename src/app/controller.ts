@@ -15,19 +15,23 @@
  *    share that answers later still opens if the landing is untouched (R2K1). Deep and share links wait up to
  *    1.2 s after first light for the sharp day map, so their flight is planned once, at the sharp range (R2K2).
  *  - Results land in rhythm with the camera: no sooner than 1.8 s after the search, and ~1 s before the
- *    camera arrives, so the headline has settled just before the reticle locks. The final report gets a
- *    short head start (600 ms) so fast networks never show the partial headline, and the best-look hero is
- *    already decoded (up to 1.2 s more) so it never mounts on an empty frame.
+ *    camera arrives, so the headline has settled just before the reticle locks.
+ *  - R-M1, one coherent arrival: the first paint waits up to 1.5 s more for the settled report (the final one,
+ *    with its clear cover when the week needs one; up to 1 s more while that cover is still being checked), and
+ *    up to 1.2 s for its hero to be decoded, so the hero is chosen once and never mounts on an empty frame. The engine finds the clear cover while the passes are
+ *    computed and says so (onCover), and its photo starts downloading then. After the first paint the hero is
+ *    never swapped without a user action (results pins the first-painted photo).
  *  - The submit and handoff frames carry only what they must (R2K3): the address bar and the lookup count
  *    are written in idle time, and the results model is built in idle time before the report lands.
  */
 import { useApp } from '@/state/store'
 import type { Capture, Place, ProgressEvent, Report } from '@/types'
+import type { EngineReport } from '@/engine/report'
 import { currentCatalog, loadCatalog, loadCatalogNames } from '@/engine/catalog'
 import { ensureTz } from '@/imagery'
 import { getShare, recordLookup, type Share } from '@/lib/backend'
 import { passLinkOpts, pickPreselect, readUrlTarget, type RunOpts } from './links'
-import { raceTimeout, sleep } from './timing'
+import { isSettled, raceTimeout, settleWaitMs, sleep } from './timing'
 
 export type { RunOpts } from './links'
 
@@ -75,8 +79,18 @@ const MIN_DWELL_MS = 1800
 const LEAD_BEFORE_ARRIVAL_MS = 1000
 /** Never wait on the camera longer than this (a globe that stops reporting must not stall results). */
 const MAX_CAMERA_WAIT_MS = 6000
-/** A partial report waits this long for the final one before it is shown. */
-const FINAL_RACE_MS = 600
+/**
+ * R-M1: from the camera window, the first paint waits at most this long for the settled report: the final one
+ * (not the partial), carrying its clear cover when the week needs one (not `coverPending`).
+ */
+const SETTLE_RACE_MS = 1500
+/** …extended by at most this much when the engine says the final report is due just after that (finalDueAt). */
+const SETTLE_GRACE_MS = 600
+/**
+ * …and by at most this much more while the week's clear cover is still being checked (coverPending): the cover
+ * is the photo the owner wants first, and after the first paint the hero never changes (results pins it).
+ */
+const COVER_GRACE_MS = 1000
 /** The hero image gets at most this much extra time to decode. */
 const HERO_RACE_MS = 1200
 /** Background report patches are applied at most once per this window (trailing). */
@@ -163,6 +177,11 @@ export async function boot() {
   }
   mark('boot-landing')
   useApp.getState().setPhase('idle')
+  warmAfterLanding()
+}
+
+/** Once the landing's entrance is over: the report engine, its workers, the time-zone table and the hover names. */
+function warmAfterLanding() {
   afterLandingEntrance(() => {
     void loadEngine().then(warmPassWorkers, () => undefined)
     void ensureTz()
@@ -253,8 +272,11 @@ export function whenIdle(fn: () => void, timeout = 1500) {
 /** The last run, so "Try again" re-runs it without retyping. */
 let lastRun: { place: Place; opts: RunOpts } | null = null
 
-/** Re-run the last report (error notice, archive-outage headline). Falls back to the stored place. */
-export function retryReport() {
+/**
+ * Re-run the last report (error notice, archive-outage headline). Falls back to the stored place. Returns the
+ * catalog retry when that is what it does, so the notice can say it is trying.
+ */
+export function retryReport(): Promise<void> | void {
   const st = useApp.getState()
   if (lastRun && (!st.place || (st.place.lat === lastRun.place.lat && st.place.lon === lastRun.place.lon))) {
     void runReport(lastRun.place, lastRun.opts)
@@ -264,17 +286,35 @@ export function retryReport() {
     void runReport(st.place)
     return
   }
-  // Nothing to re-run (the catalog failed before any search): try the catalog again, then the landing.
-  st.setPhase('boot')
-  void (async () => {
-    startCatalog()
+  return retryCatalog()
+}
+
+let catalogRetry: Promise<void> | null = null
+
+/**
+ * Nothing to re-run (the catalog failed before any search): load the catalog again BEHIND the notice, and go to
+ * the landing once it is in. The phase stays 'error' meanwhile: 'boot' belongs to the loading screen (it re-keys
+ * the HUD's lines, which blanked and wiped in again on every retry), and a landing shown on the way could flash
+ * for a frame before a second failure. A second failure leaves the notice where it is.
+ */
+function retryCatalog(): Promise<void> {
+  catalogRetry ??= (async () => {
+    catalogFailed = false
     try {
       await loadCatalog()
-      useApp.getState().setPhase('idle')
-    } catch {
-      useApp.getState().setPhase('error', CATALOG_ERROR)
+      useApp.getState().setCatalogReady(true)
+      if (useApp.getState().phase === 'error') {
+        useApp.getState().setPhase('idle')
+        warmAfterLanding()
+      }
+    } catch (e) {
+      console.error(e)
+      catalogFailed = true
+    } finally {
+      catalogRetry = null
     }
   })()
+  return catalogRetry
 }
 
 export async function runReport(place: Place, opts: RunOpts = {}) {
@@ -308,8 +348,12 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   }, 0)
 
   const started = performance.now()
-  let finalReport: Report | undefined
-  let onFinal: (() => void) | undefined
+  /** The newest non-partial report (the final one, then each background patch). */
+  let finalReport: EngineReport | undefined
+  /** The newest partial report (the engine re-sends it once with its clear cover, when it finds one before the final). */
+  let partialReport: EngineReport | undefined
+  /** Called whenever finalReport changes, while the first paint waits for the settled report. */
+  let onNewer: (() => void) | undefined
   let heroP: Promise<unknown> | undefined
   let firstShow: Promise<void> | undefined
   let shown = false
@@ -317,8 +361,8 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   let coverSeen: string | undefined
   let coverReady: Promise<unknown> = Promise.resolve()
 
-  /** The first time results appear: wait for the camera, the final report (briefly) and the hero image. */
-  const showFirst = async (r: Report) => {
+  /** The first time results appear: wait for the camera, the settled report (briefly) and the hero image. */
+  const showFirst = async (r: EngineReport) => {
     mark(r.partial ? 'partial-report' : 'final-report')
     // (1) Decode the picture that will lead the panel while the camera is still flying, and build the panel's
     //     model in idle time, so the handoff render only reads the cache (R2K3).
@@ -328,32 +372,61 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     await waitForCamera(started, flightBefore, ctrl.signal)
     mark('camera-window')
     if (inflight !== ctrl) return
-    // (3) A partial report gets a short head start for the final one.
-    if (!finalReport && r.partial) await raceTimeout(new Promise<void>((res) => (onFinal = res)), FINAL_RACE_MS)
-    if (inflight !== ctrl) return
-    const best = finalReport ?? r
-    if (best !== r) heroP = preloadHero(best, opts) // usually the same URL: an instant cache hit
-    if (best.clearCover) {
-      // The hero preload covers it (or the preselected pass leads, and the gallery preloads its neighbours).
-      coverSeen = best.clearCover.id
-      coverReady = heroP ?? coverReady
+    // (3) R-M1: one coherent arrival. Up to 1.5 s more for the settled report (the final one, with its clear
+    //     cover when the week needs one), so the headline and the hero are chosen once. If the final is late,
+    //     the newest partial leads (with the cover, when the engine found it by then).
+    const current = () => finalReport ?? partialReport ?? r
+    // A share or pass link opens on that pass's photo: the clear cover doesn't lead, so only the final report counts.
+    const settled = (x: EngineReport) => isSettled(x, leadsWithPass(opts))
+    if (!settled(current())) {
+      // An imminent final report (the engine's GIBS budget ends just after the window) is worth the extra moment.
+      const wait = settleWaitMs(performance.now(), SETTLE_RACE_MS, SETTLE_GRACE_MS, (partialReport ?? r).finalDueAt)
+      await raceTimeout(
+        new Promise<void>((res) => (onNewer = () => settled(current()) && res())),
+        wait,
+      )
+      if (inflight !== ctrl) return
+      // Still checking the clear cover: a little longer for it (the report itself may stay partial).
+      if (!leadsWithPass(opts) && current().coverPending)
+        await raceTimeout(
+          new Promise<void>((res) => (onNewer = () => !current().coverPending && res())),
+          COVER_GRACE_MS,
+        )
     }
+    onNewer = undefined
+    if (inflight !== ctrl) return
+    const best = current()
+    mark(settled(best) ? 'report-settled' : 'report-unsettled')
+    if (best !== r) heroP = preloadHero(best, opts) // usually the same URL, or the cover's (warmed by onCover)
     // (4) The hero image, decoded, or at most 1.2 s more.
     await raceTimeout(heroP, HERO_RACE_MS)
     mark('hero-ready')
     if (inflight !== ctrl) return
+    // A report that came in meanwhile lands with the first paint if its photo #1 is the same one or is decoded
+    // too (a cover that arrived during the decode is never painted undecoded); otherwise it follows through the
+    // update path after the entrance (results keeps the painted hero).
+    const newer = current()
+    const paint = newer !== best && (await heroIsReady(newer, best, opts)) ? newer : best
+    if (inflight !== ctrl) return
+    if (paint.clearCover) {
+      // The hero preload covers it (or the preselected pass leads, and the gallery preloads its neighbours).
+      coverSeen = paint.clearCover.id
+      coverReady = heroP ?? coverReady
+    }
     // (5) The model of the report about to land, built in an earlier idle task (normally long done by now).
-    await raceTimeout(prewarmModel(finalReport ?? best), 400)
+    await raceTimeout(prewarmModel(paint), 400)
     if (inflight !== ctrl) return
     const st = useApp.getState()
     shown = true
     mark('set-report')
     // One tick: report, preselection and phase together (the results view retargets the camera from here).
-    st.setReport(finalReport ?? best)
-    const pre = pickPreselect(finalReport ?? best, opts)
+    st.setReport(paint)
+    const pre = pickPreselect(paint, opts)
     if (pre) st.selectPass(pre)
     st.setPhase('results')
     mark('results')
+    // Anything newer than the painted report follows in place, after the entrance (results keeps the hero).
+    if (finalReport && finalReport !== paint && updateTimer === undefined) updateTimer = setTimeout(flushUpdate, UPDATE_BATCH_MS)
   }
 
   /**
@@ -419,22 +492,31 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
       onArchive: (caps) => {
         if (inflight === ctrl) void warmLikelyHero(caps, opts)
       },
+      // R-M1: the week has no clear photo and the last clear look is found (usually before the first report):
+      // its photo will lead the panel, so it downloads now, while the camera flies.
+      onCover: (c) => {
+        if (inflight === ctrl && !leadsWithPass(opts)) void warmPhoto(c)
+      },
       onPartial: (r) => {
         if (inflight !== ctrl) return
+        partialReport = r
+        onNewer?.()
         firstShow ??= showFirst(r)
       },
       // Background verification after the final report: counts only ever go up.
       onUpdate: (r) => {
         finalReport = r
-        // Background patches come in bursts (a dozen GIBS answers within ~100 ms): one swap per burst.
-        if (updateTimer === undefined) updateTimer = setTimeout(flushUpdate, UPDATE_BATCH_MS)
+        onNewer?.()
+        // Background patches come in bursts (a dozen GIBS answers within ~100 ms): one swap per burst. Before
+        // the first paint, showFirst picks them up itself.
+        if (shown && updateTimer === undefined) updateTimer = setTimeout(flushUpdate, UPDATE_BATCH_MS)
       },
     })
     if (inflight !== ctrl) return
     // A report needs the catalog: if the boot-time load had failed, this one succeeded (the HUD re-reads it).
     if (!useApp.getState().catalogReady) useApp.getState().setCatalogReady(true)
     finalReport = report
-    onFinal?.()
+    onNewer?.()
     void prewarmModel(report)
     if (firstShow) {
       await firstShow
@@ -560,6 +642,19 @@ const loadHeroTools = () =>
     ([best, caps, photos, images]) => ({ ...best, ...caps, ...photos, ...images }),
   )
 
+/** A share or a pass deep link leads with that pass's own photo, not the cover. */
+const leadsWithPass = (opts: RunOpts) => !!opts.selectPassId || opts.selectNorad !== undefined
+
+/** Download and decode `capture`'s card photo through the results' cache (the URL the hero requests). Never rejects. */
+async function warmPhoto(capture: Capture): Promise<void> {
+  try {
+    const { cardUrl, loadPhoto } = await loadHeroTools()
+    await loadPhoto(cardUrl(capture)).catch(() => undefined)
+  } catch (err) {
+    console.error(err)
+  }
+}
+
 /** Scene cloud at or above this reads as clouded over (the results' isClouded threshold). */
 const CLOUDED_PCT = 70
 
@@ -567,8 +662,9 @@ const CLOUDED_PCT = 70
  * Before any pass is matched: download the photo most likely to lead the panel. The shared pass's own scene
  * for a share link; otherwise the gallery's cover rule (owner B1 + D1) without the spot check: the most
  * zoomed-in scene that isn't clouded over (smallest gsdM), the clearer scene cloud (under 20 % is likely
- * clear at the spot), then the newest; with only clouded scenes, the least cloudy. A wrong guess costs one
- * crop download; the right one is a cache hit for preloadHero and the hero (same URL). Never rejects.
+ * clear at the spot), then the newest. With only clouded scenes nothing: the clear cover will lead (R-M1).
+ * A wrong guess costs one crop download; the right one is a cache hit for preloadHero and the hero (same
+ * URL). Never rejects.
  */
 async function warmLikelyHero(caps: Capture[], opts: RunOpts): Promise<void> {
   try {
@@ -585,9 +681,10 @@ async function warmLikelyHero(caps: Capture[], opts: RunOpts): Promise<void> {
     } else {
       const clear = detailed.filter((c) => cloud(c) < CLOUDED_PCT)
       const tier = (c: Capture) => (cloud(c) < 20 ? 0 : cloud(c) < 45 ? 1 : 2)
-      pick = clear.length
-        ? [...clear].sort((a, b) => a.gsdM - b.gsdM || tier(a) - tier(b) || b.datetime - a.datetime)[0]
-        : [...detailed].sort((a, b) => cloud(a) - cloud(b) || a.gsdM - b.gsdM || b.datetime - a.datetime)[0]
+      // Every scene is clouded over: the engine is already looking for the last clear look, which will lead
+      // (onCover downloads it). The least cloudy scene is only the fallback; the first report preloads it.
+      if (!clear.length) return
+      pick = [...clear].sort((a, b) => a.gsdM - b.gsdM || tier(a) - tier(b) || b.datetime - a.datetime)[0]
     }
     if (pick) await loadPhoto(cardUrl(pick)).catch(() => undefined)
   } catch (err) {
@@ -602,6 +699,16 @@ async function heroUrl(r: Report, opts: RunOpts): Promise<string | undefined> {
   const pass = pre ? r.passes.find((p) => p.id === pre) : undefined
   const capture = pass ? captureFor(r, pass) : undefined
   return capture ? cardUrl(capture) : bestLookImageUrl(r)
+}
+
+/** `next` leads with `prev`'s photo, or with one that is decoded already (so it can be painted at once). */
+async function heroIsReady(next: Report, prev: Report, opts: RunOpts): Promise<boolean> {
+  try {
+    const [a, b, { decodedPhoto }] = await Promise.all([heroUrl(next, opts), heroUrl(prev, opts), loadHeroTools()])
+    return a === b || !!decodedPhoto(a)
+  } catch {
+    return false
+  }
 }
 
 /** Download and decode the report's cover photo (gallery photo #1: the clear cover when it leads). Never rejects. */

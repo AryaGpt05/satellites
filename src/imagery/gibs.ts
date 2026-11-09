@@ -309,8 +309,8 @@ export function geoFrameCandidates(collection: GibsCollection, place: LatLon, no
  * Reads the layer's published frame list (skipping gaps and frames under 70 min old), then loads
  * the real display image with `preloadImage`, which rejects GIBS's all-black "no data" answers;
  * the first frame that decodes with pixels wins. The verified image stays loaded, so
- * `preloadImage(url)` resolves at once and `<img crossOrigin="anonymous" src={url}>` shows the same
- * pixels without another request (measured in Chromium; GIBS itself sends `no-store`).
+ * `preloadImage(url)` resolves at once with the decoded element, which is what to show (GIBS sends
+ * `no-store`, and the element's `src` is the blob: URL of the checked bytes: see preloadImage).
  * Resolves null when nothing qualifies within `maxSteps` frames (e.g. Himawari's visible band at
  * night: no network at all then). Rejects only on abort. Browser only (uses `Image`).
  */

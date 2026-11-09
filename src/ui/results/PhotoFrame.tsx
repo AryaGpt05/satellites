@@ -121,6 +121,7 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
       {mode === 'reveal' && pass ? (
         <PushbroomReveal
           src={url}
+          view={view}
           headingDeg={pass.headingDeg}
           lines={cardSpec(capture).px}
           alt={alt}

@@ -3,21 +3,26 @@
  * during the camera flight cost the main thread only a message (K8). Same result as `fetchPixelsHere`, which
  * it falls back to when module workers or OffscreenCanvas are unavailable (tests, old engines, CSP) or the
  * worker fails to start (its requests in flight are re-run here).
+ * `fetchCheckedImage(url)` (I-1): the same for a GIBS photo the panel shows: its bytes plus its no-data share.
  *
  * Abort semantics match fetch: aborting `signal` rejects at once with the signal's reason and aborts the
  * worker's request. A network failure rejects with a TypeError, as fetch does (withRetry retries those).
  */
-import { fetchPixelsHere, type PixelFetch } from './pixels'
+import { fetchCheckedImageHere, fetchPixelsHere, type CheckedImage, type PixelFetch } from './pixels'
 import { abortReason } from './net'
 
+type Kind = 'fetch' | 'image'
+const HERE: Record<Kind, (url: string, signal?: AbortSignal) => Promise<unknown>> = { fetch: fetchPixelsHere, image: fetchCheckedImageHere }
+
 interface Pending {
+  kind: Kind
   url: string
   signal?: AbortSignal
-  resolve: (r: PixelFetch) => void
+  resolve: (r: unknown) => void
   reject: (e: unknown) => void
 }
 
-type WorkerReply = { type: 'ok'; id: number; r: PixelFetch } | { type: 'error'; id: number; name: string; message: string }
+type WorkerReply = { type: 'ok'; id: number; r: unknown } | { type: 'error'; id: number; name: string; message: string }
 
 /** undefined: not tried yet; null: unavailable (use this thread) */
 let worker: Worker | null | undefined
@@ -41,7 +46,7 @@ function retire(w: Worker) {
   }
   const held = [...pending.values()]
   pending.clear()
-  for (const p of held) fetchPixelsHere(p.url, p.signal).then(p.resolve, p.reject)
+  for (const p of held) HERE[p.kind](p.url, p.signal).then(p.resolve, p.reject)
 }
 
 function getWorker(): Worker | null {
@@ -70,9 +75,18 @@ function getWorker(): Worker | null {
 }
 
 export function fetchPixels(url: string, signal?: AbortSignal): Promise<PixelFetch> {
+  return request<PixelFetch>('fetch', url, signal)
+}
+
+/** Fetch an image for display and measure its no-data share, in the pixels worker when possible (I-1). */
+export function fetchCheckedImage(url: string, signal?: AbortSignal): Promise<CheckedImage> {
+  return request<CheckedImage>('image', url, signal)
+}
+
+function request<T>(kind: Kind, url: string, signal?: AbortSignal): Promise<T> {
   const w = getWorker()
-  if (!w) return fetchPixelsHere(url, signal)
-  return new Promise<PixelFetch>((resolve, reject) => {
+  if (!w) return HERE[kind](url, signal) as Promise<T>
+  return new Promise<T>((resolve, reject) => {
     if (signal?.aborted) return reject(abortReason(signal))
     const id = nextId++
     const onAbort = () => {
@@ -83,11 +97,12 @@ export function fetchPixels(url: string, signal?: AbortSignal): Promise<PixelFet
     signal?.addEventListener('abort', onAbort, { once: true })
     const done = () => signal?.removeEventListener('abort', onAbort)
     pending.set(id, {
+      kind,
       url,
       signal,
-      resolve: (r) => (done(), resolve(r)),
+      resolve: (r) => (done(), resolve(r as T)),
       reject: (e) => (done(), reject(e)),
     })
-    w.postMessage({ type: 'fetch', id, url })
+    w.postMessage({ type: kind, id, url })
   })
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Pass } from '@/types'
 import { passLinkOpts, pickPreselect, readUrlTarget } from './links'
-import { raceTimeout } from './timing'
+import { isSettled, raceTimeout, settleWaitMs } from './timing'
 
 const DAY = 86_400_000
 const NOW = Date.parse('2026-11-08T18:00:00Z')
@@ -76,5 +76,26 @@ describe('passLinkOpts / pickPreselect', () => {
     expect(pickPreselect({ passes, windowEnd: 1000 }, { selectNorad: 1 })).toBe('b')
     expect(pickPreselect({ passes, windowEnd: 1000 }, { selectNorad: 9 })).toBeUndefined()
     expect(pickPreselect({ passes, windowEnd: 1000 }, {})).toBeUndefined()
+  })
+})
+
+describe('first results paint (R-M1)', () => {
+  it('waits for the final report, and for its clear cover when the cover leads', () => {
+    expect(isSettled({ partial: true, coverPending: false })).toBe(false)
+    expect(isSettled({ partial: false, coverPending: true })).toBe(false)
+    expect(isSettled({ partial: false, coverPending: false })).toBe(true)
+    // A share / pass link opens on its pass's photo: a pending cover doesn't hold it.
+    expect(isSettled({ partial: false, coverPending: true }, true)).toBe(true)
+    expect(isSettled({ partial: true, coverPending: false }, true)).toBe(false)
+  })
+
+  it('stretches the wait (by at most the grace) for a final report due just after it', () => {
+    // Due 1.75 s from now: worth 1.9 s (150 ms slack) instead of 1.5 s.
+    expect(settleWaitMs(1000, 1500, 600, 2750)).toBe(1900)
+    // Due within the race anyway: the race.
+    expect(settleWaitMs(1000, 1500, 600, 1800)).toBe(1500)
+    // Due too late (beyond the grace), or unknown: the race.
+    expect(settleWaitMs(1000, 1500, 600, 4000)).toBe(1500)
+    expect(settleWaitMs(1000, 1500, 600)).toBe(1500)
   })
 })

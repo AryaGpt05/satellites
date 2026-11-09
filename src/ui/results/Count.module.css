@@ -1,11 +1,25 @@
 .count {
   position: relative;
-  display: inline-block;
+  /* A one-cell grid: the counting digits and (while counting) the invisible final value share the cell. */
+  display: inline-grid;
   font-variant-numeric: tabular-nums;
   vertical-align: baseline;
 }
 .cur {
   display: inline-block;
+}
+/* The final value, invisible, in the same grid cell as the counting digits: the box is its final width from the
+   first frame (U-2). Emptied when the count lands. */
+.ghost,
+.cur {
+  grid-area: 1 / 1;
+}
+.ghost {
+  visibility: hidden;
+  white-space: nowrap;
+}
+.ghost:empty {
+  display: none;
 }
 .old {
   position: absolute;

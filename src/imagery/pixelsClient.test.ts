@@ -87,6 +87,30 @@ describe('fetchPixels (pixels worker client)', () => {
     expect(fetched).toEqual(['https://example.test/d.png', 'https://example.test/e.png'])
   })
 
+  it('sends display-image checks (I-1) to the worker as image requests', async () => {
+    const { fetchCheckedImage } = await load()
+    const p = fetchCheckedImage('https://example.test/gibs.jpg')
+    const w = FakeWorker.last!
+    expect(w.sent).toEqual([{ type: 'image', id: 1, url: 'https://example.test/gibs.jpg' }])
+    const r = { status: 200, contentType: 'image/jpeg', blob: new Blob(['x']), noData: 0.1 }
+    w.reply({ type: 'ok', id: 1, r })
+    await expect(p).resolves.toBe(r)
+  })
+
+  it('checks a display image in this thread without a worker: bytes plus their no-data share', async () => {
+    vi.stubGlobal('OffscreenCanvas', undefined)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['jpeg']), { status: 200, headers: { 'content-type': 'image/jpeg' } })))
+    // No decoder in node: the share is unknown and the picture is trusted.
+    const { fetchCheckedImage } = await load()
+    const r = await fetchCheckedImage('https://example.test/g.jpg')
+    expect(r).toMatchObject({ status: 200, contentType: 'image/jpeg', noData: undefined })
+    expect(r.blob).toBeInstanceOf(Blob)
+    // WMS errors come as 200 + XML: no bytes to show.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<ServiceException/>', { status: 200, headers: { 'content-type': 'text/xml' } })))
+    await expect(fetchCheckedImage('https://example.test/h')).resolves.toEqual({ status: 200, contentType: 'text/xml' })
+    expect(FakeWorker.last).toBeUndefined()
+  })
+
   it('without OffscreenCanvas it never starts a worker', async () => {
     vi.stubGlobal('OffscreenCanvas', undefined)
     vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 200, headers: { 'content-type': 'text/xml' } })))

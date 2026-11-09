@@ -5,6 +5,11 @@
  * pixels.worker.ts runs `fetchPixelsHere` off the main thread (K8: a report reads ~40 probes during the
  * camera flight; fetch → blob → decode → draw → read back was ~200 ms of main-thread work on a 4×-throttled
  * phone). pixelsClient.ts talks to it and falls back to this module in the calling thread.
+ *
+ * `fetchCheckedImageHere` (I-1) does the same for the NASA GIBS photos the panel SHOWS: fetch, measure the no-data
+ * share on a 32 px decode, and hand back the image bytes, so the caller shows a picture known to have pixels
+ * without ever drawing the full image on the main thread (createImageBitmap(HTMLImageElement) there cost 2–27 ms
+ * per GIBS image on a phone).
  */
 
 export interface Pixels {
@@ -76,4 +81,57 @@ export async function fetchPixelsHere(url: string, signal?: AbortSignal): Promis
   // WMS reports errors as 200 + XML: no pixels then.
   if (!contentType.startsWith('image/')) return { status: res.status, contentType }
   return { status: res.status, contentType, pixels: await decodeImagePixels(await res.blob()) }
+}
+
+/** Pixel counts as no-data when it's transparent or every channel is within JPEG noise of 0. */
+const NO_DATA_MAX_CHANNEL = 6
+const NO_DATA_MIN_ALPHA = 16
+
+/** Measure no-data (transparent or near-black pixels) in RGBA pixels. */
+export function measureNoData(rgba: Uint8ClampedArray | Uint8Array): { noDataFraction: number; meanLuma: number } {
+  const n = rgba.length >> 2
+  if (n === 0) return { noDataFraction: 1, meanLuma: 0 }
+  let empty = 0
+  let luma = 0
+  for (let i = 0; i < rgba.length; i += 4) {
+    const r = rgba[i]
+    const g = rgba[i + 1]
+    const b = rgba[i + 2]
+    const a = rgba[i + 3]
+    if (a < NO_DATA_MIN_ALPHA || (r <= NO_DATA_MAX_CHANNEL && g <= NO_DATA_MAX_CHANNEL && b <= NO_DATA_MAX_CHANNEL)) empty++
+    else luma += 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const full = n - empty
+  return { noDataFraction: empty / n, meanLuma: full ? luma / full : 0 }
+}
+
+/** Side of the decode the no-data check reads: averaging keeps it honest, 32² keeps it cheap. */
+export const CHECK_PX = 32
+
+/** An image fetched for display, with its no-data share measured (a non-2xx or non-image answer has no blob). */
+export interface CheckedImage {
+  status: number
+  contentType: string
+  /** The image bytes (2xx image responses) */
+  blob?: Blob
+  /** 0..1 share of no-data pixels, or undefined if they couldn't be read (the picture is trusted then) */
+  noData?: number
+}
+
+/** Fetch `url` for display and measure its no-data share in this thread (the worker's job, and the fallback). */
+export async function fetchCheckedImageHere(url: string, signal?: AbortSignal): Promise<CheckedImage> {
+  const res = await fetch(url, { signal })
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!res.ok || !contentType.startsWith('image/')) {
+    await res.body?.cancel().catch(() => undefined)
+    return { status: res.status, contentType }
+  }
+  const blob = await res.blob()
+  let noData: number | undefined
+  try {
+    noData = measureNoData((await decodeImagePixels(blob, CHECK_PX)).data).noDataFraction
+  } catch {
+    noData = undefined // no decoder or 2D context here: trust the picture
+  }
+  return { status: res.status, contentType, blob, noData }
 }

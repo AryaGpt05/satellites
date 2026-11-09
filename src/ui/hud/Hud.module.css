@@ -136,10 +136,10 @@
   transition-duration: 0ms;
 }
 @media (pointer: coarse) {
-  /* a ≥ 40 px tall hit box (it may overlap the wordmark line above: that one isn't interactive) */
+  /* a ≥ 44 px tall hit box (U-6; it may overlap the wordmark line above: that one isn't interactive) */
   .about {
-    padding: 13px 0;
-    margin: -13px 0;
+    padding: 15px 0;
+    margin: -15px 0;
   }
 }
 /* A box ring would collide with the wordmark line 3px above; a signal underline marks focus instead

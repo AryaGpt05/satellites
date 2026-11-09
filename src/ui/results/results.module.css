@@ -79,13 +79,16 @@
   }
 }
 
-/* Short landscape phones (≤ 540 px tall): a compact full-height dock, timeline inside it (MOB-14). */
+/* Short landscape phones (≤ 540 px tall): a compact full-height dock, timeline inside it (MOB-14). U-3: wider, so the
+   summary and the pass view can set the photo beside the words (a 390 px tall screen has no room to stack them). */
 .vars.shortLandscape {
   --dock-h: calc(100dvh - 2 * (var(--bezel-inset) + 8px));
+  /* everything on the first screen besides the hero picture: dock insets, header, body padding, gallery bar, caption */
+  --hero-chrome: 240px;
 }
 .panel.shortLandscape {
   top: calc(var(--bezel-inset) + 8px);
-  width: min(380px, 46vw);
+  width: min(600px, 66vw);
 }
 .panel.shortLandscape :global(section) {
   scroll-margin-top: 0;
@@ -964,6 +967,69 @@
   height: 72px;
 }
 
+/* Short landscape phones (U-3): the summary in two columns, the photo beside the headline and the counts, the
+   timeline across both under them. */
+.summaryWide {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-areas:
+    'hero head'
+    'counts counts'
+    'tl tl';
+  gap: 12px 18px;
+  align-items: start;
+}
+.summaryWide > .headBlock {
+  grid-area: head;
+}
+.summaryWide > [data-peek-end] {
+  grid-area: hero;
+}
+.summaryWide > .verdicts {
+  grid-area: counts;
+}
+.summaryWide > .mTimeline {
+  grid-area: tl;
+}
+.summaryWide .headline {
+  font-size: 24px;
+}
+.summaryWide .headlineMore {
+  margin-top: 6px;
+  font-size: 17px;
+}
+
+/* The list waiting for the archives (a partial report, U-2): an instrument line, no spinner. */
+.listWait {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+}
+.listCaret {
+  display: inline-block;
+  width: 6px;
+  height: 11px;
+  margin-left: 6px;
+  background: var(--bone-3);
+  animation: list-caret 1s steps(1, end) infinite;
+}
+@keyframes list-caret {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .listCaret {
+    animation: none;
+  }
+}
+
 /* ── footer actions ───────────────────────────────────────────── */
 .actions {
   display: flex;
@@ -982,6 +1048,23 @@
   flex: none;
   width: 44px;
   padding: 0;
+}
+/* Short landscape phones: the pass actions at the end of the header's line (U-3). */
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.headActions > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.actionsCompact {
+  flex: none;
+}
+.actionsCompact .primary {
+  flex: none;
+  padding-inline: 14px;
 }
 .actionsThree .primary {
   flex: 1;
@@ -1016,5 +1099,17 @@
     font-size: 28px;
     line-height: 1;
     max-width: 22ch;
+  }
+}
+
+/* Touch (U-6): the one-line pass header's back icon draws 28 px and takes a 44 px tap. */
+@media (pointer: coarse) {
+  .crumbIcon {
+    position: relative;
+  }
+  .crumbIcon::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
   }
 }

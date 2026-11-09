@@ -167,9 +167,37 @@ export function buildResultsModel(report: Report, place = cachedPlace(report.pla
   }
 }
 
-/** Build (and cache) the model of a report ahead of its first render: call it in idle time (R2R7). */
+/** Run `cb` in a task of its own, queued now (ahead of any timer the caller sets after this returns). */
+function nextTask(cb: () => void): void {
+  if (typeof MessageChannel === 'undefined') {
+    setTimeout(cb, 0)
+    return
+  }
+  const c = new MessageChannel()
+  c.port1.onmessage = () => {
+    c.port1.close()
+    cb()
+  }
+  c.port2.postMessage(0)
+}
+
+/**
+ * Build (and cache) the model of a report ahead of its first render: call it in idle time (R2R7). In two tasks (U-1):
+ * the place and window first (sun every 10 minutes, day and hour marks, the time zone), then the report's own parts in
+ * a task queued right behind it, so neither is a long task on a phone (one build was 141 ms at 4× CPU). If the
+ * render comes first, it builds what is missing itself, as before.
+ */
 export function prewarmResultsModel(report: Report): void {
-  if (!modelCache.has(report)) modelCache.set(report, buildResultsModel(report))
+  if (modelCache.has(report)) return
+  const { lat, lon } = report.place
+  if (!placeCache.has(`${lat},${lon},${report.windowStart},${report.windowEnd}`)) {
+    cachedPlace(lat, lon, report.windowStart, report.windowEnd)
+    nextTask(() => {
+      if (!modelCache.has(report)) modelCache.set(report, buildResultsModel(report))
+    })
+    return
+  }
+  modelCache.set(report, buildResultsModel(report))
 }
 
 /** The model of a report, from the cache when prewarmed (identical object), else built now and cached. */

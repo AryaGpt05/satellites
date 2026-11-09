@@ -10,11 +10,12 @@
  *  - A continuous band on top for the geostationary imagers (they never "pass": DESIGN §2).
  *  - Hover: mono tooltip (it also explains the mark forms). Click/tap: select.
  *
- * Static layers are painted on a canvas (1,900 marks); hover, selection and the playhead are DOM.
+ * Static layers are one SVG of batched paths (1,900 marks in ~20 elements, no canvas: U-1); hover, selection and
+ * the playhead are DOM.
  * The playhead moves every frame from the scene clock as a transform (R20): replay never re-renders
  * the strip.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { sceneClock } from '@/state/sceneClock'
 import { useAfterSceneFrame } from './capture'
 import { useApp } from '@/state/store'
@@ -104,7 +105,6 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
   const span = t1 - t0
   const reduced = useReducedMotion()
   const plotRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const headRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [hover, setHover] = useState<{ pass: Pass; x: number } | null>(null)
@@ -127,76 +127,76 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
     return () => ro.disconnect()
   }, [])
 
-  // ── static paint ─────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const cv = canvasRef.current
-    if (!cv || !L.w || !L.h) return
+  // ── static layer: one SVG of batched paths (U-1) ───────────────────────────────
+  // Not a canvas: a 2D canvas allocates its backing store on its first draw, and on a phone that waits on the GPU
+  // process (busy drawing the globe): 30–200 ms of main thread at 4× CPU when the results land. ~20 path elements,
+  // rasterized off the main thread, with the same geometry, colours and device-pixel snapping as the canvas had.
+  const summary = `Timeline, ${Math.round(span / 86_400_000)} days: ${(['imaged', 'likely', 'could', 'overhead'] as const)
+    .map((v) => `${int(lanes[v].passes.length)} ${VERDICT_META[v].title.toLowerCase()}`)
+    .join(', ')}.`
+  const staticLayer = useMemo(() => {
+    if (!L.w || !L.h) return null
     const dpr = Math.min(2, window.devicePixelRatio || 1)
-    cv.width = Math.round(L.w * dpr)
-    cv.height = Math.round(L.h * dpr)
-    const ctx = cv.getContext('2d')
-    if (!ctx) return
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, L.w, L.h)
     const px = 1 / dpr
     const X = (t: number) => ((t - t0) / span) * L.w
     const snap = (x: number) => Math.round(x * dpr) / dpr + px / 2
+    const f = (n: number) => +n.toFixed(2)
+    const paths: { key: string; d: string; fill?: string; stroke?: string; width?: number; crisp?: boolean }[] = []
+    const fills = new Map<string, string[]>()
+    const addFill = (color: string, d: string) => {
+      const a = fills.get(color)
+      if (a) a.push(d)
+      else fills.set(color, [d])
+    }
 
-    // Day / night: the real sun at this place.
+    // Day / night: the real sun at this place (alpha quantized to 1/400, merged into one path per level).
+    const base = compact ? 0.055 : 0.07
+    let runA = -1
+    let runFrom = 0
+    let runTo = 0
+    const flush = () => {
+      if (runA > 0) addFill(`rgba(236,232,224,${(runA / 400).toFixed(4)})`, `M${f(runFrom)} 0H${f(runTo + 0.5)}V${f(L.h)}H${f(runFrom)}Z`)
+    }
     for (let i = 0; i < sun.length - 1; i++) {
       const a = X(t0 + i * SUN_SAMPLE_MS)
       const b = X(Math.min(t1, t0 + (i + 1) * SUN_SAMPLE_MS))
       const d = daylight((sun[i] + sun[i + 1]) / 2)
-      if (d <= 0.001) continue
-      ctx.fillStyle = `rgba(236,232,224,${((compact ? 0.055 : 0.07) * d).toFixed(4)})`
-      ctx.fillRect(a, 0, b - a + 0.5, L.h)
+      const q = d <= 0.001 ? 0 : Math.max(1, Math.round(base * d * 400))
+      if (q === runA && Math.abs(a - runTo) < 0.01) {
+        runTo = b
+        continue
+      }
+      flush()
+      runA = q
+      runFrom = a
+      runTo = b
     }
+    flush()
 
     // Local midnights and 6-hourly ticks.
-    ctx.lineWidth = px
-    ctx.strokeStyle = 'rgba(236,232,224,0.16)'
-    ctx.beginPath()
-    for (const d of days) {
-      const x = snap(X(d.t))
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, L.h)
-    }
-    ctx.stroke()
-    ctx.strokeStyle = 'rgba(236,232,224,0.14)'
-    ctx.beginPath()
-    for (const hm of hours) {
-      const x = snap(X(hm.t))
-      const len = hm.hour === 12 ? 5 : 3
-      ctx.moveTo(x, L.h)
-      ctx.lineTo(x, L.h - len)
-    }
-    ctx.stroke()
-
+    paths.push({ key: 'mid', d: days.map((d) => `M${f(snap(X(d.t)))} 0V${f(L.h)}`).join(''), stroke: 'rgba(236,232,224,0.16)', width: px, crisp: true })
+    paths.push({
+      key: 'ticks',
+      d: hours.map((hm) => `M${f(snap(X(hm.t)))} ${f(L.h)}V${f(L.h - (hm.hour === 12 ? 5 : 3))}`).join(''),
+      stroke: 'rgba(236,232,224,0.14)',
+      width: px,
+      crisp: true,
+    })
     // Lane separators.
-    ctx.strokeStyle = 'rgba(236,232,224,0.05)'
-    ctx.beginPath()
-    for (let i = 1; i < L.lanes.length; i++) {
-      const y = Math.round(L.tops[i] * dpr) / dpr + px / 2
-      ctx.moveTo(0, y)
-      ctx.lineTo(L.w, y)
-    }
-    ctx.stroke()
-
+    let sep = ''
+    for (let i = 1; i < L.lanes.length; i++) sep += `M0 ${f(Math.round(L.tops[i] * dpr) / dpr + px / 2)}H${f(L.w)}`
+    paths.push({ key: 'sep', d: sep, stroke: 'rgba(236,232,224,0.05)', width: px, crisp: true })
     // Geostationary: continuous presence, one hairline per watcher.
     if (L.geoH) {
       const n = Math.min(3, report.geo.length)
       for (let g = 0; g < n; g++) {
         const y = Math.round((((g + 1) * L.geoH) / (n + 1)) * dpr) / dpr + px / 2
-        ctx.strokeStyle = `rgba(236,232,224,${g === 0 ? 0.42 : 0.2})`
-        ctx.beginPath()
-        ctx.moveTo(0, y)
-        ctx.lineTo(L.w, y)
-        ctx.stroke()
+        paths.push({ key: `geo${g}`, d: `M0 ${f(y)}H${f(L.w)}`, stroke: `rgba(236,232,224,${g === 0 ? 0.42 : 0.2})`, width: px, crisp: true })
       }
     }
 
     // ── the noise floor: density strips (decision #7) ──
-    // One device-pixel column per bin; a 1 × 5 px bone rect whose alpha grows with the count.
+    // One device-pixel column per bin; a 1 × 5 px bone rect whose alpha grows with the count (runs of equal columns merged).
     const cols = Math.ceil(L.w * dpr)
     const strip = (passes: Pass[], y: number) => {
       const n = new Uint16Array(cols)
@@ -206,97 +206,100 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
         n[c]++
         if (meta(p.norad).category === 'radar') radar[c]++
       }
-      const top = Math.round((y - 2.5) * dpr) / dpr
-      for (let c = 0; c < cols; c++) {
-        if (!n[c]) continue
+      const top = f(Math.round((y - 2.5) * dpr) / dpr)
+      const colorOf = (c: number) => {
+        if (!n[c]) return ''
         const a = Math.min(0.3, 0.05 + 0.04 * n[c])
-        ctx.fillStyle = radar[c] * 2 >= n[c] ? `rgba(169,199,211,${Math.min(0.35, a + 0.05).toFixed(3)})` : `rgba(236,232,224,${a.toFixed(3)})`
-        ctx.fillRect(c / dpr, top, px, 5)
+        return radar[c] * 2 >= n[c] ? `rgba(169,199,211,${Math.min(0.35, a + 0.05).toFixed(3)})` : `rgba(236,232,224,${a.toFixed(3)})`
+      }
+      for (let c = 0; c < cols; ) {
+        const color = colorOf(c)
+        let e = c + 1
+        while (e < cols && colorOf(e) === color) e++
+        if (color) addFill(color, `M${f(c / dpr)} ${top}h${f((e - c) / dpr)}v5h${f(-(e - c) / dpr)}Z`)
+        c = e
       }
     }
     const isNoise = (p: Pass) => p.verdict === 'could' || (p.verdict === 'likely' && meta(p.norad).category === 'weather-leo')
-    if (compact) {
-      // Everything that isn't a photograph, as one strip.
-      strip([...lanes.likely.passes, ...lanes.could.passes, ...lanes.overhead.passes], L.laneY('likely'))
-    } else {
+    if (compact) strip([...lanes.likely.passes, ...lanes.could.passes, ...lanes.overhead.passes], L.laneY('likely'))
+    else {
       strip(lanes.likely.passes.filter(isNoise), L.laneY('likely'))
       strip(lanes.could.passes, L.laneY('could'))
     }
 
     // ── signal-bearing marks: likely open-optical diamonds, crewed crosses ──
-    const bone = 'rgba(236,232,224,0.62)'
-    const ice = 'rgba(169,199,211,0.75)'
     if (!compact) {
       const g = 2.7
+      const marks = { bone: '', ice: '' }
       for (const v of ['likely', 'overhead'] as const) {
         const y = L.laneY(v)
         for (const p of lanes[v].passes) {
           if (isNoise(p)) continue
           const x = X(p.tClosest)
           const cat = meta(p.norad).category
-          ctx.strokeStyle = cat === 'radar' ? ice : bone
-          ctx.lineWidth = 1
-          ctx.beginPath()
+          const k = cat === 'radar' ? 'ice' : 'bone'
           switch (glyphForPass(p.verdict, cat)) {
             case 'likely':
-              ctx.moveTo(x, y - g - 0.6)
-              ctx.lineTo(x + g + 0.6, y)
-              ctx.lineTo(x, y + g + 0.6)
-              ctx.lineTo(x - g - 0.6, y)
-              ctx.closePath()
+              marks[k] += `M${f(x)} ${f(y - g - 0.6)}L${f(x + g + 0.6)} ${f(y)}L${f(x)} ${f(y + g + 0.6)}L${f(x - g - 0.6)} ${f(y)}Z`
               break
             case 'crewed':
-              ctx.moveTo(x, y - g - 0.5)
-              ctx.lineTo(x, y + g + 0.5)
-              ctx.moveTo(x - g - 0.5, y)
-              ctx.lineTo(x + g + 0.5, y)
+              marks[k] += `M${f(x)} ${f(y - g - 0.5)}V${f(y + g + 0.5)}M${f(x - g - 0.5)} ${f(y)}H${f(x + g + 0.5)}`
               break
             case 'weather-leo':
-              ctx.arc(x, y, g, 0, Math.PI * 2)
+              marks[k] += `M${f(x - g)} ${f(y)}a${g} ${g} 0 1 0 ${2 * g} 0a${g} ${g} 0 1 0 ${-2 * g} 0`
               break
             default:
-              ctx.rect(x - g + 0.5, y - g + 0.5, 2 * g - 1, 2 * g - 1)
+              marks[k] += `M${f(x - g + 0.5)} ${f(y - g + 0.5)}h${f(2 * g - 1)}v${f(2 * g - 1)}h${f(-(2 * g - 1))}Z`
           }
-          ctx.stroke()
         }
       }
+      paths.push({ key: 'bone', d: marks.bone, stroke: 'rgba(236,232,224,0.62)', width: 1 })
+      paths.push({ key: 'ice', d: marks.ice, stroke: 'rgba(169,199,211,0.75)', width: 1 })
     }
 
     // ── photographs: detailed captures are signal diamonds standing on stems (they read first);
     // daily mosaics are small bone dots (real, but not a picture of YOU) ──
     const iy = L.laneY('imaged')
-    const mosaics: Pass[] = []
-    const detailed: Pass[] = []
+    let dots = ''
+    let stems = ''
+    let diamonds = ''
+    const dr = compact ? 2.2 : 2.6
+    const r = compact ? 4.4 : 5.4
     for (const p of lanes.imaged.passes) {
       const c = p.captureId ? captureById.get(p.captureId) : undefined
-      if (c && isDailyMosaic(c)) mosaics.push(p)
-      else detailed.push(p)
-    }
-    ctx.fillStyle = 'rgba(236,232,224,0.7)'
-    for (const p of mosaics) {
-      ctx.beginPath()
-      ctx.arc(X(p.tClosest), iy, compact ? 2.2 : 2.6, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    const r = compact ? 4.4 : 5.4
-    for (const p of detailed) {
       const x = X(p.tClosest)
-      ctx.strokeStyle = 'rgba(255,106,26,0.55)'
-      ctx.lineWidth = px
-      ctx.beginPath()
-      ctx.moveTo(snap(x), iy + r)
-      ctx.lineTo(snap(x), L.h)
-      ctx.stroke()
-      ctx.fillStyle = palette.signal
-      ctx.beginPath()
-      ctx.moveTo(x, iy - r)
-      ctx.lineTo(x + r, iy)
-      ctx.lineTo(x, iy + r)
-      ctx.lineTo(x - r, iy)
-      ctx.closePath()
-      ctx.fill()
+      if (c && isDailyMosaic(c)) dots += `M${f(x - dr)} ${f(iy)}a${dr} ${dr} 0 1 0 ${2 * dr} 0a${dr} ${dr} 0 1 0 ${-2 * dr} 0`
+      else {
+        stems += `M${f(snap(x))} ${f(iy + r)}V${f(L.h)}`
+        diamonds += `M${f(x)} ${f(iy - r)}L${f(x + r)} ${f(iy)}L${f(x)} ${f(iy + r)}L${f(x - r)} ${f(iy)}Z`
+      }
     }
-  }, [L, sun, days, hours, lanes, report.geo.length, t0, t1, span, meta, compact, captureById])
+    const fillPaths = [...fills].map(([color, ds], i) => ({ key: `f${i}`, d: ds.join(''), fill: color, crisp: true }))
+    const all = [
+      ...fillPaths.filter((x) => x.d.includes('V')), // day / night first (under everything)
+      ...paths.filter((x) => ['mid', 'ticks', 'sep'].includes(x.key) || x.key.startsWith('geo')),
+      ...fillPaths.filter((x) => !x.d.includes('V')), // density strips
+      ...paths.filter((x) => x.key === 'bone' || x.key === 'ice'),
+      { key: 'dots', d: dots, fill: 'rgba(236,232,224,0.7)' },
+      { key: 'stems', d: stems, stroke: 'rgba(255,106,26,0.55)', width: px, crisp: true },
+      { key: 'diamonds', d: diamonds, fill: palette.signal },
+    ].filter((x) => x.d)
+    return (
+      <svg className={s.canvas} width={L.w} height={L.h} viewBox={`0 0 ${f(L.w)} ${f(L.h)}`} role="img" aria-label={summary}>
+        {all.map((x) => (
+          <path
+            key={x.key}
+            d={x.d}
+            fill={'fill' in x && x.fill ? x.fill : 'none'}
+            stroke={'stroke' in x && x.stroke ? x.stroke : undefined}
+            strokeWidth={'width' in x ? x.width : undefined}
+            shapeRendering={'crisp' in x && x.crisp ? 'crispEdges' : undefined}
+          />
+        ))}
+      </svg>
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [L, sun, days, hours, lanes, report.geo.length, t0, t1, span, meta, compact, captureById, summary])
 
   // ── playhead: every frame, as a transform (R20) ─────────────────────────────────
   const lastX = useRef(-1)
@@ -363,9 +366,6 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
   const endLabel = nowish ? 'Now' : compact ? '' : lastDay && lastDay.label === fmtLocalDay(t1, tz) ? `${fmtLocalTime(t1, tz)} ${zoneAbbr(t1, tz)}` : fmtLocalDay(t1, tz)
   const charW = compact ? 6.2 : 6.6
   const endRoom = endLabel ? endLabel.length * charW + 14 : 0
-  const summary = `Timeline, ${daysN} days: ${(['imaged', 'likely', 'could', 'overhead'] as const)
-    .map((v) => `${int(laneCount(v))} ${VERDICT_META[v].title.toLowerCase()}`)
-    .join(', ')}.`
 
   return (
     <div className={cx(s.timeline, compact && s.compact, className)} role="group" aria-label={`${summary} Use the left and right arrow keys to step through passes.`}>
@@ -389,7 +389,9 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
       <div className={s.body}>
         {!compact ? (
           <div className={s.lanes} aria-hidden>
-            {L.geoH ? (
+            {/* U-2: the labels are placed from the plot's measured height, so they appear once it is known (never
+                first at 0 and then jumping to their lanes). The column keeps its width meanwhile. */}
+            {size.h && L.geoH ? (
               <span className={s.laneLabel} style={{ top: 0, height: L.geoH }} title={geoNames.join(', ')}>
                 <span className={s.geoLabel}>
                   <Glyph name="weather-geo" size={9} /> <span className={s.laneWord}>Geo · </span>
@@ -397,7 +399,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
                 </span>
               </span>
             ) : null}
-            {(['imaged', 'likely', 'could', 'overhead'] as const).map((v) => (
+            {(size.h ? (['imaged', 'likely', 'could', 'overhead'] as const) : []).map((v) => (
               <span
                 key={v}
                 className={cx(s.laneLabel, laneCount(v) === 0 && s.laneEmpty, v === 'imaged' && s.laneLead)}
@@ -414,7 +416,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
 
         <div className={s.plotWrap}>
           <div ref={plotRef} className={s.plot} onPointerMove={onMove} onPointerLeave={onLeave} onClick={onClick}>
-            <canvas ref={canvasRef} className={s.canvas} role="img" aria-label={summary} />
+            {staticLayer}
 
             {selected ? (
               <div

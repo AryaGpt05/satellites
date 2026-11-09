@@ -43,7 +43,7 @@ import { replayWindow } from './lib/replay'
 import { stepPass } from './lib/timeline'
 import { useResultsModel, type ResultsModel } from './model'
 import { useOnce } from './once'
-import { SHORT_DESK_QUERY, exitTimeline, lastShellUnmount, publishSheetInset, rememberComputingSnap, lastComputingSnapPx, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
+import { SHORT_DESK_QUERY, exitTimeline, headHeight, lastShellUnmount, publishSheetInset, rememberComputingSnap, lastComputingSnapPx, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
 import s from './results.module.css'
 
 export interface ResultsViewProps {
@@ -57,8 +57,16 @@ export interface ResultsViewProps {
 
 /** R3-5, phones: the clock not replaying this long (paused, scrubbed) once the camera is there raises the sheet. */
 const SHEET_QUIET_MS = 600
-/** Sim time frozen this long with no camera flight: no globe is drawing, raise. */
+/** Sim time frozen this long with no camera flight, the globe never having taken up the replay: no globe is drawing, raise. */
 const SHEET_STALL_MS = 1500
+/**
+ * The same while the globe IS replaying (U-4): on arrival it holds the clock up to 1.5 s for the pass's image to reach
+ * the GPU (acquisition.ts DECAL_WAIT_MS), longer on a slow phone. That hold is the approach, not a stall: raising on
+ * it put the sheet at full height before the dive.
+ */
+const SHEET_REPLAY_STALL_MS = 4500
+/** Phones: the globe band (px, below the HUD band) the capture snap keeps when the pass photo can stay ≥ 240 px (U-4). */
+const PHONE_CAPTURE_BAND = 150
 /** Never hold the sheet low longer than this (a real approach + dive takes 6–8 s). */
 const SHEET_CAP_MS = 14_000
 /** Phone snaps that are fractions of the viewport (the measured ones are px). */
@@ -171,11 +179,31 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     const id = requestAnimationFrame(() => startTransition(() => setFullFor(fullKey)))
     return () => cancelAnimationFrame(id)
   }, [fullKey, fullFor])
-  // Back to the overview: the list comes back where the user left it, once its sections are there.
+  // A new place (or a re-run) opens at the top of its own overview, never at the last place's list position (U-2:
+  // that opened the new results scrolled past the hero, with the sheet below its top snap where the body can't scroll).
+  const scrollFor = useRef('')
+  useLayoutEffect(() => {
+    if (!reportKey || scrollFor.current === reportKey) return
+    scrollFor.current = reportKey
+    listScroll.current = 0
+  }, [reportKey])
+  // Back to the overview: the list comes back where the user left it, once its sections are there. Read and written
+  // from an observer's callback (after layout, before paint): reading scrollTop in the commit that mounts the list
+  // forced a layout of all of it, 131 ms at 4× CPU (U-1). Done once the content is tall enough (the list may mount a
+  // beat later, on the final report), or given up after 2 s.
   useLayoutEffect(() => {
     const body = bodyRef.current
-    if (!full || shownKey !== 'overview' || !body) return
-    if (Math.abs(body.scrollTop - listScroll.current) > 1) body.scrollTop = listScroll.current
+    const inner = innerRef.current
+    if (!full || shownKey !== 'overview' || !body || !inner || typeof ResizeObserver === 'undefined') return
+    const want = listScroll.current
+    const until = performance.now() + 2000
+    const ro = new ResizeObserver(() => {
+      const fits = body.scrollHeight - body.clientHeight >= want - 1
+      if (fits && Math.abs(body.scrollTop - want) > 1) body.scrollTop = want
+      if (fits || performance.now() > until) ro.disconnect()
+    })
+    ro.observe(inner)
+    return () => ro.disconnect()
   }, [full, shownKey])
   // The desktop timeline strip mounts once per report (it persists across a pass and back).
   const [dockFor, setDockFor] = useState('')
@@ -234,7 +262,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     const pad = geo.pad
     if (shownKey === 'overview') {
       const peek = geo.peekEnd !== undefined ? geo.top + pad + geo.peekEnd + 12 : vh * 0.36
-      return [Math.min(peek, vh * (MID - 0.02)), MID, TOP]
+      // The peek ends under the hero's caption. A short phone (375×667) may go past 60 % for it, as long as a
+      // 232 px band (HUD + globe) stays above the sheet (U-6: the caption was cut in half there); the mid snap
+      // stays above the peek.
+      const p0 = Math.min(peek, Math.max(vh * (MID - 0.02), vh - 232))
+      return [p0, Math.max(vh * MID, p0 + 60), TOP]
     }
     const flight = Math.min(geo.top + geo.foot + 2, vh * 0.4)
     const imageSnap = geo.imageEnd !== undefined ? geo.top + pad + geo.imageEnd + 8 + geo.foot : vh * 0.7
@@ -321,7 +353,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         if (quietSince && !flying && now - quietSince >= SHEET_QUIET_MS && now - startedAt >= SHEET_QUIET_MS) return raise()
       }
       // No globe drawing (sim time frozen with nothing flying), or a sequence that never gets there.
-      if ((!flying && now - lastTAt >= SHEET_STALL_MS) || now - startedAt >= SHEET_CAP_MS) raise()
+      const stall = mode === 'replay' ? SHEET_REPLAY_STALL_MS : SHEET_STALL_MS
+      if ((!flying && now - lastTAt >= stall) || now - startedAt >= SHEET_CAP_MS) raise()
     })
     return () => {
       done = true
@@ -384,30 +417,54 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     return () => ro.disconnect()
   }, [computing, mobile, continued, shownKey])
 
-  // Desktop pass frame: measure what sits above and below it so the square always fits (R8, R2R5): above it
-  // the header and the gallery's bar; below it the caption and credit, the body's 24 px end fade, the footer.
-  // The square shrinks instead of pushing the credit into the fade.
+  // Pass frame: measure what sits above and below it so the square always fits (R8, R2R5): above it the header and the
+  // gallery's bar; below it the caption and credit, the body's end fade, the footer. The square shrinks instead of
+  // pushing the credit into the fade. Phones (U-3) measure against the sheet's top snap, so on a short phone (375×667)
+  // the caption never sits under the footer.
+  const leaving = useRef(false)
+  // Leaving: fading out, or about to (the selection cleared, so the header already lost its replay strip).
+  leaving.current = staged.stage === 'out' || viewKey !== staged.shown
   useLayoutEffect(() => {
     const sec = sectionRef.current
     const body = bodyRef.current
     const inner = innerRef.current
-    if (mobile || !sec || !body || !inner || !shownPass) return
+    if (!sec || !body || !inner || !shownPass) return
     const measure = () => {
+      // A view on its way out (Back) keeps its size while it fades: the header changing under it is the next view's.
+      if (leaving.current) return
       const frame = inner.querySelector<HTMLElement>('[data-gallery="detail"] [data-current] [data-photo-frame]') ?? inner.querySelector<HTMLElement>('[data-detail-frame]')
       if (!frame) return
-      const sr = sec.getBoundingClientRect()
       const foot = body.nextElementSibling as HTMLElement | null
       const cap = frame.parentElement?.querySelector('figcaption') as HTMLElement | null
-      const caption = cap ? cap.offsetHeight + 8 : 0
-      const above = sr.top + body.offsetTop + 20 + (frame.getBoundingClientRect().top - inner.getBoundingClientRect().top)
-      const below = (foot?.offsetHeight ?? 0) + Math.max(0, window.innerHeight - sr.bottom) + caption + 24 + 4
+      // A plate set beside the square (short landscape phones, U-3) takes no height under it.
+      const capBeside = !!cap && cap.offsetLeft > frame.offsetLeft + 1
+      const caption = cap && !capBeside ? cap.offsetHeight + 8 : 0
+      const offset = frame.getBoundingClientRect().top - inner.getBoundingClientRect().top
+      const vh = window.innerHeight
+      if (mobile) {
+        // Everything in the sheet but the square: header (grip included), body padding, the gallery's bar, the caption,
+        // the footer. The square takes what the capture snap leaves while a globe band of PHONE_CAPTURE_BAND stays
+        // above the sheet (U-4: the photo and the painted globe together); a phone too short for that and a ≥ 240 px
+        // square gets the top snap instead (then the square fits under the HUD band, caption above the footer).
+        const pad = parseFloat(getComputedStyle(body).paddingTop) || 20
+        const chrome = headHeight(body) + pad + offset + caption + (foot?.offsetHeight ?? 0) + 6
+        const withBand = vh - useApp.getState().uiInsets.top - PHONE_CAPTURE_BAND - chrome
+        const room = withBand >= 240 ? withBand : Math.min(vh * TOP, vh - 64) - chrome
+        sec.style.setProperty('--detail-chrome', `${Math.round(vh - room)}px`)
+        return
+      }
+      const sr = sec.getBoundingClientRect()
+      const above = sr.top + headHeight(body) + 20 + offset
+      const below = (foot?.offsetHeight ?? 0) + Math.max(0, vh - sr.bottom) + caption + 24 + 4
       sec.style.setProperty('--detail-chrome', `${Math.round(above + below)}px`)
     }
     // The observer's first callback (after layout) does the first measure: no forced layout in the
-    // commit that opens the pass.
+    // commit that opens the pass. The header too: its replay strip appearing makes it taller.
     if (typeof ResizeObserver === 'undefined') measure()
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
     ro?.observe(sec)
+    const head = body.previousElementSibling
+    if (head) ro?.observe(head)
     window.addEventListener('resize', measure)
     return () => {
       ro?.disconnect()
@@ -498,11 +555,15 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     },
     [mobile],
   )
+  // Short landscape phones (U-3): a 390 px tall screen has no height for a footer under the pass photo; its actions ride
+  // at the end of the pass header's single line instead, and the photo gets the height.
+  const headActions = shortLandscape && !!shownPass
   const footer = shownPass && shownModel ? (
     <DetailFooter
       model={shownModel}
       pass={shownPass}
       mobile={mobile}
+      compact={headActions}
       sharedPass={sharedPass}
       onShare={setSharing}
       onCheckPlace={openSearch}
@@ -520,12 +581,13 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         label={place ? `Satellites over ${place.label}` : 'Computing passes'}
         header={
           <GlideHeight swapKey={headerKeyOf(staged.shown)}>
-            <div key={headerKeyOf(staged.shown)} className={headSwapClass} style={dirStyle}>
+            <div key={headerKeyOf(staged.shown)} className={cx(headSwapClass, headActions && s.headActions)} style={dirStyle}>
               {header}
+              {headActions ? footer : null}
             </div>
           </GlideHeight>
         }
-        footer={footer}
+        footer={headActions ? undefined : footer}
         snaps={snaps}
         snap={sheetSnap}
         onSnapChange={onSnapChange}
@@ -553,7 +615,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
               model={lastModel.current}
               mobile={mobile}
               compactTimeline={mobile || shortLandscape}
-              noSummaryRule={shortDesk}
+              noSummaryRule={shortDesk || shortLandscape}
+              wide={shortLandscape}
               full={full}
               enterKey={enterKey}
               selectedId={selectedId}
@@ -631,6 +694,8 @@ interface OverviewProps {
   compactTimeline: boolean
   /** Short laptops: no 01 / SUMMARY notch (the passes are 01, as on phones) */
   noSummaryRule?: boolean
+  /** Short landscape phones: the summary in two columns (the photo beside the words, U-3) */
+  wide?: boolean
   full: boolean
   enterKey: string
   selectedId?: string
@@ -642,12 +707,13 @@ interface OverviewProps {
   onCloseInvite: () => void
 }
 
-function Overview({ model, mobile, compactTimeline, noSummaryRule = false, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
+function Overview({ model, mobile, compactTimeline, noSummaryRule = false, wide = false, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
   const { report } = model
   // Notch indices in reading order (V22): phones have no SUMMARY rule (the summary is the sheet's
   // header and hero), so their first rule is 01 / PASSES; short laptops likewise (R2R1).
   const idx = (n: number) => String(mobile || noSummaryRule ? n - 1 : n).padStart(2, '0')
   const enter = useOnce(`${enterKey}:body`)
+  const listReady = useListReady(model)
   // The summary leads with the photos (owner B): the gallery, photo #1 being the closest look. With no photo
   // at all, the geostationary imager that sees the place all week.
   const hero = model.photos.length ? (
@@ -689,10 +755,9 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, full,
           ) : (
             <div className={s.mTimeline} />
           )}
-          <Notes model={model} enter={enter} />
         </section>
       ) : (
-        <section className={s.section} aria-label="Summary">
+        <section className={cx(s.section, wide && s.summaryWide)} aria-label="Summary">
           {noSummaryRule ? null : (
             <Rule index="01" className={s.rule}>
               Summary
@@ -709,7 +774,7 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, full,
           ) : null}
         </section>
       )}
-      {full ? (
+      {full && listReady ? (
         <>
           <section className={s.section} aria-label="Passes">
             <Rule index={idx(2)} className={s.rule}>
@@ -724,8 +789,9 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, full,
             <GeoWatchers watchers={report.geo} place={report.place} days={model.windowDays} />
           </section>
           <section className={s.section}>
-            {/* Laptops: the caveats close the overview, so the passes notch shows on the first screen (R2R1). */}
-            {mobile ? null : <Notes model={model} />}
+            {/* The caveats close the overview (R2R1; phones too, U-2): the passes notch comes up the first screen, and
+                the counts line that grows when the archives answer moves nothing under it. */}
+            <Notes model={model} />
             <p className={s.footnote}>
               Pass times are when each satellite was closest to {report.place.label}, computed from public orbital elements
               {report.catalogFetchedAt ? ` (fetched ${report.catalogFetchedAt.slice(0, 16).replace('T', ' ')}Z)` : ''}. Local times are {model.tzLabel}.
@@ -733,15 +799,45 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, full,
           </section>
         </>
       ) : (
-        // Reserve the passes notch while the sections stage in, so the summary never shifts (A1).
-        <section className={s.section} aria-hidden>
+        // Reserve the passes notch while the sections stage in, so the summary never shifts (A1). While the archives
+        // are still being checked (a partial report), the list waits: verified weather mosaics move from 'likely' to
+        // 'watched', and re-sorting rows under the reader is a layout shift (U-2). It mounts once, final.
+        <section className={s.section} aria-hidden={full ? undefined : true}>
           <Rule index={idx(2)} className={s.rule}>
             Passes
           </Rule>
+          {full ? (
+            <p className={s.listWait} role="status">
+              Checking the archives<span className={s.listCaret} aria-hidden />
+            </p>
+          ) : null}
         </section>
       )}
     </>
   )
+}
+
+/** A partial report never holds the list back longer than this (a slow archive): it mounts, and may re-sort once. */
+const LIST_PARTIAL_CAP_MS = 8000
+/** When each report (by key) was first shown partial, so a remount (Back from a pass) keeps the same cap. */
+const partialSince = new Map<string, number>()
+
+/** The pass list mounts on the final report (or a partial one shown for LIST_PARTIAL_CAP_MS, or an archive outage). */
+function useListReady(model: ResultsModel): boolean {
+  const r = model.report
+  const key = `${r.windowEnd}:${r.place.lat},${r.place.lon}`
+  const waiting = !!r.partial && !model.archiveFailed
+  const [, wake] = useState(0)
+  let since = partialSince.get(key)
+  if (waiting && since === undefined) partialSince.set(key, (since = performance.now()))
+  const left = since === undefined ? 0 : LIST_PARTIAL_CAP_MS - (performance.now() - since)
+  const ready = !waiting || left <= 0
+  useEffect(() => {
+    if (ready) return
+    const id = window.setTimeout(() => wake((n) => n + 1), Math.max(0, left) + 16)
+    return () => window.clearTimeout(id)
+  }, [ready, left])
+  return ready
 }
 
 // ── pass footer ───────────────────────────────────────────────────────────────────────────
@@ -750,6 +846,7 @@ function DetailFooter({
   model,
   pass,
   mobile,
+  compact = false,
   sharedPass,
   onShare,
   onReplay,
@@ -758,6 +855,8 @@ function DetailFooter({
   model: ResultsModel
   pass: Pass
   mobile: boolean
+  /** In the header's line (short landscape phones): short words, no back button (the header has it) */
+  compact?: boolean
   /** A share recipient looking at the shared pass (R2R10) */
   sharedPass: boolean
   onShare: (p: Pass) => void
@@ -769,7 +868,7 @@ function DetailFooter({
   // A clouded picture: the primary action is the clearest one, not sharing a white square.
   const clearer = !sharedPass && !!capture && isClouded(capture) && cover?.pass && !cover.clouded && cover.pass.id !== pass.id ? cover.pass : undefined
   // R2R10: the recipient's primary is their own place; Share and Replay become icons.
-  const iconOnly = !!clearer || (sharedPass && !!onCheckPlace)
+  const iconOnly = compact || !!clearer || (sharedPass && !!onCheckPlace)
   const replay = (
     <Button onClick={onReplay} title="Replay the pass on the globe" aria-label="Replay the pass" className={cx(iconOnly && s.iconBtn)}>
       <Glyph name="play" size={12} />
@@ -782,7 +881,7 @@ function DetailFooter({
     </Button>
   )
   return (
-    <div className={cx(s.actions, iconOnly && s.actionsThree)}>
+    <div className={cx(s.actions, iconOnly && s.actionsThree, compact && s.actionsCompact)}>
       {mobile ? (
         <Button onClick={clearPass} aria-label="All passes" className={s.iconBtn}>
           <Glyph name="arrow-left" size={13} />
@@ -804,9 +903,9 @@ function DetailFooter({
           {shareIcon}
         </>
       ) : (
-        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary}>
+        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label={compact ? 'Share this pass' : undefined}>
           <Glyph name="share" size={14} />
-          Share this pass
+          {compact ? 'Share' : 'Share this pass'}
         </Button>
       )}
       {replay}

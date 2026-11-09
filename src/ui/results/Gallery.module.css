@@ -51,8 +51,9 @@
 .counter {
   color: var(--bone-2);
   margin-right: 6px;
-  /* a stable width: the nav never shifts as the number changes (A1) */
-  min-width: 7.5ch;
+  /* a stable width: the nav never shifts as the number changes (A1), the longest form included ("28 this week", the
+     counter on a last clear look; U-2: 7.5ch let it grow 42 px when the final report landed) */
+  min-width: calc(12 * (1ch + var(--track-label, 0.08em)));
   text-align: right;
 }
 .filter {
@@ -75,6 +76,12 @@
 }
 .seg + .seg {
   border-left: 1px solid var(--line-strong);
+}
+/* Touch (U-6): "All" is 35 px of text; every segment at least a 44 px wide target. */
+@media (pointer: coarse) {
+  .seg {
+    min-width: 44px;
+  }
 }
 .segOn {
   color: var(--bone);
@@ -407,6 +414,11 @@
   }
 }
 
+/* The pass view's corners hold the scale and north chips: the reveal's LINE counter rides bottom centre there. */
+.detail [data-scan-chip] {
+  left: 50%;
+  transform: translateX(-50%);
+}
 /* pass-view overlays: sensor (top left), scale (bottom left), north (bottom right) */
 .chips {
   position: absolute;
@@ -733,8 +745,35 @@ b.warn,
   width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));
   transform: translateX(-50%);
 }
+/* Phones: the full slide, unless the sheet's top snap is too short for the square and its caption above the footer
+   (375×667, U-3): then the square shrinks to what --detail-chrome (measured by the view) leaves. */
 .detail.mobile .figure {
-  width: 100%;
+  width: min(100%, max(220px, calc(100dvh - var(--detail-chrome, 0px))));
+  margin-inline: auto;
+}
+/* Short landscape phones (U-3): the square fills the height the dock leaves and the plate (product, place, credit) sits
+   beside it, so the whole photo is on the first screen. --detail-chrome then counts no caption below. */
+@media (min-width: 761px) and (orientation: landscape) and (max-height: 540px) {
+  .detail:not(.mobile) .figure {
+    --sq: min(58%, max(132px, calc(100dvh - var(--detail-chrome, 0px))));
+    width: 100%;
+    display: grid;
+    grid-template-columns: var(--sq) minmax(0, 1fr);
+    align-items: end;
+    column-gap: 14px;
+  }
+  .detail:not(.mobile) .figure > .cap {
+    align-self: end;
+  }
+  .detail:not(.mobile) .rail {
+    left: 0;
+    width: min(58%, max(132px, calc(100dvh - var(--detail-chrome, 0px))));
+    transform: none;
+  }
+  .detail:not(.mobile) .capRow {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
 }
 @media (min-width: 600px) and (max-width: 1100px) and (orientation: portrait) {
   .detail.mobile {
@@ -816,5 +855,13 @@ b.warn,
   }
   .hero.mobile .coverNote {
     grid-column: 1 / -1;
+  }
+}
+
+/* Touch (U-6, landscape phones show the card's Share icon): a 44 px square. */
+@media (pointer: coarse) {
+  .mShare {
+    width: 44px;
+    min-height: 44px;
   }
 }

@@ -303,7 +303,126 @@ describe('computeReport', () => {
     // It never counts toward the window: no pass, not in the captures.
     expect(report.captures.map((c) => c.id)).not.toContain('OLD_20')
     expect(report.passes.some((p) => p.captureId === 'OLD_20')).toBe(false)
-    if (partialCover !== null) expect(partialCover).toBeUndefined()
+    // R-M1: when there is a partial report, it may already carry the cover (never a different one).
+    if (partialCover) expect((partialCover as Capture).id).toBe('OLD_20')
+  })
+
+  it('R-M1: looks for the cover while the passes are computed, so the first report already carries it', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const t = s2c[s2c.length - 1].tClosest
+    const white = capture({ id: 'S2_WHITE', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: t - 7 * 60_000, cloudCoverPct: 91 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [white], degraded: [] })
+    // GIBS answers only after the partial report, so there is one.
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+      setTimeout(r, 3000)
+    })
+    imagery.weatherCaptures.mockImplementation(async () => {
+      await gate
+      return []
+    })
+    const windowStart = now - 7 * 86_400_000
+    const old = capture({ id: 'OLD_6', platform: 'landsat-9', collection: 'landsat-c2-l2', datetime: windowStart - 6 * 86_400_000, cloudCoverPct: 4, gsdM: 30 })
+    imagery.searchClearScenes.mockResolvedValue([old])
+    imagery.spotCloud.mockResolvedValue('clear')
+    const order: string[] = []
+    const covers: string[] = []
+    const seen: { partial: boolean; cover?: string; pending: boolean }[] = []
+    const report = await computeReport(waterloo, {
+      now,
+      onCover: (c) => (covers.push(c.id), order.push('cover')),
+      onPartial: (r) => {
+        order.push('partial')
+        seen.push({ partial: r.partial, cover: r.clearCover?.id, pending: r.coverPending })
+        release()
+      },
+    })
+    // Every scene of the week is clouded over (91 %): the cover's spot checks start with the archive's answer,
+    // before any pass is known, and the UI hears about it before the first report.
+    expect(covers).toEqual(['OLD_6'])
+    expect(order).toEqual(['cover', 'partial'])
+    expect(seen).toEqual([{ partial: true, cover: 'OLD_6', pending: false }])
+    expect(report.clearCover?.id).toBe('OLD_6')
+    expect(report.coverPending).toBe(false)
+  })
+
+  it('R-M1: a cover found after the partial report re-sends the partial with it, before the final', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const white = capture({ id: 'S2_WHITE', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: s2c[0].tClosest - 7 * 60_000, cloudCoverPct: 95 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [white], degraded: [] })
+    let releaseGibs!: () => void
+    const gibs = new Promise<void>((r) => {
+      releaseGibs = r
+      setTimeout(r, 3000)
+    })
+    imagery.weatherCaptures.mockImplementation(async () => {
+      await gibs
+      return []
+    })
+    let releaseSpot!: () => void
+    const spotGate = new Promise<void>((r) => (releaseSpot = r))
+    const old = capture({ id: 'OLD_2', platform: 'sentinel-2b', collection: 'sentinel-2-l2a', datetime: now - 9 * 86_400_000, cloudCoverPct: 3 })
+    imagery.searchClearScenes.mockResolvedValue([old])
+    imagery.spotCloud.mockImplementation(async (c: Capture) => {
+      if (c.id === 'OLD_2') await spotGate
+      return c.id === 'OLD_2' ? 'clear' : 'cloud'
+    })
+    const partials: { cover?: string; pending: boolean; passes: number }[] = []
+    const report = await computeReport(waterloo, {
+      now,
+      onPartial: (r) => {
+        partials.push({ cover: r.clearCover?.id, pending: r.coverPending, passes: r.passes.length })
+        if (partials.length === 1) releaseSpot()
+        else releaseGibs()
+      },
+    })
+    expect(partials.map(({ cover, pending }) => ({ cover, pending }))).toEqual([
+      { cover: undefined, pending: true },
+      { cover: 'OLD_2', pending: false },
+    ])
+    expect(partials[1].passes).toBe(partials[0].passes)
+    expect(report.clearCover?.id).toBe('OLD_2')
+  })
+
+  it('R-M1: a scene that looks clear waits for its own spot check before the cover is looked for', async () => {
+    const s2c = passesOf(60989, WATERLOO)
+    const scene = capture({ id: 'S2_SPOT', platform: 'sentinel-2c', collection: 'sentinel-2-l2a', datetime: s2c[0].tClosest - 7 * 60_000, cloudCoverPct: 30 })
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [scene], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const windowStart = now - 7 * 86_400_000
+    const old = capture({ id: 'OLD_3', platform: 'sentinel-2a', collection: 'sentinel-2-l2a', datetime: windowStart - 3 * 86_400_000, cloudCoverPct: 2 })
+    imagery.searchClearScenes.mockResolvedValue([old])
+    const checked: string[] = []
+    imagery.spotCloud.mockImplementation(async (c: Capture) => {
+      checked.push(c.id)
+      return c.id === 'S2_SPOT' ? 'cloud' : 'clear'
+    })
+    const report = await computeReport(waterloo, { now })
+    // 30 % scene cloud could be clear at the spot: the week's own check first, then (cloud) the cover's.
+    expect(checked).toEqual(['S2_SPOT', 'OLD_3'])
+    expect(report.clearCover?.id).toBe('OLD_3')
+  })
+
+  it('R-M1: a final report sent while the cover is still checked says so, and an update settles it', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    imagery.searchClearScenes.mockResolvedValue([capture({ id: 'OLD', platform: 'sentinel-2a', collection: 'sentinel-2-l2a', datetime: now - 9 * 86_400_000, cloudCoverPct: 2 })])
+    imagery.spotCloud.mockImplementation(async () => {
+      await gate
+      return 'cloud'
+    })
+    const ctl = new AbortController()
+    const updates: { cover?: string; pending: boolean }[] = []
+    const report = await computeReport(waterloo, { now, budgetMs: 100, signal: ctl.signal, onUpdate: (r) => updates.push({ cover: r.clearCover?.id, pending: r.coverPending }) })
+    expect(report.coverPending).toBe(true)
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    // No clear look was found: the update has no cover, and nothing is pending any more.
+    expect(updates).toEqual([{ cover: undefined, pending: false }])
+    ctl.abort()
   })
 
   it('delivers a late clear cover as a background update', async () => {

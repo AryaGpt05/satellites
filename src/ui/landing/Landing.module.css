@@ -406,6 +406,20 @@
   color: var(--signal);
   transition-duration: 0ms;
 }
+/* Touch (U-6): a 44 px tall target for the 15 px line, reaching mostly downward (the chips' own targets are above). */
+@media (pointer: coarse) {
+  .credit {
+    position: relative;
+  }
+  .credit::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -10px;
+    bottom: -19px;
+  }
+}
 .stats {
   margin: 0;
   text-align: right;
@@ -918,7 +932,7 @@
 /* Touch, swipeable chip row: the 40 px chips take 44 px taps. The row gains 2 px of padding above and
    below (and gives it back in margin, so nothing moves) for the hit box to extend into: a scroller
    clips what overflows its padding box. */
-@media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px) {
+@media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px), (pointer: coarse) and (orientation: landscape) and (max-height: 540px) {
   .chips {
     margin-block: -2px;
     padding-block: 2px;

@@ -24,3 +24,24 @@ export function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
     )
   })
 }
+
+/**
+ * R-M1: is `r` the report the first results paint wants? The final one (not the partial), no longer waiting on a
+ * clear cover, unless the cover won't lead (a share or pass link opens on its pass's own photo).
+ */
+export function isSettled(r: { partial?: boolean; coverPending?: boolean }, coverIrrelevant = false): boolean {
+  return !r.partial && (coverIrrelevant || !r.coverPending)
+}
+
+/** The final report is built this long after the engine's GIBS budget ends, at most (matching, the build). */
+export const FINAL_SLACK_MS = 150
+
+/**
+ * How long (from `now`) the first paint waits for the settled report: `race`, stretched by at most `grace` when
+ * the engine says the final report is due just after that (`dueAt`, a partial report's finalDueAt).
+ */
+export function settleWaitMs(now: number, race: number, grace: number, dueAt?: number): number {
+  if (dueAt === undefined) return race
+  const until = dueAt + FINAL_SLACK_MS - now
+  return until <= race + grace ? Math.max(race, until) : race
+}

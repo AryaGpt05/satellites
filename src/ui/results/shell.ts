@@ -124,6 +124,12 @@ export interface SheetGeometry {
 const BODY_PAD_TOP = 20
 
 /**
+ * Where the Sheet's body starts: the height of the header container right before it (grip included on phones). The
+ * header overlays the sheet (R3-9), so the body's own offsetTop is 0; this reads the header itself (U-5).
+ */
+export const headHeight = (body: HTMLElement): number => (body.previousElementSibling as HTMLElement | null)?.offsetHeight ?? 0
+
+/**
  * Measures the mobile sheet: the body's offset (grip + header), the footer, and where the content's
  * marked blocks end. Re-measures on any size change of the header, body content or footer.
  */
@@ -153,7 +159,7 @@ export function useSheetGeometry(
     const section = body.parentElement
     const outer = section?.querySelector<HTMLElement>('[data-anim-outer]')
     const natural = section?.querySelector<HTMLElement>('[data-anim-inner]')
-    const top = body.offsetTop + (outer && natural ? natural.offsetHeight - outer.offsetHeight : 0)
+    const top = headHeight(body) + (outer && natural ? natural.offsetHeight - outer.offsetHeight : 0)
     const pad = parseFloat(getComputedStyle(body).paddingTop) || BODY_PAD_TOP
     const innerTop = inner.getBoundingClientRect().top
     const end = (sel: string) => {

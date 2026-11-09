@@ -7,7 +7,8 @@
  *    with a 200 ms crossfade of the number only (owner A1: no roll, no colour flash, never the panel).
  *  - Reduced motion: no count; a change is the same 200 ms crossfade.
  *
- * Every frame writes textContent through refs; React renders this once. Local adapter for the
+ * Every frame writes textContent through refs; React renders this once. While it counts up, a hidden copy of the
+ * final value holds the box at its final width (U-2), so the unit or words beside it never move. Local adapter for the
  * shell's planned Num `countKey` / `tick` props (S7).
  */
 import { useLayoutEffect, useRef } from 'react'
@@ -33,6 +34,7 @@ export function Count({ value, countKey, duration = DUR.count, delay = 0, tick =
   const rootRef = useRef<HTMLSpanElement>(null)
   const curRef = useRef<HTMLSpanElement>(null)
   const oldRef = useRef<HTMLSpanElement>(null)
+  const ghostRef = useRef<HTMLSpanElement>(null)
   const shown = useRef<number | null>(null)
   const raf = useRef(0)
   const fmt = useRef(format)
@@ -58,16 +60,20 @@ export function Count({ value, countKey, duration = DUR.count, delay = 0, tick =
         return
       }
       cur.textContent = f(0)
+      const ghost = ghostRef.current
+      if (ghost) ghost.textContent = f(value)
       const start = performance.now() + delay
       const step = (now: number) => {
         const t = Math.min(1, Math.max(0, (now - start) / duration))
         cur.textContent = f(Math.round(value * easeOut(t)))
         if (t < 1) raf.current = requestAnimationFrame(step)
+        else if (ghost) ghost.textContent = ''
       }
       raf.current = requestAnimationFrame(step)
       return
     }
 
+    if (ghostRef.current) ghostRef.current.textContent = ''
     if (prev === value) {
       cur.textContent = f(value)
       return
@@ -92,6 +98,7 @@ export function Count({ value, countKey, duration = DUR.count, delay = 0, tick =
   return (
     <span ref={rootRef} className={[s.count, className].filter(Boolean).join(' ')}>
       <span ref={oldRef} className={s.old} aria-hidden />
+      <span ref={ghostRef} className={s.ghost} aria-hidden />
       <span ref={curRef} className={s.cur} />
     </span>
   )

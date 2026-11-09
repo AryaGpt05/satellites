@@ -207,6 +207,7 @@ function SharedPicture({ tz }: { tz?: string }) {
     <div className={s.shared}>
       <PushbroomReveal
         src={url}
+        view="shared"
         headingDeg={shared.pass?.headingDeg ?? 180}
         lines={CROP_PX}
         alt={`${name} image of ${shared.placeLabel}, shared with you.`}

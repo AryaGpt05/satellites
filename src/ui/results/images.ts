@@ -67,7 +67,7 @@ export function warmPhoto(url: string | undefined): void {
  * never reloads, re-decodes, fires another load event or re-runs a fade. Two views that can be on screen together
  * (the lightbox over the gallery) each get their own element.
  */
-export type PhotoView = 'hero' | 'detail' | 'lightbox' | 'lightbox-hi' | 'film' | 'list' | 'geo' | 'geo-look'
+export type PhotoView = 'hero' | 'detail' | 'lightbox' | 'lightbox-hi' | 'film' | 'list' | 'geo' | 'geo-look' | 'shared'
 
 const PER_VIEW_MAX = 96
 const viewEls = new Map<PhotoView, Map<string, HTMLImageElement>>()

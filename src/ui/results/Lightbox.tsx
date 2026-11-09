@@ -63,10 +63,11 @@ function computeLayout(mobile: boolean): Layout {
     const side = Math.max(160, Math.min(W, H - topH - metaH))
     return { side, left: (W - side) / 2, top: topH + Math.max(0, (H - topH - metaH - side) / 2) }
   }
-  // The top bar (56), the metadata strip under the photo (12 + three rows), the filmstrip (48 px thumbs, 24 px off
-  // the bottom): the photo takes the rest, up to 85vh (≥ 700 px on a 900 px tall laptop).
+  // The top bar (56), the metadata strip under the photo (12 above + three rows ≈ 56 + an 8 px breath above the
+  // filmstrip, U-5: at 1280×800 it sat flush on it), the filmstrip (48 px thumbs, 24 px off the bottom): the photo takes
+  // the rest, up to 85vh (≥ 680 px on a 900 px tall laptop).
   const topH = 56
-  const metaH = 64
+  const metaH = 12 + 56 + 10
   const filmH = 78
   const side = Math.max(240, Math.min(H - topH - metaH - filmH, W - 2 * 96, Math.round(H * 0.85)))
   return { side, left: (W - side) / 2, top: topH + Math.max(0, (H - topH - metaH - filmH - side) / 2) }
@@ -713,6 +714,7 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
     return (
       <PushbroomReveal
         src={base}
+        view="lightbox"
         headingDeg={photo.pass.headingDeg}
         lines={cardSpec(photo.capture).px}
         alt={alt}

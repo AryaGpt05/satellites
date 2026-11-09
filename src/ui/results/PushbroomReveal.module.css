@@ -12,23 +12,77 @@
   border: 1px solid var(--line-strong);
   overflow: hidden;
 }
-.canvas {
+/* The photo: the view's own session <img> (R3-1). Shown with the sweep in place over it (data-ready, set where the
+   sweep is placed, before paint) or once done; never before the sweep covers what is not scanned yet. */
+.pic {
   position: absolute;
   inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
+  object-fit: cover;
   opacity: 0;
+  user-select: none;
+  -webkit-user-drag: none;
 }
-/* The scan itself is the entrance: the canvas appears at once, already raster-filled. */
-.cut.on {
+.frame[data-ready] .pic,
+.frame[data-done] .pic {
   opacity: 1;
 }
 .fade {
   transition: opacity 200ms linear;
 }
-.fade.on {
-  opacity: 1;
+
+/* The part not yet scanned, as one layer the compositor moves (U-1): rotated to the heading, pivoting at the box
+   centre; its local x = 0 is the scan front. Sizes come from place() (--sweep-len along the motion, --sweep-ext
+   across it). */
+.sweep {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  visibility: hidden;
+  will-change: transform;
+}
+.frame[data-ready] .sweep {
+  visibility: visible;
+}
+.raster,
+.glow,
+.front {
+  position: absolute;
+  top: calc(var(--sweep-ext, 0px) / -2);
+  height: var(--sweep-ext, 0px);
+}
+/* Ink, with hairlines parallel to the front at a 4 px pitch: lines waiting to be read. */
+.raster {
+  left: 0;
+  width: var(--sweep-len, 0px);
+  background-color: var(--ink-2);
+  background-image: repeating-linear-gradient(90deg, transparent 0 3.5px, rgb(236 232 224 / 0.06) 3.5px 4px);
+}
+/* The trailing glow just behind the front (DESIGN §5: ≈ 6–8 px, fading to 0). */
+.glow {
+  left: -8px;
+  width: 8px;
+  background: linear-gradient(to left, rgb(255 106 26 / 0.42), rgb(255 106 26 / 0.18) 35%, rgb(255 106 26 / 0));
+}
+/* The scan front: a 2 px signal line with a 1 px bone core (a hot read head, not a crack in a JPEG). */
+.front {
+  left: -1px;
+  width: 2px;
+  background: var(--signal);
+}
+.front::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0.5px;
+  width: 1px;
+  background: rgb(236 232 224 / 0.6);
 }
 /* A scene that is almost all cloud must not be the brightest object on screen (decision #2). */
 .dim {
@@ -159,6 +213,11 @@
   opacity: 1;
 }
 .dot {
+  width: 5px;
+  height: 5px;
+}
+.dotSlot {
+  display: inline-flex;
   width: 5px;
   height: 5px;
 }

@@ -98,12 +98,23 @@
   cursor: grabbing;
 }
 .grip {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   height: 28px;
   cursor: inherit;
+}
+/* A 44 px touch target with the same 28 px look (U-3): the hit area reaches 16 px above the sheet's top edge, the
+   way a native sheet's grabber does; nothing in the header loses its own taps. */
+.grip::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -16px;
+  bottom: 0;
 }
 .grip:focus-visible {
   outline-offset: -4px;
@@ -227,6 +238,15 @@
   padding: 14px var(--sheet-pad);
   border-top: 1px solid var(--line);
   background: var(--ink-1);
+}
+/* Short landscape phones: every pixel of height goes to the content (U-3). */
+@media (orientation: landscape) and (max-height: 540px) {
+  .dock .foot {
+    padding-block: 8px;
+  }
+  .dock .head {
+    padding-block: 10px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

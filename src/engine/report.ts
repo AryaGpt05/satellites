@@ -30,9 +30,12 @@
  * asks whether Sentinel-2 images this spot at all (open ocean: no), so geometry never claims "likely".
  *
  * The clear cover (owner request D, clearCover.ts): the newest nearly cloud-free scenes of the 60 days before
- * the window are listed in parallel with the archive search; only when the window has no clear detailed photo
- * are their spots checked, and the newest clear one rides on the report as `clearCover` (the final report when
- * it is in by then, else a background `onUpdate`). It never holds the partial or the final report.
+ * the window are listed in parallel with the archive search. R-M1: as soon as the window's own scenes show no
+ * clear detailed photo (at once when they are all clouded over, else after their spot checks), the candidates'
+ * spots are checked, in parallel with the pass search, and `onCover` hands the find to the UI so its photo
+ * downloads early. The report carries it as `clearCover` once the matched passes confirm the need (usually
+ * already the partial report; `coverPending` says one is still being checked), else a background `onUpdate`
+ * delivers it. It never holds the partial or the final report.
  *
  * After the final report, GIBS stragglers keep probing in the background; each one that comes back with
  * pixels patches the report through `onUpdate` (counts only ever go up). VIIRS stragglers count as imaged
@@ -44,7 +47,7 @@ import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } 
 import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
 import { satrecFor } from './sgp4'
 import { geoWatchers } from './geostationary'
-import { needsClearCover, startClearCover } from './clearCover'
+import { needsClearCover, scenesLackClearPhoto, startClearCover } from './clearCover'
 import { attachCaptures, attachDailyCaptures, captureNorad, dailyCaptureTarget, MATCH_AFTER_MS, MATCH_BEFORE_MS } from './match'
 import { passNear, passTargetFor, type PassTarget } from './passes'
 import { passWorkerCount, runPassSearch, warmPassWorkers } from './pool'
@@ -85,8 +88,9 @@ export interface ReportOptions {
   now?: number
   onProgress?: (e: ProgressEvent) => void
   /**
-   * Called at most once, before the final result, with a complete report that lacks only the GIBS
-   * weather-mosaic matches (those passes are still 'likely'). Not called if nothing is pending by then.
+   * Called before the final result with a complete report that lacks only the GIBS weather-mosaic matches
+   * (those passes are still 'likely'). Not called if nothing is pending by then. Called once more, with the
+   * same report plus its `clearCover`, when the clear cover is found after that and before the final (R-M1).
    */
   onPartial?: (r: EngineReport) => void
   /**
@@ -99,6 +103,11 @@ export interface ReportOptions {
    * its scenes: lets the UI start downloading the picture it will most likely lead with.
    */
   onArchive?: (captures: Capture[]) => void
+  /**
+   * Called at most once, as soon as the clear cover is found (the window's scenes show no clear photo; often
+   * before the partial report): lets the UI download the photo that will lead the panel.
+   */
+  onCover?: (cover: Capture) => void
   signal?: AbortSignal
   /**
    * Time budget in ms from the call, after which NASA GIBS verifications still in flight are dropped
@@ -127,6 +136,16 @@ export interface EngineReport extends Report {
   notes: string[]
   /** True for the `onPartial` snapshot: GIBS weather mosaics not matched yet. */
   partial: boolean
+  /**
+   * The window needs a clear cover and it is still being looked for: a later report (or `onUpdate`) carries it,
+   * or says there is none (false). Lets the UI hold its first paint briefly for the cover (R-M1).
+   */
+  coverPending: boolean
+  /**
+   * Partial reports only: when (performance.now() time) the final report is due, at the latest: the end of the
+   * GIBS budget. Lets the UI wait for an imminent final report instead of painting the partial one (R-M1).
+   */
+  finalDueAt?: number
   timings: ReportTimings
 }
 
@@ -193,6 +212,15 @@ function waitAtMost(p: Promise<unknown>, ms: number, signal?: AbortSignal): Prom
     signal?.addEventListener('abort', onAbort, { once: true })
     p.then(finish, finish)
   })
+}
+
+/** A User Timing mark ("overflight:engine-<name>") for timing probes; free when nobody reads it. */
+function mark(name: string) {
+  try {
+    performance.mark(`overflight:engine-${name}`)
+  } catch {
+    /* no User Timing */
+  }
 }
 
 /** Call a caller-supplied callback; a throwing UI callback must not take the report down with it. */
@@ -288,6 +316,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     .finally(() => {
       archiveMs = performance.now() - archiveStart
       archiveDone = true
+      mark('archive')
     })
   // It only rejects on abort, possibly while we await something else: never leave that unhandled.
   archive.catch(noop)
@@ -309,6 +338,39 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   // The clear cover's candidate scenes (60 days before the window): listed now, checked only if needed.
   const coverLeg = startClearCover(latLon, windowStart, signal)
   let clearCover: Capture | undefined
+  /** The cover's spot checks are done (`found` is their answer). */
+  const cover = { done: false, found: undefined as Capture | undefined, told: false }
+  const pickCover = () => {
+    const p = coverLeg.pick()
+    if (!cover.done)
+      p.then(
+        (c) => {
+          mark(c ? 'cover-found' : 'cover-none')
+          cover.found = c
+          cover.done = true
+          if (c && !cover.told && !signal?.aborted) {
+            cover.told = true
+            safely(opts.onCover, c)
+          }
+        },
+        () => (cover.done = true),
+      )
+    return p
+  }
+  // R-M1: look for the cover as soon as the window's own scenes say there is no clear photo (at once when every
+  // scene is clouded over, else once their spot checks are in), in parallel with the pass search, so it is
+  // usually known before the first results. The matched passes confirm the need below.
+  archive
+    .then(async (caps) => {
+      if (archiveFailed || signal?.aborted) return
+      if (!scenesLackClearPhoto(caps)) {
+        await spots
+        if (!scenesLackClearPhoto(caps) || signal?.aborted) return
+      }
+      mark('cover-start')
+      await pickCover()
+    })
+    .catch(noop)
   // Time zones for the report's local times (a lazy chunk; usually loaded long before).
   const tz = Promise.resolve()
     .then(() => ensureTz())
@@ -365,6 +427,19 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     lateMs: opts.onUpdate ? undefined : 0,
   })
 
+  // The geostationary watchers need nothing from the pass search: worked out in a task of their own while the
+  // workers run (on a 4x-throttled phone they cost ~70 ms, which used to sit in the task that delivers the passes).
+  const geoP = new Promise<GeoWatcher[]>((resolve, reject) =>
+    setTimeout(() => {
+      try {
+        resolve(geoWatchers(cat, latLon, windowStart, windowEnd))
+      } catch (err) {
+        reject(err)
+      }
+    }, 0),
+  )
+  geoP.catch(noop)
+
   let passes: Pass[]
   try {
     passes = (await Promise.all([gibsPasses, otherPasses])).flat()
@@ -373,13 +448,19 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     throw err
   }
   const passesMs = performance.now() - passStart
+  mark('passes')
   throwIfAborted(signal)
 
-  const geo = geoWatchers(cat, latLon, windowStart, windowEnd)
+  const geo = await geoP
+  mark('geo')
   const satellitesConsidered = targets.length + featuredSats(cat).filter((s) => s.category === 'weather-geo' && s.profile?.operational).length
   /** Weather-leg sentences, recomputed for every build (background patches change them). */
   let weatherNotes: string[] = []
+  /** The clear cover this report waits on (set once the matched passes confirm the window needs one). */
+  let coverP: Promise<Capture | undefined> | undefined
 
+  /** The end of the GIBS budget (set when the partial report goes out). */
+  let finalDueAt: number | undefined
   const build = (list: Pass[], captures: Capture[], partial: boolean, firstResultMs: number): EngineReport => {
     const sorted = [...list].sort((a, b) => a.tClosest - b.tClosest)
     const counts = { satellitesConsidered, passes: sorted.length, imaged: 0, likely: 0, could: 0, overhead: 0 }
@@ -398,6 +479,8 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       notes: [...notes, ...weatherNotes],
       partial,
       archiveFailed,
+      coverPending: !!coverP && !cover.done,
+      ...(partial && finalDueAt !== undefined ? { finalDueAt } : {}),
       ...(clearCover ? { clearCover } : {}),
       timings: {
         catalogMs,
@@ -422,11 +505,13 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   }
   throwIfAborted(signal)
   emit('match', `MATCHING ${plural(stac.length, 'SCENE')} TO ${plural(passes.length, 'PASS', 'PASSES')}`, 0.8)
+  mark('archive-in')
   const orphans = attachCaptures(passes, stac)
   passes.push(...passesForOrphanScenes(cat, latLon, orphans, passes))
 
   // Spot classes for the best look, the open-ocean check and the time-zone table: all were started long
   // ago; whatever isn't in by its budget doesn't hold the report.
+  mark('matched')
   await Promise.all([spots, tz])
   throwIfAborted(signal)
   const planAnswer = planCheck ? await waitForValue(planCheck, PLAN_BUDGET_MS, signal) : undefined
@@ -441,20 +526,36 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     if (recast) notes.push(OCEAN_NOTE)
   }
 
-  // No clear Sentinel-2 / Landsat photo this week: find the last clear look from before it, in the background.
-  let coverP: Promise<Capture | undefined> | undefined
+  /** The partial report's snapshot, until the final report is built (a cover found meanwhile re-sends it). */
+  let partialSnapshot: Pass[] | undefined
+  let partialHadCover = false
+  // No clear Sentinel-2 / Landsat photo this week: the last clear look from before it (usually found by now).
   if (!archiveFailed && needsClearCover(passes, stac)) {
-    coverP = coverLeg.pick().then(
-      (c) => (clearCover = c),
+    coverP = pickCover().then(
+      (c) => {
+        clearCover = c
+        // Found after the partial report and before the final one: the partial again, with its cover, so the
+        // UI can lead with the right photo whichever report it paints first.
+        if (c && partialSnapshot && !partialHadCover && !signal?.aborted) safely(opts.onPartial, build(partialSnapshot, [...stac], true, firstResultMs))
+        return c
+      },
       (): undefined => undefined,
     )
+    if (cover.done) clearCover = cover.found
   }
 
   let firstResultMs = 0
   if (!weather.isDone() && opts.onPartial) {
     firstResultMs = performance.now() - tStart
+    finalDueAt = Math.max(tStart + budgetMs, (weather.timing().startedAt || performance.now()) + MIN_WEATHER_MS)
+    mark('partial')
     // Snapshot: the final report mutates verdicts on these passes, so hand out copies.
-    safely(opts.onPartial, build(passes.map(clonePass), [...stac], true, firstResultMs))
+    partialSnapshot = passes.map(clonePass)
+    partialHadCover = !!clearCover
+    const partialReport = build(partialSnapshot, [...stac], true, firstResultMs)
+    mark('partial-built')
+    safely(opts.onPartial, partialReport)
+    mark('partial-sent')
   }
 
   // ── GIBS mosaics, within the time budget ─────────────────────────────────
@@ -463,7 +564,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     const { total, settled } = weather.progress()
     emit('match', total ? `VERIFYING NASA WEATHER MOSAICS · ${nf.format(settled)} / ${nf.format(total)}` : 'VERIFYING NASA WEATHER MOSAICS', 0.86 + 0.13 * (total ? settled / total : 0))
     const startedAt = weather.timing().startedAt || performance.now()
-    const deadline = Math.max(tStart + budgetMs, startedAt + MIN_WEATHER_MS)
+    const deadline = finalDueAt ?? Math.max(tStart + budgetMs, startedAt + MIN_WEATHER_MS)
     try {
       await waitAtMost(weather.settled, deadline - performance.now(), signal)
     } catch (err) {
@@ -504,7 +605,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   // Nobody to hand a late cover to: give it a short wait (a retry of the same report is a cache hit).
   if (coverP && !clearCover && !opts.onUpdate) await waitAtMost(coverP, COVER_WAIT_MS, signal)
   throwIfAborted(signal)
+  partialSnapshot = undefined
   let latest = build(passes, [...stac, ...weatherMatched], false, firstMs)
+  mark('final')
   emit('done', `${plural(latest.counts.passes, 'PASS', 'PASSES')} · ${plural(latest.counts.imaged, 'IMAGE')}`, 1)
 
   // Background: a straggler that comes back with pixels upgrades its pass in a NEW report (the delivered
@@ -512,10 +615,11 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   if (opts.onUpdate) {
     let current = passes
     const weatherCaps = [...weatherMatched]
-    // A clear cover that came in after the final report: the same report, plus its cover.
-    if (coverP && !clearCover) {
-      void coverP.then((c) => {
-        if (!c || signal?.aborted) return
+    // A clear cover that came in after the final report: the same report, plus its cover. When the final went
+    // out still waiting on the cover (coverPending) and the search found none, the same report says so.
+    if (coverP && latest.coverPending) {
+      void coverP.then(() => {
+        if (signal?.aborted) return
         latest = build(current, [...stac, ...weatherCaps], false, firstMs)
         safely(opts.onUpdate, latest)
       })

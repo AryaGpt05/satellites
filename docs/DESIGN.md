@@ -36,7 +36,7 @@ All colours are CSS variables in `src/styles/tokens.css`. Never hard-code hex va
 | `--bone-3-mark` | `rgb(236 232 224 / .40)` | non-text marks only (ticks, glyph strokes) |
 | `--bone-4` | `rgb(236 232 224 / .18)` | hairlines strong |
 | `--line` | `rgb(236 232 224 / .10)` | hairlines default |
-| `--signal` | `#FF6A1A` | sodium orange: photographed / you-are-here / primary action / live |
+| `--signal` | `#FF6A1A` | sodium orange: watched (a real image exists) / you-are-here / primary action / live |
 | `--signal-2` | `rgb(255 106 26 / .22)` | signal fills, swath ribbons |
 | `--ice` | `#A9C7D3` | the ONLY secondary hue: radar + night-capable sensors, used sparingly |
 | `--warn` | `#E8C547` | data caveats only (stale catalog, cloud cover) |
@@ -74,7 +74,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
 | `--fs-panel-h` | 34px | 34px | panel headline (condensed) |
 | `--fs-panel-sub` | 22px | 22px | panel sub-headline |
 
-The results headline integer is static: it does not count up. It counts satellites with detailed (Sentinel-2 / Landsat) images, which is final once the archives answer, so it never changes while weather mosaics verify. Weather mosaics are reported on the second line.
+The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public photos (Sentinel-2, Landsat and the daily weather mosaics) are counted on the second line, the only one that can read "At least…" and settle in place.
 
 ## 4. Layout
 
@@ -120,19 +120,22 @@ The results headline integer is static: it does not count up. It counts satellit
 Declarative, specific, quietly uncanny. Second person. Real numbers.
 
 - Hero: "Something watched *you* this week." (three lines: `Something` / `watched *you*` / `this week.`; the serif *you* in signal orange) Sub: "Enter any place on Earth. See every satellite that passed over it in the last 7 days, and the actual pictures they took."
-- Result headline: "In the last 7 days, **256 satellites flew over** *Waterloo*." then "**29 photos were made public.**" (N = distinct satellites with any pass; K = real public images in the window; only the photos line can be partial: "At least K photos…")
-- Pass detail: "Sentinel-2C crossed 786 km overhead at 16:14:21 UTC, moving south at 7.46 km/s. It was looking straight down. Cloud cover: 25%."
-- Commercial: "WorldView Legion 4 passed within view at 10:52 local. It could have pointed here. We can't know whether it did."
-- Geostationary: "GOES-19 has photographed this spot every 10 minutes, all week: 1,008 times."
+- Result headline: "In the last 7 days, **256 satellites watched** *Waterloo*." then "**29 photos were made public.**" (N = distinct satellites with any pass; K = real public images in the window; only the photos line can be partial: "At least K photos…"). None: "No satellite we track watched Waterloo this week." One: "1 satellite watched".
+- Pass detail: "Sentinel-2C crossed 786 km overhead at 16:14:21 UTC, moving south at 7.46 km/s. It was looking straight down. Cloud cover: 25%." Per-pass headline and share post: "Sentinel-2C watched Waterloo."
+- Commercial: "WorldView Legion 4 passed within view at 10:52 local. It could have watched Waterloo. We can't know whether it did."
+- Geostationary: "GOES-19 has watched this spot every 10 minutes, all week: 1,008 times."
+- User-facing copy says **watched**, never "photographed" (code comments and identifiers may keep the old word). "{K} photos were made public." stays as the owner wrote it.
 
 Honesty is part of the aesthetic. Uncertainty is stated plainly in `--bone-3` mono footnotes.
 
 ### Verdict vocabulary (one set of words everywhere)
 
+Source of truth: `VERDICT_META` in `src/ui/results/lib/meta.ts` (the share cards mirror it in `api/_lib/cardSpec.ts`).
+
 | verdict | name | count unit | lane label | verb |
 |---|---|---|---|---|
-| imaged | Photographed | IMAGES | PHOTO | photographed |
-| likely | Likely photographed | PASSES | LIKELY | swept over |
+| imaged | Watched | IMAGES | PHOTO | watched |
+| likely | Likely watched | PASSES | LIKELY | swept over |
 | could | Could have pointed here | PASSES | COULD | passed within view |
 | overhead | Passed overhead | PASSES | OVERHEAD | passed overhead |
 
@@ -145,7 +148,31 @@ Honesty is part of the aesthetic. Uncertainty is stated plainly in `--bone-3` mo
 - WCAG AA contrast for text (bone on ink passes easily, and bone-3 is used only for ≥ 10.5px mono labels).
 - Keyboard: `/` focuses search, `←/→` steps through passes, `Esc` goes back, `Space` plays or pauses replay.
 - `prefers-reduced-motion`: no scramble, no camera flights (cut plus 300ms fade), and the reveal becomes a fade.
-- 60fps on an M1 Air at 1440p, and ≥ 40fps on a mid-range phone. DPR is capped at 2. Textures are progressive (2k first, then 8k).
+- 60fps on an M1 Air at 1440p, and ≥ 40fps on a mid-range phone. DPR is capped at 2.
+- Earth textures are progressive, and every upgrade is decoded off the main thread (createImageBitmap in a worker) and
+  uploaded in strips across frames, never during a camera flight, a sheet drag or the acquisition sequence:
+  - **Desktops:** 1k at first light → 4k → 8k.
+  - **Phones** (stacked layout or the mobile tier): 1k at first light → the **2k day + night pair in ONE swap**, and 2k is
+    final (no 4k / 8k on phones). Clouds stay 1k, and go to 2k only after the camera has rested zoomed in for ~1.5 s.
+    At most one visible sharpening, ideally before the landing's entrance ends.
+- Overlays that cover the globe (`<html data-overlay="lightbox|about|share">`, see ARCHITECTURE.md) pause or throttle it.
+
+## 10. The loading screen
+
+There is exactly one, and it is the wordmark. `index.html` paints `#boot-static` with the HTML (no JS, no fonts: the
+letters are an SVG path): the serif **Watched.** centred on ink, a touch above the middle, its signal full stop
+breathing (opacity, on the compositor, so it keeps moving through script parse and texture decode). No checklist, no
+progress bar, no second screen. Boot holds it at least 650 ms from navigation start and until the globe's first light
+and the first faces are in (never longer than 12 s). If loading takes over 6 s, one quiet mono line appears under the
+wordmark: "Slow connection, still loading"; it leaves with the ink.
+
+The exit (`src/app/bootCurtain.ts`, in the commit that mounts what boot led to: the landing, the computing panel, or
+the fault notice): the stop settles to full (240 ms); the wordmark **glides onto the HUD's own wordmark** (760 ms: it
+rises and shrinks first, then slides left along the top, so it never crosses the landing's headline) and lands on
+the same pixels; the ink fades off the globe (560 ms after 120 ms); in the frame it lands, `html[data-boot]` goes, the
+HUD's wordmark shows in its place and the curtain is removed. Transform and opacity only. The HUD's other lines and
+the landing wipe in under the fading ink. Reduced motion: one 200 ms fade, nothing moves. Never on screen: two
+wordmarks at once, the landing before the logo, the logo after the HUD's wordmark, a white or black flash.
 
 
 ## Brand
