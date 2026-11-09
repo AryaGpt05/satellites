@@ -5,10 +5,10 @@ import { createBackStack, resolveTabId, stampOf, type BackStack, type HistoryLik
  * A session history for one tab, asynchronous like a browser's: a traversal (`go`, or the user's Back / Forward) is
  * queued, and resolved RELATIVE TO THE ENTRY CURRENT WHEN IT IS PROCESSED (`deliver()`, a later task), landing with a
  * popstate carrying that entry's state. One the user queued earlier is processed first (`jumpFirst`); an app move can
- * be lost (`dropApp`). Moving below the first entry leaves the site: counted when the APP's move does it
+ * be lost (`dropApp`); with `chromium`, an app move requested while a user traversal is pending is dropped. Moving below the first entry leaves the site: counted when the APP's move does it
  * (`leftSite`); a user Back there does nothing (first entry in the tab). Out of range above: nothing happens.
  */
-function fakeHistory(first = '/') {
+function fakeHistory(first = '/', opts: { chromium?: boolean } = {}) {
   type Entry = { state: unknown; url: string }
   const entries: Entry[] = [{ state: null, url: first }]
   let index = 0
@@ -35,6 +35,8 @@ function fakeHistory(first = '/') {
     },
     go(delta: number) {
       log.gos.push(delta)
+      // Chromium: an app history.go requested while a user traversal is pending is dropped.
+      if (opts.chromium && pending.some((t) => !t.byApp)) return
       traverse(delta, true)
     },
     /** The user's Back / Forward / long-press jump */
@@ -604,22 +606,25 @@ describe('tab id (F4: storage blocked)', () => {
 })
 
 describe('back stack: user traversals racing the app’s own moves (history.go resolves when the browser gets to it)', () => {
-  it('the app’s move waits for a fresh task: a Back the user already queued lands first and is read as theirs', () => {
-    const h = fakeHistory()
-    const { s, open, uiClose, closed, settle, endTick } = load(h)
-    open('results')
-    open('pass')
-    settle()
-    uiClose('pass') // "All passes"…
-    h.back() // …and Back, pressed during the same long task
-    endTick() // the tick's batched flush runs before the browser gets to the Back
-    expect(h.log.gos).toEqual([]) // no go yet: it waits for a fresh task, behind the user's Back
-    settle()
-    expect(h.log.leftSite).toBe(0)
-    expect(closed).toEqual([]) // the Back landed on the list's entry: nothing more closed
-    expect(s.names()).toEqual(['results'])
-    expect(h.index()).toBe(1)
-    expect(h.url()).toBe('/?q=paris')
+  it('a Back right after a close from the UI still closes the next layer (Chromium drops a later app go)', () => {
+    for (const chromium of [true, false]) {
+      const h = fakeHistory('/', { chromium })
+      const { s, open, uiClose, closed, settle, endTick } = load(h)
+      open('results')
+      open('pass')
+      open('lightbox')
+      settle()
+      uiClose('lightbox') // the photo viewer's ×…
+      endTick() // …moves in its own tick
+      expect(h.log.gos).toEqual([-1])
+      h.back() // …and a Back right after it
+      settle()
+      expect(closed).toEqual(['pass'])
+      expect(s.names()).toEqual(['results'])
+      expect(h.index()).toBe(1)
+      expect(h.url()).toBe('/?q=paris')
+      expect(h.log.leftSite).toBe(0)
+    }
   })
 
   it('a user Back processed before the app’s queued move: the app’s lands back on the user’s entry, never off the site', () => {

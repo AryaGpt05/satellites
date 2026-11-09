@@ -13,8 +13,9 @@
  *    is asked to rewrite the address bar for what is on screen (`onSettled`), whatever an earlier write left on the
  *    entry it lands on;
  *  - the app's own moves never go below this load's first entry, so the app itself never navigates off the site;
- *  - history.go is relative and resolved when the browser gets to it, so the app's moves run from a fresh task (after
- *    a traversal the user already queued has landed), one at a time; a user move that lands while one is queued is
+ *  - history.go is relative and resolved when the browser gets to it, so the app's moves go one at a time: a close
+ *    from the UI moves in its own tick (ahead of a Back pressed after it), a dead Forward's undo from a fresh task
+ *    (after a Back the user pressed right after it has landed); a user move that lands while one is queued is
  *    read once the app's has landed too, and entries are put above the user's so the app's lands back on it; a move
  *    that never lands is given up after MOVE_TIMEOUT_MS and the stack lines up with where the browser is.
  * Layers stack in their drawn order (results < pass < search < lightbox < share < about), not in the order they opened:
@@ -47,8 +48,8 @@ export interface BackStackOptions {
   /** Runs the batched history move after the current tick's opens and closes (a microtask in the browser). */
   schedule: (fn: () => void) => void
   /**
-   * A timer (setTimeout in the browser); returns its cancel. The app's own history.go runs from a fresh task, after
-   * any traversal the user already queued has landed, and an app move that never lands is given up after a timeout.
+   * A timer (setTimeout in the browser); returns its cancel. A dead Forward's undo runs from a fresh task (after a
+   * traversal the user queued right after it has landed), and an app move that never lands is given up after a timeout.
    */
   later?: (fn: () => void, ms: number) => () => void
   /** This tab's id (sessionStorage): entries stamped by this tab, in this load or an earlier one, are ours. */
@@ -119,6 +120,11 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
   let timeouts = 0
   /** A move waiting for its fresh task */
   let movePending = false
+  /** The next move follows a traversal (a dead Forward's undo): it waits for a fresh task, behind a Back the user may
+   *  have pressed right after. A move the UI starts (×, "All passes", New search) goes in the tick that closed the
+   *  layer, ahead of a Back pressed after it: Chromium drops an app history.go requested while a user traversal is
+   *  pending, so a later one would lose that Back. */
+  let afterTraversal = false
   /** A change arrived while a move was outstanding: flush again when it lands */
   let dirty = false
   let scheduled = false
@@ -170,9 +176,12 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
       cur = target
       o.onSettled?.()
     } else if (target < cur && !movePending) {
-      movePending = true
-      later(move, 0)
+      if (afterTraversal) {
+        movePending = true
+        later(move, 0)
+      } else move()
     }
+    afterTraversal = false
   }
   const change = () => {
     if (scheduled) return
@@ -188,6 +197,7 @@ export function createBackStack(h: HistoryLike, o: BackStackOptions): BackStack 
 
   /** The browser is at depth d, whoever moved it there: close layers above it; a Forward into a dead entry is undone. */
   const traverse = (d: number): string[] => {
+    afterTraversal = true
     cur = d
     adoptable = 0
     const closedNames: string[] = []
