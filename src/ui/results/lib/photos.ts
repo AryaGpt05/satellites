@@ -22,6 +22,7 @@
 import type { Capture, Pass, Report, SpotCloud } from '@/types'
 import { pickLead, SPOT_RANK as CLARITY_SPOT_RANK, type Ranked } from '@/lib/clarity'
 import { isClouded } from './bestLook'
+import { northInCropDeg, placeInCrop } from '../../../../api/_lib/toneRender'
 import { captureFor, cropSpec, displayUrl, isDetailed, type CropSpec } from './captures'
 
 export interface Photo {
@@ -138,15 +139,48 @@ export const THUMB_PX = 112
 export const thumbUrl = (c: Capture) => displayUrl(c, { ...cardSpec(c), px: THUMB_PX })
 
 /**
- * The lightbox's sharper render of the same area (owner B2): 2048 px for Sentinel-2 / Landsat, so zooming in
- * shows real pixels. Weather mosaics and geostationary frames are already at native scale: no second request.
+ * The lightbox's sharper render, if any: none. The card image already holds every pixel the archive has for the
+ * area (Sentinel-2: its own 10 m pixels, copied 1:1 on the scene's grid; Landsat: an exact 2× of its 30 m), so
+ * zooming in the lightbox shows real pixels from the photo that is already decoded: no second request, no 2048 px
+ * render (it only upsampled the same 10 km: 4.7–7.1 s and ~1 s of toning for no new detail), no crossfade.
  */
-export const HIRES_PX = 2048
-export function hiResUrl(c: Capture): string | undefined {
-  if (!isDetailed(c)) return undefined
-  return displayUrl(c, { ...cardSpec(c), px: HIRES_PX })
+export function hiResUrl(_c: Capture): string | undefined {
+  return undefined
 }
 
 /** Crop width in km (the card and the lightbox show the same area). */
 export const cropWidthKm = (c: Pick<Capture, 'collection'>) => cardSpec(c).halfSizeKm * 2
 
+/**
+ * A compass bearing (the satellite's heading at closest approach) as drawn on the capture's photo, degrees clockwise
+ * from the photo's up. Sentinel-2 / Landsat photos are cut on the place's UTM grid, whose up is grid north: true
+ * north is turned from it by the meridian convergence (up to ~3°), and so is every heading overlaid on the photo.
+ */
+export function photoHeadingDeg(c: Capture, headingDeg: number): number {
+  let url: string
+  try {
+    url = cardUrl(c)
+  } catch {
+    return headingDeg
+  }
+  return headingDeg + northInCropDeg(url)
+}
+
+/**
+ * Where the searched place sits in a capture's photo: offsets from the centre as fractions of the photo's side (x to
+ * the right, y down). A photo on the place's grid is centred on it within half a native pixel (toneRender nativeBox),
+ * up to about one pixel (0.1 % of the side) when the place lies within metres of a 0.01° line; the lightbox, whose
+ * zoom magnifies that, draws its reticle here. Zero for any other photo (centred exactly), or one not around it.
+ */
+export function placeOffset(c: Capture, place: { lat: number; lon: number }): { dx: number; dy: number } {
+  let at: { fx: number; fy: number } | null = null
+  try {
+    at = placeInCrop(cardUrl(c), place.lat, place.lon)
+  } catch {
+    at = null
+  }
+  const dx = at ? at.fx - 0.5 : 0
+  const dy = at ? at.fy - 0.5 : 0
+  // A photo cut around another point (never, today) keeps the reticle at its centre rather than off in the picture.
+  return Math.abs(dx) < 0.005 && Math.abs(dy) < 0.005 ? { dx, dy } : { dx: 0, dy: 0 }
+}

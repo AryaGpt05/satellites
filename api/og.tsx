@@ -123,6 +123,7 @@ type CardImage =
 
 async function cardImage(share: ShareRecord): Promise<CardImage> {
   if (share.verdict !== 'imaged') return { kind: 'none' }
+  // On the place's grid, as the app cut its photo and card (the grid follows from the rounded place alone).
   const plan = share.capture ? cropPlan(share.capture, share.lat, share.lon, PLATE) : null
   if (!plan) return { kind: 'permanent' }
   const pic = await fetchCropPicture(plan.url, IMAGE_TIMEOUT_MS)

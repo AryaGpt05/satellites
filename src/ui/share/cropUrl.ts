@@ -9,16 +9,17 @@ const PC_ITEM = /^(S2[A-Z]_MSIL2A_\d{8}T\d{6}_R\d{3}_T\d{2}[A-Z]{3}_\d{8}T\d{6}|
  * Crop URL for a shared pass's picture, so a recipient sees the shared picture the moment the link
  * opens (results R15), built from the share's stored capture and centred on its rounded point.
  *
- * Framed like the app's pass detail (results' cropSpec: a 10 km square for Sentinel-2), not like the
+ * Framed like the app's pass detail (results' cropSpec: a 10 km square for Sentinel-2, 1000 px), not like the
  * share card, so the picture shown while the recipient's own report computes is the very one the pass
- * view settles on: no zoom jump when the results land. Undefined when the share has no capture or
- * one that can't be cropped by URL.
+ * view settles on (the same URL: R3-1): no zoom jump when the results land. On the place's grid, as the report's
+ * capture of the scene is cut (the grid follows from the rounded place alone). Undefined when the share has no
+ * capture or one that can't be cropped by URL.
  */
-export function shareCropUrl(share: Share, px: number): string | undefined {
+export function shareCropUrl(share: Share, px?: number): string | undefined {
   const c = share.capture
   if (!c || !Number.isFinite(share.lat) || !Number.isFinite(share.lon)) return undefined
   const at = { lat: share.lat, lon: share.lon }
-  const opts = cropSpec(c.collection, Math.round(px))
+  const opts = cropSpec(c.collection, px === undefined ? undefined : Math.round(px))
   if ((c.collection === 'sentinel-2-l2a' || c.collection === 'landsat-c2-l2') && c.provider !== 'earth-search' && PC_ITEM.test(c.itemId)) {
     // JPEG: the same render at a fraction of the PNG's size (as results' displayUrl).
     return pcCropUrl(c.collection, c.itemId, at, opts).replace(/\.png\?/, '.jpg?')

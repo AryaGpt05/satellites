@@ -109,9 +109,17 @@ export function decalSpecFor(collection: CaptureCollection, mobile: boolean): { 
   return null
 }
 
-/** PC bbox crops come back as JPEG (smaller; no-data is black, keyed out in the shader), as the panel does. */
+/**
+ * PC bbox crops come back as JPEG (smaller; no-data is black, keyed out in the shader), as the panel does.
+ *
+ * Always GEOGRAPHIC (lon/lat, EPSG:4326), even for a scene the panel cuts on its own UTM grid: the decal is drawn on
+ * the sphere through a lon/lat patch (Imagery.tsx patchUv: uv linear in longitude and latitude), so a lon/lat image
+ * lands exactly with no per-vertex projection in the shader. A grid-cut decal would need the inverse UTM per fragment
+ * (or a mesh) to sit right, for nothing: at 78 m per pixel the decal is 8× coarser than the scene, so its warp costs
+ * no detail, and its request (~1–2 s) runs while the camera flies.
+ */
 export function decalUrl(capture: Pick<Capture, 'cropUrl' | 'collection'>, spec: { halfSizeKm: number; px: number }): string {
-  const url = capture.cropUrl(spec)
+  const url = capture.cropUrl({ ...spec, geographic: true })
   return /^https:\/\/planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/[^?]+\.png\?/.test(url) ? url.replace(/\.png\?/, '.jpg?') : url
 }
 

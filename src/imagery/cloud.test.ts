@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Capture } from '@/types'
-import { maskFromResponse, maskCellAt } from '../../api/_lib/tone'
+import { maskFromResponse, maskCellAt, pcCropUrlAt, tonePlanForUrl } from '../../api/_lib/tone'
 import { maskNpy } from '../../api/_lib/npyTesting'
 import { classifyQaArea, classifyQaPixel, classifyScl, classifySclArea, spotCheck, spotCloud, spotFromMask, spotMaskQuery } from './cloud'
 
@@ -85,6 +85,18 @@ describe('the mask query', () => {
     expect(spotFromMask(edge, WATERLOO)).toBe('unknown')
     expect(classifyQaArea([21824, 21824, 22280])).toBe('clear')
     expect(classifyQaArea([22280, 22280, 21824])).toBe('cloud')
+  })
+})
+
+describe('the mask query for a photo on the place’s grid', () => {
+  it('asks for one lon/lat mask around the rounded place, whatever the photo’s geometry', () => {
+    const url = spotMaskQuery(cap({}), WATERLOO)!.url
+    expect(url).toMatch(/\/item\/bbox\/-80\.\d{6},43\.\d{6},-80\.\d{6},43\.\d{6}\/64x64\.npy\?collection=sentinel-2-l2a&item=S2C_[^&]+&assets=SCL$/)
+    expect(spotMaskQuery(cap({}), { lat: 43.4701, lon: -80.5401 })!.url).toBe(url)
+    // The photo (on UTM 17N) derives the very same mask URL from its own (one request for both).
+    const photo = pcCropUrlAt('sentinel-2-l2a', cap({}).itemId, WATERLOO.lat, WATERLOO.lon, 5, 1000, 'jpg')
+    expect(photo).toContain('coord_crs=EPSG:32617')
+    expect(tonePlanForUrl(photo)!.maskUrl).toBe(url)
   })
 })
 

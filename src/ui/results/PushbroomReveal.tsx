@@ -5,8 +5,9 @@
  * parallel to the front, 4px pitch) on ink, like lines waiting to be read. One in-frame counter reads
  * LINE 0000 → 1024. ≈ 1.6 s, linear (a pushbroom scans at a constant rate). Reduced motion: a fade.
  *
- * The image is north-up; `headingDeg` is the ground-track heading at closest approach, so a descending
- * Sentinel-2 pass (≈ 195°) scans from the top edge down, slightly leaning.
+ * `headingDeg` is the ground-track heading at closest approach as drawn on the image, clockwise from its up (a
+ * Sentinel-2 / Landsat photo is grid-north-up: the caller turns the compass heading by the meridian convergence,
+ * lib/photos.ts photoHeadingDeg), so a descending Sentinel-2 pass (≈ 195°) scans from the top edge down, slightly leaning.
  *
  * When the scan starts (`startAt`):
  *   'now'      as soon as the image is decoded (a shared picture)

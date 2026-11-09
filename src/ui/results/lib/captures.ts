@@ -21,28 +21,35 @@ export interface CropSpec {
   px: number
 }
 
-/** Rendered size of the capture crop (square). 1024 lines → the reveal counts LINE 0000 → 1024. */
+/** Rendered size of a weather mosaic's crop (square). 1024 lines → the reveal counts LINE 0000 → 1024. */
 export const CROP_PX = 1024
+/**
+ * Rendered size of a Sentinel-2 / Landsat photo: 1000 px, i.e. exactly the scene's own pixels for Sentinel-2
+ * (10 km of 10 m, copied as they are on its grid) and exactly 2× for Landsat (15 km of 30 m: 500 native pixels,
+ * Lanczos on the same grid, no warp). See api/_lib/toneRender.ts nativeBox.
+ */
+export const DETAILED_PX = 1000
 
 /**
  * Crop size per collection, chosen so the picture reads at its native scale:
- *  - Sentinel-2 (10 m): 10 km square ≈ native pixels at 1024 px
- *  - Landsat (30 m): 15 km square (2× upsampled, still crisp)
+ *  - Sentinel-2 (10 m): 10 km square = 1000 native pixels at 1000 px
+ *  - Landsat (30 m): 15 km square (500 native pixels, an exact 2× on their own grid, still crisp)
  *  - VIIRS / MODIS daily mosaics: 240 km square, enough to see the weather system over the place
  *  - geostationary frames: 800 km square
+ * `px` defaults to the collection's own size (DETAILED_PX for Sentinel-2 / Landsat, CROP_PX otherwise).
  */
-export function cropSpec(collection: CaptureCollection, px = CROP_PX): CropSpec {
+export function cropSpec(collection: CaptureCollection, px?: number): CropSpec {
   switch (collection) {
     case 'sentinel-2-l2a':
-      return { halfSizeKm: 5, px }
+      return { halfSizeKm: 5, px: px ?? DETAILED_PX }
     case 'landsat-c2-l2':
-      return { halfSizeKm: 7.5, px }
+      return { halfSizeKm: 7.5, px: px ?? DETAILED_PX }
     case 'gibs-goes-east':
     case 'gibs-goes-west':
     case 'gibs-himawari':
-      return { halfSizeKm: 400, px }
+      return { halfSizeKm: 400, px: px ?? CROP_PX }
     default:
-      return { halfSizeKm: 120, px }
+      return { halfSizeKm: 120, px: px ?? CROP_PX }
   }
 }
 

@@ -321,6 +321,9 @@ function retryCatalog(): Promise<void> {
 
 export async function runReport(place: Place, opts: RunOpts = {}) {
   mark('run-report')
+  // S4: the lead photo's crop goes out the moment its scene is known (onArchive, ~1–2 s from now): its URL builders and
+  // loader (the results chunk) load now, alongside the archive search, not after it (measured: up to 0.8 s later).
+  void loadHeroTools().catch(() => undefined)
   inflight?.abort()
   const ctrl = new AbortController()
   inflight = ctrl
@@ -490,7 +493,9 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
       signal: ctrl.signal,
       onProgress: progress.write,
       // The archive answers ~2 s before the partial report: start the likely hero's crop now (Planetary
-      // Computer renders it on demand, 1–4 s cold), so it is decoded by the time results land.
+      // Computer renders it on demand, 1–2.5 s cold), so it is decoded by the time results land. Sentinel-2's scenes
+      // come first, alone, the moment that archive answers: a clear one leads whatever Landsat has, so its crop
+      // starts then (the second call, with every scene, finds the same URL in flight: one request).
       onArchive: (caps) => {
         if (inflight === ctrl) void warmLikelyHero(caps, opts)
       },

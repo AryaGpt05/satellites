@@ -18,7 +18,7 @@
  * sharper render and the download match exactly. `fetchMaskHere` reads the cloud mask both the curve and the spot
  * check use (one request per capture and place, shared).
  */
-import { canShareCurve, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams } from '../../api/_lib/tone'
+import { canShareCurve, maskFromResponse, maskKeyForUrl, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams } from '../../api/_lib/tone'
 
 export interface Pixels {
   data: Uint8ClampedArray
@@ -156,6 +156,12 @@ export interface MaskFetch {
 /** Masks by URL, shared by the spot check and the photos' curve (one request each per session). */
 const masks = /* @__PURE__ */ new Map<string, Promise<MaskFetch>>()
 const MASKS_MAX = 96
+/**
+ * The same masks by the curve they serve (capture and rounded place, tone.ts maskKeyForUrl). Every crop of a capture
+ * at a place names the same lon/lat mask URL today (toneRender maskUrl); the key keeps a crop finding it should two
+ * geometries ever ask for it under different URLs.
+ */
+const masksByKey = /* @__PURE__ */ new Map<string, Promise<MaskFetch>>()
 
 /**
  * An answer worth asking again: the archive's server trouble (5xx, e.g. PC's 504 "upstream request timeout" on a cold
@@ -176,14 +182,20 @@ export function fetchMaskHere(url: string): Promise<MaskFetch> {
       return { status: res.status, mask: maskFromResponse(url, await res.arrayBuffer()) }
     })()
     p = req
+    const key = maskKeyForUrl(url)
     const forget = () => {
       if (masks.get(url) === req) masks.delete(url)
+      if (key && masksByKey.get(key) === req) masksByKey.delete(key)
     }
     req.then((r) => {
       if (isTransientStatus(r.status)) forget()
     }, forget)
     masks.set(url, req)
     if (masks.size > MASKS_MAX) masks.delete(masks.keys().next().value as string)
+    if (key) {
+      masksByKey.set(key, req)
+      if (masksByKey.size > MASKS_MAX) masksByKey.delete(masksByKey.keys().next().value as string)
+    }
   }
   return p
 }
@@ -265,7 +277,7 @@ function encode(c: Canvas2D, type: string): Promise<Blob> {
 export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jpeg' | 'png' = 'jpeg'): Promise<CheckedImage> {
   const plan = tonePlanForUrl(url)
   const shares = plan ? canShareCurve(plan) : false
-  const pending = plan ? (shares ? fetchMaskHere(plan.maskUrl) : masks.get(plan.maskUrl)) : undefined
+  const pending = plan ? (shares ? fetchMaskHere(plan.maskUrl) : (masks.get(plan.maskUrl) ?? masksByKey.get(plan.key))) : undefined
   pending?.catch(() => undefined)
   const res = await fetch(url, { signal })
   const contentType = res.headers.get('content-type') ?? ''

@@ -11,7 +11,7 @@ import { waterlooReport } from '../results/__fixtures__/waterloo'
 import { isDetailed } from '../results/lib/captures'
 import { ARCHIVE_DOWN_LINE, headline, photosLine, watchedPhrase } from '../results/lib/copy'
 import type { SatMeta } from '../results/lib/meta'
-import { cardSource, summaryCardSpec, summaryFacts } from './card'
+import { cardSource, cropUrlFor, summaryCardSpec, summaryFacts } from './card'
 import { postText, roundedPlace, summaryLink, summaryPostText } from './links'
 
 // The server module reads process.env and tz-lookup: imported by a runtime specifier (as spec.test.ts).
@@ -36,28 +36,43 @@ async function captureOf(collection: string): Promise<Capture> {
 }
 
 describe('cardSource: the card cut from the pass view’s crop (R2SH1)', () => {
-  it('maps the Sentinel-2 card square into the 1024 px, ±5 km pass-view crop', async () => {
+  it('cuts the Sentinel-2 card from the pass view’s 1000 px photo at whole native pixels (the server’s very pixels)', async () => {
     const s2 = await captureOf('sentinel-2-l2a')
     const crop = cardCrop(s2)
     expect(crop.halfSizeKm).toBeCloseTo(3.15)
     const src = cardSource(s2, EXACT, ROUNDED, crop)!
     expect(src).toBeTruthy()
-    expect(src.px).toBe(1024)
-    expect(src.url).toMatch(/\/item\/bbox\/[^/]+\/1024x1024\.jpg\?collection=sentinel-2-l2a&item=S2/)
-    expect(Math.abs(src.sw - 645)).toBeLessThanOrEqual(2)
-    expect(Math.abs(src.sh - 645)).toBeLessThanOrEqual(2)
-    expect(Math.abs(src.sx - 230)).toBeLessThanOrEqual(2)
-    expect(Math.abs(src.sy - 216)).toBeLessThanOrEqual(2)
+    expect(src.px).toBe(1000)
+    expect(src.url).toMatch(/\/item\/bbox\/[^/]+\/1000x1000\.jpg\?collection=sentinel-2-l2a&item=S2[^&]+&coord_crs=EPSG:32617&dst_crs=EPSG:32617&/)
+    // 630 of the photo's own 10 m pixels, at whole-pixel offsets: the card is the photo's pixels, not a resample.
+    expect(src.sw).toBe(630)
+    expect(src.sh).toBe(630)
+    expect(Number.isInteger(src.sx) && Number.isInteger(src.sy)).toBe(true)
+    // The rounded point is ≈ 397 m east and ≈ 255 m south of the searched one (grid north ≈ 0.3° off true north here).
+    expect(Math.abs(src.sx - (185 + 40))).toBeLessThanOrEqual(2)
+    expect(Math.abs(src.sy - (185 + 26))).toBeLessThanOrEqual(2)
+    // And the server's card crop is exactly that square of the same grid (api/_lib/imagery.ts cropPlan builds this URL).
+    const cardUrl = cropUrlFor(s2, crop, ROUNDED.lat, ROUNDED.lon)!
+    expect(cardUrl).toMatch(/\/item\/bbox\/\d+,\d+,\d+,\d+\/630x630\.jpg\?collection=sentinel-2-l2a&item=S2[^&]+&coord_crs=EPSG:32617&dst_crs=EPSG:32617&/)
+    expect(cardUrl).not.toMatch(/resampling/) // reproject=lanczos is a no-op for T17TNJ, on this grid
+    const [px0, py1] = /\/bbox\/(\d+),\d+,\d+,(\d+)\//.exec(src.url)!.slice(1).map(Number)
+    const [cx0, cy1] = /\/bbox\/(\d+),\d+,\d+,(\d+)\//.exec(cardUrl)!.slice(1).map(Number)
+    expect([(cx0 - px0) / 10, (py1 - cy1) / 10]).toEqual([src.sx, src.sy])
   })
 
-  it('fits Landsat (±6.3 in ±7.5 km) and VIIRS (±118 in ±120 km) crops too', async () => {
+  it('fits Landsat (9.45 km at 15 m: 315 native px at 2×, in the 15 km photo) and VIIRS (±118 in ±120 km) crops too', async () => {
     const l9 = await captureOf('landsat-c2-l2')
     const lc = cardCrop(l9)
-    expect(lc.halfSizeKm).toBeCloseTo(6.3)
+    expect(lc.halfSizeKm).toBeCloseTo(4.725)
+    expect(lc.metresPerPx).toBe(15)
     const ls = cardSource(l9, EXACT, ROUNDED, lc)
     expect(ls).toBeTruthy()
+    expect(ls!.px).toBe(1000)
+    expect(ls!.sw).toBe(630)
+    expect(ls!.sh).toBe(630)
+    expect(ls!.sx % 2 === 0 && ls!.sy % 2 === 0).toBe(true) // whole 30 m pixels of the 2× photo
     expect(ls!.sx).toBeGreaterThan(0)
-    expect(ls!.sx + ls!.sw).toBeLessThan(1024)
+    expect(ls!.sx + ls!.sw).toBeLessThan(1000)
 
     const report = await waterlooReport({ withTracks: false })
     const viirs = report.captures.find((c) => c.collection.startsWith('gibs-viirs'))!

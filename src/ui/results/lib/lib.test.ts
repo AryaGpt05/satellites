@@ -3,7 +3,8 @@ import type { Capture, Pass } from '@/types'
 import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
 import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline, watchedPhrase } from './copy'
-import { cardUrl, filterCounts, filterPhotos, hiResUrl, orderPhotos, thumbUrl } from './photos'
+import { cardUrl, filterCounts, filterPhotos, hiResUrl, orderPhotos, photoHeadingDeg, placeOffset, thumbUrl } from './photos'
+import { pcCropUrl, type CropOpts } from '@/imagery'
 import { groupPasses, visibleCount } from './groups'
 import { glyphForPass, markColorVar, VERDICT_META, VERDICT_TAG, VERDICT_TITLE, verdictUnit, type SatMeta } from './meta'
 import { frontLine, motionVector, revealProgress, scannedPolygon, sweepRange } from './pushbroom'
@@ -223,9 +224,11 @@ describe('captures', () => {
   it('finds the capture and sizes the crop per collection', () => {
     expect(captureFor({ captures: [s2, viirs] }, { captureId: 'S2C_X' })).toBe(s2)
     expect(captureFor({ captures: [s2] }, {})).toBeUndefined()
-    expect(cropSpec('sentinel-2-l2a')).toEqual({ halfSizeKm: 5, px: 1024 })
-    expect(cropSpec('landsat-c2-l2').halfSizeKm).toBe(7.5)
-    expect(cropSpec('gibs-viirs-noaa20').halfSizeKm).toBe(120)
+    // Sentinel-2: 1000 px = exactly the scene's 10 m pixels over 10 km; Landsat: an exact 2× of 500 native 30 m pixels.
+    expect(cropSpec('sentinel-2-l2a')).toEqual({ halfSizeKm: 5, px: 1000 })
+    expect(cropSpec('landsat-c2-l2')).toEqual({ halfSizeKm: 7.5, px: 1000 })
+    expect(cropSpec('gibs-viirs-noaa20')).toEqual({ halfSizeKm: 120, px: 1024 })
+    expect(cropSpec('sentinel-2-l2a', 112).px).toBe(112)
   })
   it('asks Planetary Computer for JPEG (≈7× smaller) and leaves other providers alone', () => {
     expect(displayUrl(s2, { halfSizeKm: 5, px: 1024 })).toMatch(/\/1024x1024\.jpg\?collection=/)
@@ -711,13 +714,40 @@ describe('photos: one order everywhere (owner B1 + D1)', () => {
     expect(set.photos.map((p) => p.key)).toEqual(['T2', 'V', 'T'])
   })
 
-  it('one canonical URL per (capture, size); the lightbox asks for 2048 px of Sentinel-2 / Landsat only', () => {
+  it('one canonical URL per (capture, size); the lightbox asks for nothing more (the card photo is full resolution)', () => {
     expect(cardUrl(s2)).toBe(displayUrl(s2, cropSpec('sentinel-2-l2a')))
-    expect(cardUrl(s2)).toContain('/1024x1024.jpg?')
+    expect(cardUrl(s2)).toContain('/1000x1000.jpg?')
     expect(thumbUrl(s2)).toContain('/112x112.jpg?')
-    expect(hiResUrl(s2)).toContain('/2048x2048.jpg?')
-    expect(hiResUrl(s2)).toContain('&h=5')
+    expect(hiResUrl(s2)).toBeUndefined()
     expect(hiResUrl(viirs)).toBeUndefined()
+  })
+
+  it('turns a heading drawn on a grid-cut photo by the meridian convergence (grid north up), not on others', () => {
+    const at = { lat: 59.33, lon: 17.9 } // zone 33's eastern edge: grid north ≈ 2.5° east of true north
+    const native = { ...s2, cropUrl: (o: CropOpts) => pcCropUrl('sentinel-2-l2a', 'S2A_MSIL2A_20261105T101121_R022_T33VXF_20261105T145605', at, o) }
+    expect(photoHeadingDeg(native, 190)).toBeCloseTo(190 - 2.49, 1)
+    expect(photoHeadingDeg(native, 10)).toBeCloseTo(10 - 2.49, 1)
+    // The same place's photo from a zone-34 tile is cut on zone 33's grid too: turned the same way (GEO-1).
+    const other = { ...s2, cropUrl: (o: CropOpts) => pcCropUrl('sentinel-2-l2a', 'S2A_MSIL2A_20261105T101121_R022_T34VCL_20261105T145605', at, o) }
+    expect(photoHeadingDeg(other, 190)).toBeCloseTo(photoHeadingDeg(native, 190), 9)
+    const geographic = { ...s2, cropUrl: (o: CropOpts) => pcCropUrl('sentinel-2-l2a', 'S2A_MSIL2A_20261105T101121_R022_T33VXF_20261105T145605', at, { ...o, geographic: true }) }
+    expect(photoHeadingDeg(geographic, 190)).toBe(190)
+    expect(photoHeadingDeg(viirs, 190)).toBe(190)
+  })
+
+  it('finds the place in the photo within a native pixel of its centre, for the lightbox’s reticle', () => {
+    const at = { lat: 52.5186, lon: 13.4083 }
+    const c = { ...s2, cropUrl: (o: CropOpts) => pcCropUrl('sentinel-2-l2a', 'S2A_MSIL2A_20261105T101121_R022_T33UUU_20261105T164009', at, o) }
+    const o = placeOffset(c, at)
+    expect(Math.abs(o.dx) * 1000).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(o.dy) * 1000).toBeLessThanOrEqual(0.5)
+    expect(o.dx !== 0 || o.dy !== 0).toBe(true) // the real offset, not an assumed centre
+    // 1 m south of a 0.01° line: the photo steps a pixel over to keep its rounded point; the offset says where.
+    const edge = { lat: 52.525 - 1 / 111_200, lon: 13.4083 }
+    const ce = { ...s2, cropUrl: (o2: CropOpts) => pcCropUrl('sentinel-2-l2a', 'S2A_MSIL2A_20261105T101121_R022_T33UUU_20261105T164009', edge, o2) }
+    const oe = placeOffset(ce, edge)
+    expect(Math.abs(oe.dy) * 1000).toBeLessThanOrEqual(1.5)
+    expect(placeOffset(viirs, at)).toEqual({ dx: 0, dy: 0 })
   })
 })
 

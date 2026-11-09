@@ -19,7 +19,7 @@
  */
 import type { Capture, LatLon } from '@/types'
 import { bboxAround } from '@/lib/geo'
-import { clearFraction, maskCellAt, type ToneMask } from '../../api/_lib/tone'
+import { clearFraction, maskCellAtLatLon, maskPoint, type ToneMask } from '../../api/_lib/tone'
 import { pcMaskUrl } from './endpoints'
 import { fetchMask } from './pixelsClient'
 import { Lru, memoAsync } from './lru'
@@ -113,27 +113,37 @@ export function spotMaskQuery(capture: Capture, place: LatLon): { url: string } 
 /** Half-size of the box the spot's majority is read over (km): 1 km across. */
 const AREA_HALF_KM = 0.5
 
-/** The spot class from a mask: the majority of the cells whose centres lie in the 1 km box (else the cell under the place). */
+/**
+ * The spot class from a mask: the majority of the cells whose centres lie in the 1 km box around the place (else the
+ * cell under it). The box is drawn in the mask's own geometry: lon/lat, or 1 km of grid metres on a native mask.
+ */
 export function spotFromMask(mask: ToneMask, place: LatLon): SpotCloud {
-  const [w, s, e, n] = bboxAround(place.lat, place.lon, AREA_HALF_KM)
+  const [w, s, e, n] = mask.crs === 4326 ? bboxAround(place.lat, place.lon, AREA_HALF_KM) : areaOnGrid(mask, place)
   const values: number[] = []
   const cw = (mask.box[2] - mask.box[0]) / mask.w
   const ch = (mask.box[3] - mask.box[1]) / mask.h
   for (let y = 0; y < mask.h; y++) {
-    const lat = mask.box[3] - (y + 0.5) * ch
-    if (lat < s || lat > n) continue
+    const cy = mask.box[3] - (y + 0.5) * ch
+    if (cy < s || cy > n) continue
     for (let x = 0; x < mask.w; x++) {
-      const lon = mask.box[0] + (x + 0.5) * cw
+      const cx = mask.box[0] + (x + 0.5) * cw
       // No-data cells count as unreadable (NaN: both classifiers say 'unknown').
-      if (lon >= w && lon <= e) values.push(mask.cls[y * mask.w + x] === 0 ? NaN : mask.raw[y * mask.w + x])
+      if (cx >= w && cx <= e) values.push(mask.cls[y * mask.w + x] === 0 ? NaN : mask.raw[y * mask.w + x])
     }
   }
   if (!values.length) {
-    const c = maskCellAt(mask, place.lon, place.lat)
+    const c = maskCellAtLatLon(mask, place.lat, place.lon)
     if (c < 0 || mask.cls[c] === 0) return 'unknown'
     values.push(mask.raw[c])
   }
   return mask.collection === 'sentinel-2-l2a' ? classifySclArea(values) : classifyQaArea(values)
+}
+
+/** The 1 km square around the place in a native mask's grid metres. */
+function areaOnGrid(mask: ToneMask, place: LatLon): [number, number, number, number] {
+  const [x, y] = maskPoint(mask, place.lat, place.lon)
+  const h = AREA_HALF_KM * 1000
+  return [x - h, y - h, x + h, y + h]
 }
 
 const cache = /* @__PURE__ */ new Lru<string, Promise<SpotCheck>>(512)

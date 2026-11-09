@@ -1,6 +1,6 @@
 /**
- * Pushbroom reveal geometry (pure). The image is north-up; the satellite moves along `headingDeg`
- * (degrees clockwise from north). A pushbroom sensor builds the picture one cross-track line at a
+ * Pushbroom reveal geometry (pure). The satellite moves along `headingDeg` (degrees clockwise from the image's up:
+ * north, or grid north for a photo on a UTM grid, see lib/photos.ts photoHeadingDeg). A pushbroom sensor builds the picture one cross-track line at a
  * time as it moves, so the reveal front is a line perpendicular to the heading that advances along it.
  *
  * Screen space: x right, y down. North = −y.

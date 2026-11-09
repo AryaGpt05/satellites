@@ -9,10 +9,10 @@
  *   laptops  the photo up to ~85vh, a metadata strip and a filmstrip. Wheel / trackpad pinch zooms around
  *            the cursor, drag pans, double-click toggles 2.5×, ← → move, + − 0 zoom, Esc / ✕ / F close.
  *
- * More detail when expanded: Sentinel-2 / Landsat load a 2048 px render of the same area (lib/photos
- * hiResUrl) once the opening motion is over; the decoded card image shows at once and the sharper one
- * crossfades in (200 ms) when decoded. The resolution ("10 m / pixel") and a live scale bar ride on the
- * frame; the reticle stays on the place at any zoom.
+ * Detail when expanded: the decoded card image is the photo at full resolution (Sentinel-2's own 10 m pixels, cut
+ * on the scene's grid; lib/photos hiResUrl asks for nothing more), so zooming shows real pixels at once, from the
+ * one request. The resolution ("10 m / pixel") and a live scale bar ride on the frame; the reticle stays on the
+ * place at any zoom.
  *
  * Open / close: the photo grows from its exact rect in the panel (FLIP, 360 ms ease-out) and shrinks back to
  * the rect of whichever photo is current on close; the backdrop fades. Reduced motion: a 160 ms fade.
@@ -32,7 +32,7 @@ import { selectQuietly } from './actions'
 import { coverPinKey, pinnedOrder, useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
 import { Img } from './Img'
-import { cardSpec, cardUrl, cropWidthKm, filterPhotos, hiResUrl, thumbUrl, type Photo } from './lib/photos'
+import { cardSpec, cardUrl, cropWidthKm, filterPhotos, hiResUrl, photoHeadingDeg, placeOffset, thumbUrl, type Photo } from './lib/photos'
 import { productLabel, scaleBarKm, sensorName } from './lib/captures'
 import { dec1, int } from './lib/copy'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from './lib/time'
@@ -128,15 +128,18 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const reduced = prefersReducedMotion()
   const photo = items[index]
   const n = items.length
+  const place = model.report.place
 
   // ── zoom / pan ──────────────────────────────────────────────────────────────────────────
   const apply = useCallback(() => {
     const { s: k, x, y } = z.current
     const zl = zoomRef.current
     if (zl) zl.style.transform = k === 1 && !x && !y ? '' : `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale(${k.toFixed(4)})`
-    if (reticleRef.current) reticleRef.current.style.transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`
     const p = items[indexRef.current]
     const side = layoutRef.current.side
+    // The reticle on the place itself, which zoom magnifies (within a native pixel of the photo's centre).
+    const o = p && side ? placeOffset(p.capture, place) : { dx: 0, dy: 0 }
+    if (reticleRef.current) reticleRef.current.style.transform = `translate(-50%, -50%) translate(${(x + k * o.dx * side).toFixed(1)}px, ${(y + k * o.dy * side).toFixed(1)}px)`
     if (p && barRef.current && barTextRef.current && side) {
       const visKm = cropWidthKm(p.capture) / k
       const km = scaleBarKm(visKm)
@@ -147,7 +150,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
     if (zoomTextRef.current) zoomTextRef.current.textContent = `${k.toFixed(1)}×`
     const box = boxRef.current
     if (box) box.dataset.zoomed = k > 1.001 ? 'true' : 'false'
-  }, [items])
+  }, [items, place])
   const layoutRef = useRef(layout)
   layoutRef.current = layout
 
@@ -617,7 +620,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
           <span ref={barTextRef} className={s.scaleText} />
         </span>
         <span className={cx(s.chip, s.br)} aria-hidden>
-          <svg width="8" height="10" viewBox="0 0 8 10">
+          {/* True north, turned from the photo's up (grid north on a native crop) by the meridian convergence. */}
+          <svg width="8" height="10" viewBox="0 0 8 10" style={{ transform: `rotate(${photoHeadingDeg(photo.capture, 0).toFixed(1)}deg)` }}>
             <path d="M4 0.5 7.5 9.5 4 7.2 0.5 9.5Z" fill="currentColor" />
           </svg>
           N
@@ -681,7 +685,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   )
 }
 
-/** One photo in the viewer: the decoded card image at once, the 2048 px render crossfading in when ready. */
+/** One photo in the viewer: the decoded card image at once (a sharper render would crossfade in if hiResUrl gave one). */
 function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: ResultsModel; hires: boolean; reveal: boolean }) {
   const base = cardUrl(photo.capture)
   const hi = hiResUrl(photo.capture)
@@ -715,7 +719,7 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
       <PushbroomReveal
         src={base}
         view="lightbox"
-        headingDeg={photo.pass.headingDeg}
+        headingDeg={photoHeadingDeg(photo.capture, photo.pass.headingDeg)}
         lines={cardSpec(photo.capture).px}
         alt={alt}
         startAt="now"
