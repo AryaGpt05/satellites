@@ -361,7 +361,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
               <Facts
                 rows={[
                   ['Where it runs', 'The orbit maths happens in your browser.'],
-                  ['What we keep', 'To count searches we save a rough 10 km area and the nearest town. Never your exact spot.'],
+                  ['What we keep', 'We count searches by town and a rough 10 km area, never your exact spot, and keep a tally of what gets opened and shared. No IP addresses, no cookies, nothing that follows you between visits.'],
                   ['Who else sees it', 'Searches go to Photon (by komoot) to look up the place name. Photos load straight from the archives.'],
                   [
                     'Share links',

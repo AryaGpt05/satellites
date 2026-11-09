@@ -42,6 +42,10 @@ actual pictures they took. It runs on a live 3D globe lit by the real sun, with 
 - **Share cards** are rendered on Vercel with `@vercel/og`: the real crop, a reticle on the exact spot, and the
   numbers. Supabase stores shares and coarse (~10 km) lookup counts through RPC-only functions. There is no direct
   table access, and exact locations are never stored.
+- **Usage counts, not tracking.** The app records what happens in a visit (searches, results, passes and photos
+  opened, shares, errors) against a random id that lives only as long as the browser tab. Searches are stored by
+  town and a ~10 km cell; no IP addresses, cookies or exact coordinates are kept, and raw events are deleted after
+  90 days. The owner reads the totals at `/admin`.
 
 ## Stack
 
