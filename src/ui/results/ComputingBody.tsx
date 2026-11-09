@@ -15,11 +15,12 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { gibsWmsUrl, pcCropUrl } from '@/imagery'
+import { northInCropDeg } from '../../../api/_lib/toneRender'
 import type { Share } from '@/lib/backend'
 import { useApp } from '@/state/store'
 import type { ProgressEvent } from '@/types'
 import { shareCropUrl } from '@/ui/share'
-import { CROP_PX, cropSpec, displayUrl } from './lib/captures'
+import { cropSpec, displayUrl } from './lib/captures'
 import { cx, fmtUtc } from '@/ui/system'
 import { PushbroomReveal } from './PushbroomReveal'
 import { markSeen } from './once'
@@ -174,13 +175,13 @@ export function ComputingBody({ t0, tz }: { t0: number; tz?: string }) {
  * The shared picture's crop URL: the share package's builder (SH1), or the same crop built here from
  * the share's archive item while that export is still a stub.
  */
-function sharedImageUrl(share: Share, px: number): string | undefined {
-  const fromShare = shareCropUrl(share, px)
+function sharedImageUrl(share: Share): string | undefined {
+  const fromShare = shareCropUrl(share)
   if (fromShare) return fromShare
   const c = share.capture
   if (!c) return undefined
   const at = { lat: share.lat, lon: share.lon }
-  const spec = { ...cropSpec(c.collection), px }
+  const spec = cropSpec(c.collection)
   if (c.collection === 'sentinel-2-l2a' || c.collection === 'landsat-c2-l2')
     return displayUrl({ cropUrl: (o) => pcCropUrl(c.collection as 'sentinel-2-l2a' | 'landsat-c2-l2', c.itemId, at, o) }, spec)
   const [layer, time] = c.itemId.split('@')
@@ -198,7 +199,7 @@ function SharedPicture({ tz }: { tz?: string }) {
   if (!shared?.capture) return null
   // The pass view's own crop (R3-1: one URL per capture and size): when the recipient's report lands, the pass view
   // shows this very image, decoded already, from the one request.
-  const url = sharedImageUrl(shared, CROP_PX)
+  const url = sharedImageUrl(shared)
   if (!url) return null
   const name = shared.satName ?? 'A satellite'
   const t = shared.tClosest
@@ -208,8 +209,8 @@ function SharedPicture({ tz }: { tz?: string }) {
       <PushbroomReveal
         src={url}
         view="shared"
-        headingDeg={shared.pass?.headingDeg ?? 180}
-        lines={CROP_PX}
+        headingDeg={(shared.pass?.headingDeg ?? 180) + northInCropDeg(url)}
+        lines={cropSpec(shared.capture.collection).px}
         alt={`${name} image of ${shared.placeLabel}, shared with you.`}
         startAt="now"
         frameClassName={s.sharedFrame}

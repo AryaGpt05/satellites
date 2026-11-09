@@ -499,13 +499,14 @@ export interface CardCrop {
 }
 
 /**
- * The card's crop: one output pixel ≈ one native pixel (10 m for Sentinel-2 → a 6.3 km square), so
- * the "10 M" on the chip is literally what each pixel is. Landsat's 30 m is soft at 1:1 on a phone, so
- * it renders at 20 m per pixel.
+ * The card's crop: one output pixel = one native pixel (10 m for Sentinel-2 → a 6.3 km square: 630 of the scene's
+ * own pixels, the very ones the app's photo shows), so the "10 M" on the chip is literally what each pixel is.
+ * Landsat's 30 m is soft at 1:1 on a phone, so it renders at 15 m per pixel: an exact 2× of 315 native pixels
+ * (9.45 km), as the app's Landsat photo is (500 native pixels at 1000 px), so the card shows the photo's pixels.
  */
 export function cardCrop(c: Pick<CardCaptureInput, 'collection' | 'itemId' | 'gsdM'>, px = PLATE): CardCrop {
   const gsd = NATIVE_GSD_M[c.collection] ?? c.gsdM ?? 10
-  const metresPerPx = c.collection === 'landsat-c2-l2' ? 20 : gsd
+  const metresPerPx = c.collection === 'landsat-c2-l2' ? 15 : gsd
   return { collection: c.collection, itemId: c.itemId, halfSizeKm: Math.max(2, (metresPerPx * px) / 2000), metresPerPx }
 }
 

@@ -13,8 +13,10 @@
  * orbit (|Δt| ≲ 15 min) and display the pass time, not `Capture.datetime`.
  */
 import type { Capture, LatLon } from '@/types'
-import { ES_STAC_SEARCH, PC_STAC_SEARCH, pcCropUrl, type CropOpts, type StacCollection } from './endpoints'
+import { ES_STAC_SEARCH, PC_STAC_SEARCH, type CropOpts, type StacCollection } from './endpoints'
+import { pcCropUrl } from './pcCrop'
 import { fetchJson, isAbortError, throwIfAborted } from './net'
+import { CROP_HALF_KM, s2EpsgFromItemId, sceneEpsgFromStac, sceneOnPlaceGrid } from '../../api/_lib/toneRender'
 
 // ── STAC wire types (only what we read) ────────────────────────────────────────────────────
 
@@ -87,6 +89,8 @@ export interface Candidate {
   processing: string
   /** MGRS tile (S2) or WRS path/row (Landsat), when known */
   tile?: string
+  /** The scene's own CRS (UTM EPSG), when known: an overflight's scenes prefer the one on the place's grid */
+  epsg?: number
 }
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -147,6 +151,8 @@ export function pcItemToCandidate(item: StacItem, place: LatLon): Candidate | un
   const zenith = num(p['s2:mean_solar_zenith'])
   const sunElevationDeg = num(p['view:sun_elevation']) ?? (zenith !== undefined ? 90 - zenith : undefined)
   const itemId = item.id
+  // The scene's own CRS (Sentinel-2's also follows from its tile id): dedupe prefers the scene on the place's grid.
+  const epsg = sceneEpsgFromStac(collection, p, item.assets as Record<string, Record<string, unknown>> | undefined) ?? (collection === 'sentinel-2-l2a' ? s2EpsgFromItemId(itemId) : null) ?? undefined
   const capture: Capture = {
     id: itemId,
     provider: 'planetary-computer',
@@ -168,6 +174,7 @@ export function pcItemToCandidate(item: StacItem, place: LatLon): Candidate | un
       capture,
       processing: `${str(p['s2:processing_baseline']) ?? ''}|${s2GenerationStamp(itemId) || (str(p['s2:generation_time']) ?? '')}`,
       tile: str(p['s2:mgrs_tile']),
+      epsg,
     }
   }
   const path = str(p['landsat:wrs_path'])
@@ -176,6 +183,7 @@ export function pcItemToCandidate(item: StacItem, place: LatLon): Candidate | un
     capture,
     processing: `${str(p['landsat:collection_number']) ?? ''}|${str(p['created']) ?? ''}`,
     tile: path && row ? `${path}/${row}` : undefined,
+    epsg,
   }
 }
 
@@ -212,10 +220,14 @@ export function earthSearchItemToCandidate(item: StacItem, place: LatLon): Candi
     sourceUrl: selfLink(item),
   }
   const grid = [p['mgrs:utm_zone'], p['mgrs:latitude_band'], p['mgrs:grid_square']]
+  const zone = num(p['mgrs:utm_zone'])
+  const band = str(p['mgrs:latitude_band'])
   return {
     capture,
     processing: `${str(p['s2:processing_baseline']) ?? ''}|${productUri ? s2GenerationStamp(productUri) : ''}`,
     tile: grid.every((g) => g !== undefined) ? grid.join('') : undefined,
+    // Its zone as Planetary Computer's copy is gridded (the tile id), else as Earth Search's properties say.
+    epsg: (pcId ? s2EpsgFromItemId(pcId) : null) ?? (zone && band ? (band >= 'N' ? 32600 : 32700) + zone : undefined),
   }
 }
 
@@ -264,8 +276,11 @@ const SAME_PASS_MS = 120_000
  * Collapse archive duplicates into one capture per overflight:
  *  1. Same platform + datetime + tile, processed more than once (S2 processing baselines):
  *     keep the newest processing.
- *  2. Same platform within 2 min (overlapping MGRS tiles of one datatake, adjacent Landsat rows):
- *     keep the scene the place sits deepest inside, then the newest processing, then the clearest.
+ *  2. Same platform within 2 min (overlapping MGRS tiles of one datatake, adjacent Landsat rows): keep the scene
+ *     on the place's grid (toneRender placeGrid: the UTM zone of the place) when the whole photo lies inside it, so
+ *     its photo is the archive's own pixels, copied with no warp; else the scene the place sits deepest inside
+ *     (its photo is warped onto the place's grid, so it still turns like every other photo of the place); then the
+ *     newest processing, then the clearest.
  * Output is sorted newest first.
  */
 export function dedupeCandidates(cands: Candidate[], place: LatLon): Candidate[] {
@@ -279,7 +294,12 @@ export function dedupeCandidates(cands: Candidate[], place: LatLon): Candidate[]
     (a, b) => a.capture.platform.localeCompare(b.capture.platform) || a.capture.datetime - b.capture.datetime,
   )
   const margin = new Map(sorted.map((c) => [c, footprintMarginKm(c.capture.footprint, place)]))
+  const onGrid = (c: Candidate) => sceneOnPlaceGrid(c.epsg, place.lat, place.lon)
+  // The photo's square lies inside the footprint: the place is at least its half-diagonal from the edge.
+  const holdsPhoto = (c: Candidate) => margin.get(c)! >= ((CROP_HALF_KM as Record<string, number>)[c.capture.collection] ?? 5) * Math.SQRT2
   const better = (a: Candidate, b: Candidate) => {
+    const ga = onGrid(a)
+    if (ga !== onGrid(b) && holdsPhoto(ga ? a : b)) return ga
     const dm = margin.get(a)! - margin.get(b)!
     if (Math.abs(dm) > 0.05) return dm > 0
     if (a.processing !== b.processing) return a.processing > b.processing
@@ -363,18 +383,39 @@ export interface CaptureSearchResult {
   degraded: string[]
 }
 
-/** Like `searchCaptures`, but also reports partial failures. Throws only if every archive failed. */
-export async function searchCapturesDetailed(place: LatLon, start: number, end: number, signal?: AbortSignal): Promise<CaptureSearchResult> {
+/**
+ * Like `searchCaptures`, but also reports partial failures. Throws only if every archive failed. `onSentinel2`, when
+ * given, hears Sentinel-2's scenes (one per overflight, newest first) the moment that archive answers, before
+ * Landsat's: a clear Sentinel-2 scene outranks any Landsat one for the lead photo, so its crop can start then.
+ */
+export async function searchCapturesDetailed(
+  place: LatLon,
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+  onSentinel2?: (captures: Capture[]) => void,
+): Promise<CaptureSearchResult> {
   throwIfAborted(signal)
   if (!(end > start) || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) return { captures: [], degraded: [] }
   const degraded: string[] = []
+  const early = (cands: Candidate[]) => {
+    if (!onSentinel2 || !cands.length || signal?.aborted) return
+    try {
+      onSentinel2(dedupeCandidates(cands, place).map((c) => c.capture))
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   const s2 = (async () => {
     try {
-      return await searchPcCollection('sentinel-2-l2a', place, start, end, signal)
+      const found = await searchPcCollection('sentinel-2-l2a', place, start, end, signal)
+      early(found)
+      return found
     } catch (err) {
       if (isAbortError(err) || signal?.aborted) throw err
       const es = await searchEarthSearchS2(place, start, end, signal)
+      early(es)
       degraded.push(
         es.some((c) => c.capture.provider === 'earth-search' && !isPcS2ItemId(c.capture.itemId))
           ? 'Sentinel-2 listed via Earth Search; some scenes show a full-scene thumbnail, not a crop.'

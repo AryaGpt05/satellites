@@ -199,8 +199,13 @@ export interface Capture {
   sunElevationDeg?: number
   /** Footprint polygon of the full scene, [lon,lat][] outer ring */
   footprint?: [number, number][]
-  /** Square crop centred on the place, ready to <img src>; size in px is in the URL */
-  cropUrl: (opts: { halfSizeKm: number; px: number }) => string
+  /**
+   * Square crop centred on the place, ready to <img src>; size in px is in the URL. Sentinel-2 / Landsat crops are cut
+   * on the place's UTM grid (api/_lib/toneRender.ts placeGrid: whole native pixels, grid north up, the same grid for
+   * every photo of the place); `geographic` asks for lon/lat instead (the globe's decals, which are mapped onto the
+   * sphere in lon/lat).
+   */
+  cropUrl: (opts: { halfSizeKm: number; px: number; geographic?: boolean }) => string
   /** Full scene quicklook */
   previewUrl?: string
   /** Human link to the item in a browser (STAC browser / PC explorer) */

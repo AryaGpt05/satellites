@@ -4,7 +4,7 @@ import pcLandsat from './__fixtures__/pc-landsat-waterloo.json'
 import esS2 from './__fixtures__/es-s2-waterloo.json'
 import clearS2 from './__fixtures__/pc-clear-sentinel-2-l2a-waterloo.json'
 import clearLs from './__fixtures__/pc-clear-landsat-c2-l2-waterloo.json'
-import { pcCropUrl } from './endpoints'
+import { pcCropUrl } from './pcCrop'
 import {
   dedupeCandidates,
   earthSearchItemToCandidate,
@@ -52,8 +52,8 @@ describe('platforms', () => {
 })
 
 describe('URL builders', () => {
-  it('builds a Sentinel-2 crop as lon/lat bbox with the encoded render (tone.ts)', () => {
-    const url = pcCropUrl('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803', WATERLOO, { halfSizeKm: 3, px: 768 })
+  it('builds a geographic Sentinel-2 crop (the globe’s decal) as lon/lat bbox with the encoded render (tone.ts)', () => {
+    const url = pcCropUrl('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803', WATERLOO, { halfSizeKm: 3, px: 768, geographic: true })
     expect(url).toBe(
       'https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/-80.582077,43.445320,-80.507723,43.499280/768x768.png' +
         '?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803' +
@@ -63,7 +63,7 @@ describe('URL builders', () => {
     )
   })
   it('builds a Landsat crop from the surface-reflectance bands', () => {
-    const url = pcCropUrl('landsat-c2-l2', 'LC09_L2SP_019030_20261022_02_T1', WATERLOO, { halfSizeKm: 3, px: 512 })
+    const url = pcCropUrl('landsat-c2-l2', 'LC09_L2SP_019030_20261022_02_T1', WATERLOO, { halfSizeKm: 3, px: 512, geographic: true })
     const [path, query] = url.split('?')
     expect(path).toBe('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/-80.582077,43.445320,-80.507723,43.499280/512x512.png')
     expect(query).toBe(
@@ -104,7 +104,14 @@ describe('PC item → capture', () => {
     expect(cap.sourceUrl).toBe(
       'https://planetarycomputer.microsoft.com/api/stac/v1/collections/sentinel-2-l2a/items/S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803',
     )
+    // The scene's own CRS (STAC proj:epsg): UTM 17N, the zone of the place, so its photo is its own pixels 1:1.
+    expect(c.epsg).toBe(32617)
     expect(cap.cropUrl({ halfSizeKm: 3, px: 768 })).toBe(pcCropUrl('sentinel-2-l2a', cap.itemId, WATERLOO, { halfSizeKm: 3, px: 768 }))
+    expect(cap.cropUrl({ halfSizeKm: 5, px: 1000 })).toMatch(/\/item\/bbox\/\d+0,\d+0,\d+0,\d+0\/1000x1000\.png\?collection=sentinel-2-l2a&item=S2C_[^&]+&coord_crs=EPSG:32617&dst_crs=EPSG:32617&assets=B04/)
+    expect(cap.cropUrl({ halfSizeKm: 5, px: 1000 })).not.toMatch(/resampling/) // native size: copied 1:1
+    // The globe's decal asks for lon/lat (its patch on the sphere is linear in lon/lat).
+    expect(cap.cropUrl({ halfSizeKm: 40, px: 1024, geographic: true })).toBe(pcCropUrl('sentinel-2-l2a', cap.itemId, WATERLOO, { halfSizeKm: 40, px: 1024, geographic: true }))
+    expect(cap.cropUrl({ halfSizeKm: 40, px: 1024, geographic: true })).toMatch(/\/bbox\/-8\d\.\d{6},4\d\.\d{6},-8\d\.\d{6},4\d\.\d{6}\/1024x1024\.png\?.*&reproject=lanczos$/)
     expect(c.tile).toBe('17TNJ')
     expect(c.processing).toBe('05.13|20261102T164803')
   })
@@ -116,7 +123,20 @@ describe('PC item → capture', () => {
     expect(cap.gsdM).toBe(30)
     expect(cap.sunElevationDeg).toBeCloseTo(30.92594659)
     expect(cap.cloudCoverPct).toBeCloseTo(11.68)
-    expect(cap.cropUrl({ halfSizeKm: 3, px: 256 })).toContain('collection=landsat-c2-l2&item=LC09_L2SP_018030_20261031_02_T1&assets=red')
+    expect(cap.cropUrl({ halfSizeKm: 3, px: 256 })).toContain('collection=landsat-c2-l2&item=LC09_L2SP_018030_20261031_02_T1&coord_crs=EPSG:32617&dst_crs=EPSG:32617&assets=red')
+    // Landsat's pixel corners sit 15 m off the 30 m lattice (proj:transform 455385 / 4898715): so do the place grid's.
+    expect(pcItemToCandidate(lsItems[0], WATERLOO)!.epsg).toBe(32617)
+    expect(cap.cropUrl({ halfSizeKm: 7.5, px: 1000 })).toMatch(/\/bbox\/\d+5,\d+5,\d+5,\d+5\/1000x1000\.png\?.*&resampling=lanczos$/)
+  })
+
+  it('cuts a scene off the place’s grid on that grid all the same (Landsat over Antarctica: EPSG:3031, warped)', () => {
+    const polar = clone(lsItems[0])
+    polar.properties['proj:epsg'] = 3031
+    const c = pcItemToCandidate(polar, WATERLOO)!
+    expect(c.epsg).toBeUndefined()
+    expect(c.capture.cropUrl({ halfSizeKm: 7.5, px: 1000 })).toBe(pcItemToCandidate(lsItems[0], WATERLOO)!.capture.cropUrl({ halfSizeKm: 7.5, px: 1000 }))
+    expect(c.capture.cropUrl({ halfSizeKm: 7.5, px: 1000 })).toContain('coord_crs=EPSG:32617&dst_crs=EPSG:32617&')
+    expect(c.capture.cropUrl({ halfSizeKm: 7.5, px: 1000 })).toContain('&reproject=lanczos')
   })
 
   it('drops Landsat 7', () => {
@@ -147,6 +167,7 @@ describe('Earth Search fallback', () => {
     expect(c.capture.previewUrl).toMatch(/L2A_PVI\.jpg$/)
     expect(c.capture.sunElevationDeg).toBeCloseTo(29.2934520718594)
     expect(c.tile).toBe('17TNJ')
+    expect(c.epsg).toBe(32617)
   })
 
   it('degrades to the thumbnail when no PC id can be derived', () => {
@@ -194,6 +215,30 @@ describe('dedupe', () => {
     const b = pcItemToCandidate(edge, WATERLOO)!
     expect(footprintMarginKm(b.capture.footprint, WATERLOO)).toBeLessThan(footprintMarginKm(a.capture.footprint, WATERLOO))
     expect(dedupeCandidates([b, a], WATERLOO).map((c) => c.capture.itemId)).toEqual([a.capture.itemId])
+  })
+
+  it('keeps the tile on the place’s grid when the whole photo lies in it, else the one the place sits deepest inside', () => {
+    // One datatake over a place near a zone edge: a zone-17 tile (the place's) and a zone-16 tile it sits deeper in.
+    const at = WATERLOO
+    const kx = 111.32 * Math.cos((at.lat * Math.PI) / 180)
+    // A footprint the place sits `km` inside of (its west edge), 100 km out on the other sides.
+    const ring = (km: number): [number, number][] => {
+      const w = at.lon - km / kx
+      const e = at.lon + 100 / kx
+      const s = at.lat - 1
+      const n = at.lat + 1
+      return [[w, s], [e, s], [e, n], [w, n], [w, s]]
+    }
+    const base = pcItemToCandidate(s2Items[2], WATERLOO)!
+    const tile = (id: string, epsg: number, km: number): Candidate => ({ ...base, tile: id, epsg, capture: { ...base.capture, id, itemId: id, footprint: ring(km) } })
+    const pick = (cs: Candidate[]) => dedupeCandidates(cs, at).map((c) => c.capture.itemId)
+    // 9 km in: the 10 km photo's square (half-diagonal 7.1 km) is inside the zone-17 tile: it wins, copied 1:1.
+    expect(pick([tile('z16', 32616, 60), tile('z17', 32617, 9)])).toEqual(['z17'])
+    expect(pick([tile('z17', 32617, 9), tile('z16', 32616, 60)])).toEqual(['z17'])
+    // 5 km in: the photo would run off the zone-17 tile; the deeper zone-16 tile wins (warped onto zone 17's grid).
+    expect(pick([tile('z16', 32616, 60), tile('z17', 32617, 5)])).toEqual(['z16'])
+    // Both on the place's grid: the deeper one, as before.
+    expect(pick([tile('a', 32617, 9), tile('b', 32617, 30)])).toEqual(['b'])
   })
 
   it('merges adjacent Landsat rows of the same overflight but not different satellites', () => {
@@ -253,6 +298,29 @@ describe('search', () => {
     expect(providers).toEqual(new Set(['earth-search', 'planetary-computer']))
     expect(r.captures.filter((c) => c.collection === 'sentinel-2-l2a')).toHaveLength(esItems.length)
     expect(r.degraded.join(' ')).toMatch(/Earth Search/)
+  })
+
+  it('hands Sentinel-2’s scenes over the moment that archive answers, before Landsat’s (the lead photo’s crop starts then)', async () => {
+    let releaseLandsat!: () => void
+    const landsatHeld = new Promise<void>((r) => (releaseLandsat = r))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body))
+        if (body.collections[0] === 'landsat-c2-l2') await landsatHeld
+        return Response.json({ features: body.collections[0] === 'landsat-c2-l2' ? lsItems : s2Items, links: [] })
+      }),
+    )
+    const early: string[][] = []
+    const done = searchCapturesDetailed(WATERLOO, Date.parse('2026-10-01T00:00:00Z'), Date.parse('2026-11-08T00:00:00Z'), undefined, (caps) =>
+      early.push(caps.map((c) => c.collection)),
+    )
+    await vi.waitFor(() => expect(early).toHaveLength(1))
+    expect(new Set(early[0])).toEqual(new Set(['sentinel-2-l2a']))
+    releaseLandsat()
+    const r = await done
+    expect(early).toHaveLength(1)
+    expect(r.captures.some((c) => c.collection === 'landsat-c2-l2')).toBe(true)
   })
 
   it('throws only when every archive fails; aborts propagate', async () => {

@@ -117,9 +117,9 @@ describe('share card spec', () => {
     if (spec.plate.kind === 'image') {
       expect(spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
       expect(spec.plate.chip.segs[0].text).toBe('Sentinel-2C · MSI · 10 m')
-      expect(spec.plate.imageUrl).toMatch(/\/630x630\.jpg\?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101/)
-      // The plate is cut from the pass view's 1024 px crop (R2SH1).
-      expect(spec.plate.source?.url).toMatch(/\/1024x1024\.jpg\?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101/)
+      expect(spec.plate.imageUrl).toMatch(/\/630x630\.jpg\?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101[^&]+&coord_crs=EPSG:32617&/)
+      // The plate is cut from the pass view's 1000 px crop (R2SH1), on the place's UTM grid.
+      expect(spec.plate.source?.url).toMatch(/\/1000x1000\.jpg\?collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101[^&]+&coord_crs=EPSG:32617&/)
       expect(spec.plate.clouded).toBeUndefined()
     }
     // 81 % of the scene: mostly cloud, never "only cloud" (R2SH3).

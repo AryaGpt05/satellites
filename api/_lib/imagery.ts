@@ -8,7 +8,7 @@
  */
 import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js'
 import type { ShareCapture } from './share.js'
-import { boxAround, maskFromResponse, pcCropUrlFor, toneCrop, tonePlanForUrl, type ToneMask } from './tone.js'
+import { maskFromResponse, pcCropUrlAt, toneCrop, tonePlanForUrl, type ToneMask } from './tone.js'
 
 const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
 const EARTH_RADIUS_KM = 6371
@@ -52,6 +52,8 @@ export function isPcS2ItemId(id: string): boolean {
   return /^S2[A-Z]_MSIL2A_\d{8}T\d{6}_R\d{3}_T\d{2}[A-Z]{3}_\d{8}T\d{6}$/.test(id)
 }
 
+const LANDSAT_ID_RE = /^L[COTE]0\d_L2S[PR]_\d{6}_\d{8}_\d{2}_[A-Z0-9]{2}$/
+
 export interface CropPlan {
   url: string
   /** Half the side of the square on the ground, km */
@@ -63,23 +65,25 @@ export interface CropPlan {
 }
 
 /**
- * Plan the crop for a capture at a place, sized so one output pixel is about one native pixel
- * (10 m for Sentinel-2 → a 6.3 km square at 630 px). Null if the capture can't be cropped.
+ * Plan the crop for a capture at a place, sized as the card's crop (cardSpec cardCrop): one output pixel is one
+ * native pixel for Sentinel-2 (a 6.3 km square at 630 px), 15 m for Landsat (an exact 2× of its 30 m). On the
+ * place's UTM grid (toneRender placeGrid, from the place alone: nothing to look up): the same URL the app builds for
+ * the card (src/ui/share/card.ts cropUrlFor), whose pixels are the app photo's own. Null if the capture can't be
+ * cropped.
  */
 export function cropPlan(capture: ShareCapture, lat: number, lon: number, px: number): CropPlan | null {
   const gsd = NATIVE_GSD_M[capture.collection] ?? capture.gsdM ?? 10
-  // Landsat's 30 m is soft at 1:1 on a phone; render at 20 m/px so the card still reads as detail.
-  const metresPerPx = capture.collection === 'landsat-c2-l2' ? 20 : gsd
+  // Landsat's 30 m is soft at 1:1 on a phone; render at 15 m/px (an exact 2×) so the card still reads as detail.
+  const metresPerPx = capture.collection === 'landsat-c2-l2' ? 15 : gsd
   const halfSizeKm = Math.max(2, (metresPerPx * px) / 2000)
   const [w, s, e, n] = bboxAround(lat, lon, halfSizeKm)
-  const c = (v: number) => v.toFixed(6)
 
   if (capture.collection === 'sentinel-2-l2a' || capture.collection === 'landsat-c2-l2') {
     if (capture.collection === 'sentinel-2-l2a' && !isPcS2ItemId(capture.itemId)) return null
-    if (capture.collection === 'landsat-c2-l2' && !/^L[COTE]0\d_L2S[PR]_\d{6}_\d{8}_\d{2}_[A-Z0-9]{2}$/.test(capture.itemId)) return null
+    if (capture.collection === 'landsat-c2-l2' && !LANDSAT_ID_RE.test(capture.itemId)) return null
     return {
       // JPEG: the app's photos are JPEG renders too (and it is ~1/7 of the PNG); toned by fetchCropDataUri.
-      url: pcCropUrlFor(capture.collection, capture.itemId, boxAround(lat, lon, halfSizeKm), px, 'jpg'),
+      url: pcCropUrlAt(capture.collection, capture.itemId, lat, lon, halfSizeKm, px, 'jpg'),
       halfSizeKm,
       metresPerPx,
       source: capture.collection === 'sentinel-2-l2a' ? 'SENTINEL-2 L2A' : 'LANDSAT C2 L2',
@@ -147,9 +151,9 @@ export interface CropPicture {
 
 /**
  * A card plate's picture as a data URI satori can embed. Sentinel-2 / Landsat crops are toned as the app tones its
- * photos (./tone.ts: the shared mask, the curve measured over this very square), without the unsharp mask (see
- * below), then sent as a high-quality JPEG; anything else is embedded as fetched. Null on timeout, HTTP error, a
- * non-image answer or a suspiciously tiny body (PC returns a ~100-byte image for "no data").
+ * photos (./tone.ts: the shared mask, the curve measured over this very square, the same unsharp mask on a crop on
+ * the place's grid: see below), then sent as a high-quality JPEG; anything else is embedded as fetched. Null on
+ * timeout, HTTP error, a non-image answer or a suspiciously tiny body (PC returns a ~100-byte image for "no data").
  */
 export async function fetchCropPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
   const plan = tonePlanForUrl(url)
@@ -170,9 +174,11 @@ export async function fetchCropPicture(url: string, timeoutMs: number): Promise<
   }
   try {
     const raw = decodeJpeg(img, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256 })
-    // No unsharp mask here: this crop IS the card's plate at its own size, already crisper than the app's plate (cut
-    // from its larger photo and resampled by the browser); sharpening it too made the shared card visibly harder.
-    toneCrop(raw.data, raw.width, raw.height, plan, mask, undefined, { sharpen: 0 })
+    // On the place's grid the app's card is 630 of its photo's own pixels, sharpened as the photo is (an unsharp mask
+    // of ~0.6 native px): this crop is the same pixels at the same scale, so it gets the same sharpening, or the
+    // shared card is visibly softer than the in-app one (measured, Berlin: Laplacian 48 vs the app's 60; sharpened 60).
+    // A lon/lat plate (beyond UTM's latitudes) stays unsharpened: the app resamples its cut from a larger photo there.
+    toneCrop(raw.data, raw.width, raw.height, plan, mask, undefined, { sharpen: plan.crs === 4326 ? 0 : 1 })
     const out = encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 95)
     return { dataUri: `data:image/jpeg;base64,${Buffer.from(out.data).toString('base64')}`, complete: mask !== null }
   } catch {

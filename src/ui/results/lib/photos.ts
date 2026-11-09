@@ -22,6 +22,7 @@
 import type { Capture, Pass, Report, SpotCloud } from '@/types'
 import { pickLead, SPOT_RANK as CLARITY_SPOT_RANK, type Ranked } from '@/lib/clarity'
 import { isClouded } from './bestLook'
+import { northInCropDeg, placeInCrop } from '../../../../api/_lib/toneRender'
 import { captureFor, cropSpec, displayUrl, isDetailed, type CropSpec } from './captures'
 
 export interface Photo {
@@ -138,15 +139,68 @@ export const THUMB_PX = 112
 export const thumbUrl = (c: Capture) => displayUrl(c, { ...cardSpec(c), px: THUMB_PX })
 
 /**
- * The lightbox's sharper render of the same area (owner B2): 2048 px for Sentinel-2 / Landsat, so zooming in
- * shows real pixels. Weather mosaics and geostationary frames are already at native scale: no second request.
+ * The lightbox's sharper layer: the card's very box on the place's grid (the same native pixels, so it registers over
+ * the card exactly), rendered at HIRES_PX: Sentinel-2's 10 m pixels at 2×, Landsat's 30 m at 4×, resampled on the
+ * grid with Lanczos (no warp for a scene on it), then toned and sharpened by the same pipeline at that scale with the
+ * curve the card was shown with (pixels.ts: a magnified view). It holds no ground detail the card lacks; it spares
+ * the browser's own upscaling of the 1000 px card where the photo is shown larger than that in device pixels (a
+ * phone at 3×, a Retina laptop) or zoomed in (hiResHelps). Only the lightbox asks for it, once per photo (the
+ * gallery and the hero never do). Weather mosaics, geostationary frames and an archive thumbnail (no crop): none.
  */
-export const HIRES_PX = 2048
+export const HIRES_PX = 2000
 export function hiResUrl(c: Capture): string | undefined {
   if (!isDetailed(c)) return undefined
-  return displayUrl(c, { ...cardSpec(c), px: HIRES_PX })
+  const url = displayUrl(c, { ...cardSpec(c), px: HIRES_PX })
+  return url !== cardUrl(c) ? url : undefined
 }
+
+/** Device pixels across the shown photo past which the 1000 px card is magnified on screen (iPhone 15 Pro: 1179). */
+export const HIRES_DEVICE_PX = 1100
+/** Zoom past which the sharper layer is asked for on any screen (once per photo). */
+export const HIRES_ZOOM = 1.3
+/** A zoom this small already means the user is zooming in: the lightbox starts the sharper layer then, ahead of HIRES_ZOOM. */
+export const HIRES_INTENT_ZOOM = 1.05
+
+/**
+ * Whether the lightbox's sharper layer shows more than the card: the photo's side in device pixels already past
+ * HIRES_DEVICE_PX at 1× (a phone at 3×, a Retina laptop; never a 1× laptop, 688–900 px), or a zoom past HIRES_ZOOM.
+ */
+export const hiResHelps = (sideCssPx: number, dpr: number, zoom = 1) => sideCssPx * dpr > HIRES_DEVICE_PX || zoom > HIRES_ZOOM
 
 /** Crop width in km (the card and the lightbox show the same area). */
 export const cropWidthKm = (c: Pick<Capture, 'collection'>) => cardSpec(c).halfSizeKm * 2
 
+/**
+ * A compass bearing (the satellite's heading at closest approach) as drawn on the capture's photo, degrees clockwise
+ * from the photo's up. Sentinel-2 / Landsat photos are cut on the place's UTM grid, whose up is grid north: true
+ * north is turned from it by the meridian convergence (under 3° in a standard 6° zone; up to 5.4° in south-west
+ * Norway's zone 32 and 6.0° in Svalbard's 12°-wide zones, api/_lib/utm.ts), and so is every heading overlaid on the photo.
+ */
+export function photoHeadingDeg(c: Capture, headingDeg: number): number {
+  let url: string
+  try {
+    url = cardUrl(c)
+  } catch {
+    return headingDeg
+  }
+  return headingDeg + northInCropDeg(url)
+}
+
+/**
+ * Where the searched place sits in a capture's photo: offsets from the centre as fractions of the photo's side (x to
+ * the right, y down). A photo on the place's grid is centred on it within half a native pixel (toneRender nativeBox),
+ * up to about one pixel (0.1 % of the side) when the place lies within metres of a 0.01° line; the lightbox, whose
+ * zoom magnifies that, draws its reticle here. Zero for any other photo (centred exactly), or one not around it.
+ */
+export function placeOffset(c: Capture, place: { lat: number; lon: number }): { dx: number; dy: number } {
+  let at: { fx: number; fy: number } | null = null
+  try {
+    at = placeInCrop(cardUrl(c), place.lat, place.lon)
+  } catch {
+    at = null
+  }
+  const dx = at ? at.fx - 0.5 : 0
+  const dy = at ? at.fy - 0.5 : 0
+  // A photo cut around another point (never, today) keeps the reticle at its centre rather than off in the picture.
+  return Math.abs(dx) < 0.005 && Math.abs(dy) < 0.005 ? { dx, dy } : { dx: 0, dy: 0 }
+}

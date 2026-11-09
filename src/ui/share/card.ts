@@ -41,6 +41,7 @@ import {
   type Prim,
   type ScaleBar,
 } from '../../../api/_lib/cardSpec'
+import { cropCrs, gridOfBox, isToneCollection, nativeBox } from '../../../api/_lib/toneRender'
 import { loadPhoto } from '../results/images'
 import { pickBestLook } from '../results/lib/bestLook'
 import { captureFor, cropSpec, displayUrl } from '../results/lib/captures'
@@ -64,7 +65,10 @@ export function weekSatellites(report: Report, meta: MetaFn): number {
   return headline(report, meta).flewOver
 }
 
-/** Crop URL for a capture at the card's scale, centred on an arbitrary point (the rounded share point). */
+/**
+ * Crop URL for a capture at the card's scale, centred on an arbitrary point (the rounded share point): on the
+ * place's grid (the server's card builds the very same URL, api/_lib/imagery.ts cropPlan).
+ */
 export function cropUrlFor(capture: Pick<Capture, 'provider' | 'collection' | 'itemId' | 'cropUrl'>, crop: CardCrop, lat: number, lon: number): string | undefined {
   const opts = { halfSizeKm: crop.halfSizeKm, px: PLATE }
   if (capture.provider === 'planetary-computer' && (capture.collection === 'sentinel-2-l2a' || capture.collection === 'landsat-c2-l2')) {
@@ -84,14 +88,18 @@ export function cropUrlFor(capture: Pick<Capture, 'provider' | 'collection' | 'i
 
 /** Display URLs whose pixels map linearly to a lon/lat box: Planetary Computer bbox crops and GIBS WMS (EPSG:4326). */
 const LINEAR_CROP = /^https:\/\/(planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/|gibs\.earthdata\.nasa\.gov\/wms\/epsg4326\/[^?]*\?.*BBOX=)/
+const PC_BOX = /^https:\/\/planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\//
 
 /**
  * Where the card's square sits inside the picture the pass view decoded (share R2SH1).
  *
- * The pass view shows displayUrl(capture, cropSpec(collection)): a `spec.px` square over
- * bboxAround(exact, spec.halfSizeKm), rendered in plain lon/lat (EPSG:4326), so source pixels are linear
- * in longitude and latitude. The card's crop is bboxAround(rounded, crop.halfSizeKm). Undefined when that
- * box leaves the source on any side, or when the capture has no such crop (an Earth Search thumbnail).
+ * The pass view shows displayUrl(capture, cropSpec(collection)): a `spec.px` square, linear in its own coordinates.
+ * On the place's UTM grid (every Sentinel-2 / Landsat photo below 84° N) that is grid metres: the photo is the box of whole
+ * native pixels around the exact point (toneRender nativeBox) and the card's square the box of whole native pixels
+ * around the rounded point on the same grid, so the card is cut at whole-pixel offsets (Sentinel-2: 630 of the
+ * photo's own 1000 pixels, the very pixels the server's card copies). Otherwise lon/lat (EPSG:4326):
+ * bboxAround(exact, spec.halfSizeKm) and bboxAround(rounded, crop.halfSizeKm). Undefined when the card's box leaves
+ * the source on any side, or when the capture has no such crop (an Earth Search thumbnail).
  */
 export function cardSource(
   capture: Pick<Capture, 'collection' | 'cropUrl'>,
@@ -107,8 +115,18 @@ export function cardSource(
     return undefined
   }
   if (!url || !LINEAR_CROP.test(url)) return undefined
-  const D = bboxAround(exact.lat, exact.lon, spec.halfSizeKm)
-  const Cb = bboxAround(rounded.lat, rounded.lon, crop.halfSizeKm)
+  const crs = cropCrs(url)
+  let D: [number, number, number, number]
+  let Cb: [number, number, number, number]
+  if (crs !== null && crs !== 4326 && isToneCollection(capture.collection)) {
+    const m = PC_BOX.exec(url)!
+    D = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
+    const grid = gridOfBox(capture.collection, crs, D)
+    Cb = nativeBox(grid, rounded.lat, rounded.lon, Math.round((2 * crop.halfSizeKm * 1000) / grid.gsd))
+  } else {
+    D = bboxAround(exact.lat, exact.lon, spec.halfSizeKm)
+    Cb = bboxAround(rounded.lat, rounded.lon, crop.halfSizeKm)
+  }
   const kx = spec.px / (D[2] - D[0])
   const ky = spec.px / (D[3] - D[1])
   const sx = (Cb[0] - D[0]) * kx
@@ -479,7 +497,7 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   ctx.clip()
   if (plate.kind === 'image' && img) {
     const r = pic?.rect
-    ctx.imageSmoothingQuality = 'high' // the cut is downsampled a little (645 → 630 px for Sentinel-2)
+    ctx.imageSmoothingQuality = 'high' // a cut on the place's grid is copied 1:1 (630 of the photo's own pixels); a lon/lat cut is resampled a little
     if (r) ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, PLATE, PLATE)
     else ctx.drawImage(img, 0, 0, PLATE, PLATE)
     if (plate.clouded) {

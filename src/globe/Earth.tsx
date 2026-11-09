@@ -92,6 +92,7 @@ export function Earth({ textures, geometry }: { textures: EarthTextures; geometr
           ...paintUniforms(rt),
           uFreshColor: { value: lin(palette.signal) },
           uPanelHalf: rt.paint.uPanelHalf,
+          uPanelTurn: rt.paint.uPanelTurn,
           uDayLod: rt.paint.uDayLod,
           uPanelColor: { value: lin(palette.bone) },
         },

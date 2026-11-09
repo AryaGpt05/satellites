@@ -10,9 +10,10 @@ import { niceLength } from './card.js'
 import { buildCardSpec, buildSummarySpec } from './cardSpec.js'
 import { esc, jsonForScript, sharePageHtml } from './html.js'
 import { encode as encodeJpeg } from 'jpeg-js'
+import { decode as decodeJpeg } from 'jpeg-js'
 import { bboxAround, cropPlan, fetchCropPicture } from './imagery.js'
 import { maskNpy } from './npyTesting.js'
-import { maskUrl, pcRenderQuery, tonePlanForUrl } from './tone.js'
+import { maskFromResponse, maskUrl, pcRenderQuery, toneCrop, tonePlanForUrl } from './tone.js'
 import { cardInputFromShare, description, headline, shareFromDeepLink, shareFromParams, shareFromRpc, summaryDescription, summaryFromParams, summaryTitle, text } from './share.js'
 
 /** The app's fallback link for the Sentinel-2C pass (src/ui/share/links.ts deepLink with the pass). */
@@ -221,22 +222,76 @@ describe('card spec', () => {
 })
 
 describe('crop plans', () => {
-  it('matches the app’s Planetary Computer recipe for Sentinel-2', () => {
+  it('cuts Sentinel-2 on the place’s grid: 630 of its 10 m pixels, the app photo’s very pixels, no warp', () => {
+    const S2 = 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803'
+    const fetch = vi.spyOn(globalThis, 'fetch')
     const plan = cropPlan(shareFromRpc(ROW)!.capture!, 43.47, -80.54, 630)!
+    expect(fetch).not.toHaveBeenCalled() // the grid follows from the place: nothing to look up
+    fetch.mockRestore()
     expect(plan.metresPerPx).toBe(10)
     expect(plan.halfSizeKm).toBeCloseTo(3.15)
-    expect(plan.url).toMatch(/^https:\/\/planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/-80\.\d{6},43\.\d{6},-80\.\d{6},43\.\d{6}\/630x630\.jpg\?/)
-    expect(plan.url).toContain(`collection=sentinel-2-l2a&item=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&${pcRenderQuery('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803')}`)
-    // The server's crop is the measuring square of the app's photo: same mask, same curve key (tone.ts).
+    const m = /\/item\/bbox\/(\d+),(\d+),(\d+),(\d+)\/630x630\.jpg\?collection=sentinel-2-l2a&item=S2C[^&]+&coord_crs=EPSG:32617&dst_crs=EPSG:32617&/.exec(plan.url)!
+    expect(m).toBeTruthy()
+    const [w, s, e, n] = m.slice(1, 5).map(Number)
+    expect([e - w, n - s, w % 10, n % 10]).toEqual([6300, 6300, 0, 0])
+    expect(plan.url).toContain(`collection=sentinel-2-l2a&item=${S2}&coord_crs=EPSG:32617&dst_crs=EPSG:32617&${pcRenderQuery('sentinel-2-l2a', S2)}`)
+    // reproject=lanczos is a no-op for the tile on this grid (T17TNJ is zone 17): no resampling at native size.
+    expect(plan.url).not.toMatch(/resampling/)
+    // The server's crop IS the measuring square of the app's photo: same mask (lon/lat), same curve key.
     const tone = tonePlanForUrl(plan.url)!
-    expect(tone.maskUrl).toBe(maskUrl('sentinel-2-l2a', 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803', 43.47, -80.54))
-    tone.ref.forEach((v, i) => expect(tone.box[i]).toBeCloseTo(v, 5))
+    expect(tone.crs).toBe(32617)
+    expect(tone.box).toEqual(tone.ref)
+    expect(tone.maskUrl).toBe(maskUrl('sentinel-2-l2a', S2, 43.47, -80.54))
+    expect(tone.key).toBe(`sentinel-2-l2a|${S2}|43.47,-80.54`)
   })
-  it('uses the Landsat render at 20 m per pixel', () => {
-    const plan = cropPlan({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_019030_20261022_02_T1' }, 43.47, -80.54, 630)!
-    expect(plan.metresPerPx).toBe(20)
-    expect(plan.url).toContain('assets=red&assets=green&assets=blue&asset_as_band=true&expression=')
-    expect(plan.url).toContain('reproject=lanczos')
+  it('uses the Landsat render at 15 m per pixel: an exact 2× of 315 pixels of the place’s grid, with no lookup', () => {
+    const ID = 'LC09_L2SP_019030_20261022_02_T1'
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    const plan = cropPlan({ collection: 'landsat-c2-l2', itemId: ID }, 43.47, -80.54, 630)!
+    expect(fetch).not.toHaveBeenCalled()
+    fetch.mockRestore()
+    expect(plan.metresPerPx).toBe(15)
+    expect(plan.halfSizeKm).toBeCloseTo(4.725)
+    expect(plan.url).toContain('&coord_crs=EPSG:32617&dst_crs=EPSG:32617&')
+    const [w, , e] = /\/bbox\/([\d,]+)\//.exec(plan.url)![1].split(',').map(Number)
+    expect([e - w, w % 30]).toEqual([9450, 15])
+    expect(plan.url).toContain(`collection=landsat-c2-l2&item=${ID}&coord_crs=EPSG:32617&dst_crs=EPSG:32617&${pcRenderQuery('landsat-c2-l2', ID)}&resampling=lanczos`)
+  })
+  it('puts every capture of a place on one grid: a scene of the neighbouring zone is warped onto it, Antarctica too', () => {
+    // Stockholm (18.07° E: zone 34). Its Sentinel-2 tile T33VXF and Landsat row 192/019 are delivered in zone 33.
+    const a = cropPlan({ collection: 'sentinel-2-l2a', itemId: 'S2A_MSIL2A_20261105T101121_R022_T34VCL_20261105T145605' }, 59.33, 18.07, 630)!
+    const b = cropPlan({ collection: 'sentinel-2-l2a', itemId: 'S2A_MSIL2A_20261105T101121_R022_T33VXF_20261105T145605' }, 59.33, 18.07, 630)!
+    const c = cropPlan({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SP_192019_20261103_02_T1' }, 59.33, 18.07, 630)!
+    for (const p of [a, b, c]) expect(p.url).toContain('coord_crs=EPSG:32634&dst_crs=EPSG:32634&')
+    expect(/\/bbox\/([^/]+)\//.exec(a.url)![1]).toBe(/\/bbox\/([^/]+)\//.exec(b.url)![1]) // the same ground, pixel for pixel
+    // McMurdo: a polar stereographic Landsat scene, warped onto UTM 58.
+    expect(cropPlan({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SR_055115_20261103_02_T2' }, -77.85, 166.67, 630)!.url).toContain('coord_crs=EPSG:32658&dst_crs=EPSG:32658&')
+    // Beyond UTM's latitudes: the geographic render, warped with Lanczos.
+    const geo = cropPlan({ collection: 'landsat-c2-l2', itemId: 'LC09_L2SR_055117_20261103_02_T2' }, -80.5, 160, 630)!
+    expect(geo.url).toMatch(/\/bbox\/1[56]\d\.\d{6},-80\.\d{6},1[56]\d\.\d{6},-80\.\d{6}\/630x630\.jpg\?collection=landsat-c2-l2&item=[^&]+&assets=red.*&reproject=lanczos$/)
+  })
+  it('sharpens a plate on the place’s grid as the app sharpens its photo, so the shared card is as crisp as the app’s', async () => {
+    const plan = cropPlan({ collection: 'sentinel-2-l2a', itemId: 'S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803' } as never, 43.47, -80.54, 630)!
+    const W = 630
+    const px = new Uint8Array(W * W * 4)
+    for (let i = 0; i < W * W; i++) px.set([60 + ((i * 37) % 90), 55 + ((i * 53) % 80), 40 + ((i * 29) % 60), 255], i * 4)
+    const jpg = Buffer.from(encodeJpeg({ data: px, width: W, height: W }, 90).data)
+    const npy = maskNpy(64, 64, () => 4)
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => (u.includes('.npy?') ? new Response(npy) : new Response(jpg, { headers: { 'content-type': 'image/jpeg' } }))))
+    try {
+      const pic = (await fetchCropPicture(plan.url, 5_000))!
+      const tone = tonePlanForUrl(plan.url)!
+      const mask = maskFromResponse(tone.maskUrl, npy)
+      const as = (sharpen: number) => {
+        const raw = decodeJpeg(jpg, { useTArray: true, formatAsRGBA: true })
+        toneCrop(raw.data, raw.width, raw.height, tone, mask, undefined, { sharpen })
+        return `data:image/jpeg;base64,${Buffer.from(encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 95).data).toString('base64')}`
+      }
+      expect(pic.dataUri).toBe(as(1)) // the app's photo: the unsharp mask of ~0.6 native px
+      expect(pic.dataUri).not.toBe(as(0))
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
   it('refuses Earth Search ids (no server-side cropper)', () => {
     expect(cropPlan({ collection: 'sentinel-2-l2a', itemId: 'S2C_T17TNJ_20261101T161421_L2A' }, 43.47, -80.54, 630)).toBeNull()

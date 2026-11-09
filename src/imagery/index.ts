@@ -29,7 +29,8 @@ export type { LocateErrorCode } from './geocode'
 export { preloadImage, isImageCached, probeImage, decodeImagePixels, EmptyImageError, tonedImageBlob } from './image'
 export type { ImageProbe } from './image'
 
-export { pcCropUrl, gibsWmsUrl, gibsDomainsUrl, worldviewUrl, pcItemMapUrl, isTonedUrl } from './endpoints'
+export { gibsWmsUrl, gibsDomainsUrl, worldviewUrl, pcItemMapUrl } from './endpoints'
+export { pcCropUrl, isTonedUrl } from './pcCrop'
 export type { CropOpts } from './endpoints'
 
 export { fetchJson, withRetry, HttpError, TimeoutError, isAbortError } from './net'

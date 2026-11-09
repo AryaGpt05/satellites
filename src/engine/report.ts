@@ -110,8 +110,9 @@ export interface ReportOptions {
    */
   onUpdate?: (r: EngineReport) => void
   /**
-   * Called once, as soon as the Sentinel-2/Landsat search answers (long before the partial report), with
-   * its scenes: lets the UI start downloading the picture it will most likely lead with.
+   * Called as soon as the Sentinel-2/Landsat search answers (long before the partial report), with its scenes:
+   * lets the UI start downloading the picture it will most likely lead with. Called first with Sentinel-2's scenes
+   * alone the moment that archive answers (a clear one leads whatever Landsat has), then once with them all.
    */
   onArchive?: (captures: Capture[]) => void
   /**
@@ -309,7 +310,8 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   let archiveMs = 0
   let archiveDone = false
   let archiveFailed = false
-  const archive = withTimeout((s) => searchCapturesDetailed(latLon, windowStart, windowEnd, s), ARCHIVE_TIMEOUT_MS, signal)
+  const onSentinel2 = opts.onArchive ? (caps: Capture[]) => !signal?.aborted && safely(opts.onArchive, caps) : undefined
+  const archive = withTimeout((s) => searchCapturesDetailed(latLon, windowStart, windowEnd, s, onSentinel2), ARCHIVE_TIMEOUT_MS, signal)
     .then((r) => {
       notes.push(...r.degraded)
       return r.captures

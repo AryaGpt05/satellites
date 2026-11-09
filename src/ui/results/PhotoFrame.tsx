@@ -19,7 +19,8 @@ import { Img } from './Img'
 import { Mark } from './Mark'
 import { PushbroomReveal } from './PushbroomReveal'
 import { Reticle } from './Reticle'
-import { cropWidthKm, cardUrl, cardSpec, type Photo } from './lib/photos'
+import { cropWidthKm, cardUrl, cardSpec, photoHeadingDeg, type Photo } from './lib/photos'
+import { northInCropDeg } from '../../../api/_lib/toneRender'
 import { scaleBarKm, sensorName } from './lib/captures'
 import { int } from './lib/copy'
 import { motionVector } from './lib/pushbroom'
@@ -99,7 +100,7 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
       onCapture: () => {
         if (mode === 'reveal' && (revealing.current || !wasSeen(seenKey))) return
         if (img !== 'ready' && mode === 'img') return
-        playEcho(frameRef.current, echoRef.current, pass?.headingDeg ?? 180)
+        playEcho(frameRef.current, echoRef.current, photoHeadingDeg(capture, pass?.headingDeg ?? 180))
       },
     },
     !!echo && !reduced && current,
@@ -107,6 +108,7 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
 
   const widthKm = cropWidthKm(capture)
   const bar = scaleBarKm(widthKm)
+  const northDeg = chips ? northInCropDeg(url) : 0
   const dim = photo.clouded ? ((capture.cloudCoverPct ?? 0) >= 90 ? s.dimOvercast : s.dimCloud) : undefined
   const alt = `${model.meta(pass?.norad ?? capture.norad ?? 0).name} image of ${model.report.place.label}. The place is at the centre.`
   const expand = () => frameRef.current && onExpand?.(frameRef.current)
@@ -122,7 +124,7 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
         <PushbroomReveal
           src={url}
           view={view}
-          headingDeg={pass.headingDeg}
+          headingDeg={photoHeadingDeg(capture, pass.headingDeg)}
           lines={cardSpec(capture).px}
           alt={alt}
           startAt={reveal === 'hero' ? 'hero' : 'capture'}
@@ -181,7 +183,8 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
             <span className={s.scaleText}>{bar >= 1 ? int(bar) : bar} km</span>
           </span>
           <span className={cx(s.chip, s.br)}>
-            <svg width="8" height="10" viewBox="0 0 8 10">
+            {/* True north, turned from the photo's up (grid north on a native crop) by the meridian convergence. */}
+            <svg width="8" height="10" viewBox="0 0 8 10" style={northDeg ? { transform: `rotate(${northDeg.toFixed(1)}deg)` } : undefined}>
               <path d="M4 0.5 7.5 9.5 4 7.2 0.5 9.5Z" fill="currentColor" />
             </svg>
             N

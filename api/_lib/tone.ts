@@ -7,8 +7,10 @@
  * the functions share both.
  *
  * 1. The render Planetary Computer makes (`pcRenderQuery`): the surface-reflectance bands (S2 B04/B03/B02,
- *    Landsat red/green/blue), warped to lon/lat with Lanczos (`reproject=lanczos`: the default nearest warp
- *    leaves 10 m / 30 m stair-steps; `resampling=` is ignored by bbox crops), and sent as the SQUARE ROOT of
+ *    Landsat red/green/blue), cut on the place's UTM grid at whole native pixels (a scene on that grid: no warp,
+ *    the archive's own pixels; toneRender.ts placeGrid / nativeBox), any other scene, the globe's decals and places
+ *    beyond UTM warped with Lanczos (`reproject=lanczos`: the default nearest warp leaves 10 m / 30 m stair-steps),
+ *    and sent as the SQUARE ROOT of
  *    reflectance over [0, ENC_TOP_REFL]. The root spreads PC's 8 bits over the shadows, where low-sun scenes
  *    live, so our own curve never stretches a handful of dark levels into bands. Baseline-aware: Sentinel-2
  *    products from processing baseline 04.00 on carry a +1000 offset that PC does not remove.
@@ -28,10 +30,12 @@
  * 3. The curve is measured over ONE region every renderer can derive: the share card's square around the
  *    place rounded to 0.01° (the server only knows the rounded point). The cloud mask comes from one small
  *    request every renderer builds the same way (`maskUrl`, a 64 px npy of SCL / QA_PIXEL around the rounded
- *    point), which also answers the spot check and the clear fraction for the ranking (src/imagery/cloud.ts).
+ *    point, in lon/lat whatever the crop's geometry: toMaskCrs), which also answers the spot check and the clear
+ *    fraction for the ranking (src/imagery/cloud.ts).
  */
 
 import { ENC_TOP_REFL, NATIVE_GSD_M, isToneCollection, type Box, type ToneCollection, type TonePlan } from './toneRender.js'
+import { utmInverse } from './utm.js'
 
 export * from './toneRender.js'
 
@@ -96,6 +100,7 @@ export type Cell = (typeof Cell)[keyof typeof Cell]
 
 export interface ToneMask {
   collection: ToneCollection
+  /** The mask's square, lon/lat degrees (always: toneRender maskUrl; crops on a UTM grid read it through toMaskCrs) */
   box: Box
   w: number
   h: number
@@ -146,19 +151,79 @@ export function maskFromNpy(collection: ToneCollection, box: Box, npy: Npy): Ton
 
 const MASK_URL_RE = /\/item\/bbox\/(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\/\d+x\d+\.npy\?(.*)$/
 
-/** The mask grid from a `maskUrl` and its npy body (the URL says the collection and the square). */
+/** The mask grid from a `maskUrl` and its npy body (the URL says the collection and the square, in lon/lat). */
 export function maskFromResponse(url: string, body: ArrayBuffer | Uint8Array): ToneMask {
   const m = MASK_URL_RE.exec(url)
-  const collection = m ? (new URLSearchParams(m[5]).get('collection') ?? '') : ''
-  if (!m || !isToneCollection(collection)) throw new Error('not a mask URL')
+  const q = m ? new URLSearchParams(m[5]) : null
+  const collection = q?.get('collection') ?? ''
+  // maskUrl never asks for a grid (coord_crs / dst_crs): a box in metres is not one of ours.
+  if (!m || !q || !isToneCollection(collection) || q.has('coord_crs') || q.has('dst_crs')) throw new Error('not a mask URL')
   return maskFromNpy(collection, [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])], parseNpy(body))
 }
 
-/** Mask cell under a lon/lat, or −1 off the grid. */
-export function maskCellAt(m: ToneMask, lon: number, lat: number): number {
-  const x = Math.floor(((lon - m.box[0]) / (m.box[2] - m.box[0])) * m.w)
-  const y = Math.floor(((m.box[3] - lat) / (m.box[3] - m.box[1])) * m.h)
-  return x >= 0 && y >= 0 && x < m.w && y < m.h ? y * m.w + x : -1
+/** Mask cell under a lon/lat (`x` = lon, `y` = lat, on the mask's side of the antimeridian), or −1 off the grid. */
+export function maskCellAt(m: ToneMask, x: number, y: number): number {
+  const i = Math.floor(((x - m.box[0]) / (m.box[2] - m.box[0])) * m.w)
+  const j = Math.floor(((m.box[3] - y) / (m.box[3] - m.box[1])) * m.h)
+  return i >= 0 && j >= 0 && i < m.w && j < m.h ? j * m.w + i : -1
+}
+
+/**
+ * A lat/lon as the mask's [lon, lat], the longitude taken on the mask's side of the antimeridian (a box near ±180°
+ * runs past it).
+ */
+export function maskPoint(m: Pick<ToneMask, 'box'>, lat: number, lon: number): [number, number] {
+  const c = (m.box[0] + m.box[2]) / 2
+  return [lon + 360 * Math.round((c - lon) / 360), lat]
+}
+
+/** Mask cell under a lat/lon (either side of the antimeridian), or −1 off the grid. */
+export function maskCellAtLatLon(m: ToneMask, lat: number, lon: number): number {
+  const [x, y] = maskPoint(m, lat, lon)
+  return maskCellAt(m, x, y)
+}
+
+/** Lattice cells per side over which toMaskCrs interpolates (81 exact projections a crop). */
+const MAP_CELLS = 8
+
+/**
+ * A point of a crop in `crs` → the same ground point in the (lon/lat) mask, or null for a lon/lat crop (the mask's
+ * own geometry). A crop on a UTM grid reads the mask through lat/lon: projected exactly on an 8 × 8 lattice over the
+ * crop and bilinearly within its cells (≤ 0.2 m off over a 15 km crop, against 156 m mask cells; a projection per
+ * sample would cost ~0.3 s a photo).
+ */
+export function toMaskCrs(m: ToneMask, crs: number, box: Box): ((x: number, y: number) => [number, number]) | null {
+  if (crs === 4326) return null
+  const exact = (x: number, y: number): [number, number] => {
+    const [lat, lon] = utmInverse(crs, x, y)
+    return maskPoint(m, lat, lon)
+  }
+  const N = MAP_CELLS
+  const [w, s, e, n] = box
+  const cw = (e - w) / N
+  const ch = (n - s) / N
+  const lx = new Float64Array((N + 1) * (N + 1))
+  const ly = new Float64Array((N + 1) * (N + 1))
+  for (let j = 0; j <= N; j++)
+    for (let i = 0; i <= N; i++) {
+      const [px, py] = exact(w + i * cw, s + j * ch)
+      lx[j * (N + 1) + i] = px
+      ly[j * (N + 1) + i] = py
+    }
+  return (x, y) => {
+    const fx = (x - w) / cw
+    const fy = (y - s) / ch
+    const i = Math.min(N - 1, Math.max(0, Math.floor(fx)))
+    const j = Math.min(N - 1, Math.max(0, Math.floor(fy)))
+    const u = fx - i
+    const v = fy - j
+    const k = j * (N + 1) + i
+    const a = (1 - u) * (1 - v)
+    const b = u * (1 - v)
+    const c = (1 - u) * v
+    const d = u * v
+    return [a * lx[k] + b * lx[k + 1] + c * lx[k + N + 1] + d * lx[k + N + 2], a * ly[k] + b * ly[k + 1] + c * ly[k + N + 1] + d * ly[k + N + 2]]
+  }
 }
 
 /**
@@ -336,6 +401,7 @@ export function measureTone(
   mask?: ToneMask | null,
   stats?: Partial<ToneStats>,
   spanGain = 1,
+  crs = 4326,
 ): ToneParams {
   const sx = width / (box[2] - box[0])
   const sy = height / (box[3] - box[1])
@@ -372,6 +438,7 @@ export function measureTone(
   const dLon = (box[2] - box[0]) / width
   const dLat = (box[3] - box[1]) / height
   const near = mask ? cloudNear(mask) : null
+  const toMask = mask ? toMaskCrs(mask, crs, box) : null
   for (let y = y0; y < y1; y += step) {
     const lat = box[3] - (y + 0.5) * dLat
     for (let x = x0; x < x1; x += step) {
@@ -387,7 +454,8 @@ export function measureTone(
       // Bit 0: every pixel; bit 1: clear ground; bit 2: ground but for cirrus.
       let in3 = 0b111
       if (mask && near) {
-        const c = maskCellAt(mask, box[0] + (x + 0.5) * dLon, lat)
+        const px = box[0] + (x + 0.5) * dLon
+        const c = toMask ? maskCellAt(mask, ...toMask(px, lat)) : maskCellAt(mask, px, lat)
         if (c >= 0) {
           if (near[c] & NEAR_CLOUD || mask.cls[c] === Cell.Shadow) in3 = 0b001
           else if (near[c] & NEAR_CIRRUS) in3 = 0b101
@@ -822,7 +890,7 @@ function* toneCropSteps(
   known: ToneParams | undefined,
   opts: ToneCropOptions,
 ): Generator<void, ToneParams> {
-  const params = known ?? measureTone(rgba, width, height, plan.box, plan.ref, mask, undefined, coarseSpanGain(plan.collection, plan.metresPerPx))
+  const params = known ?? measureTone(rgba, width, height, plan.box, plan.ref, mask, undefined, coarseSpanGain(plan.collection, plan.metresPerPx), plan.crs)
   yield
   yield* toneSteps(rgba, width, height, params, (opts.sharpen ?? 1) * sharpenSigma(plan.collection, plan.metresPerPx), plan.jpeg)
   return params
