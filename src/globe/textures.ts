@@ -55,6 +55,7 @@ import {
 import { latLonToWorld, sunDirectionWorld } from '@/lib/geo'
 import { useApp } from '@/state/store'
 import { kmPerTexel, type TextureLevel } from './framing'
+import { glx } from './debugGl'
 import { detectMobile, provisionalTier, type QualityTier } from './quality'
 import { FRAME, type GlobeRuntime } from './runtime'
 
@@ -743,7 +744,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       return tex
     }
 
-    const plan = upgradePlan(tier)
+    const plan = glx('noupgrade') ? [] : upgradePlan(tier)
     const critical = criticalSteps(plan, DEEP_DARK)
     /** store.dayMapSharp: once per page, when the maps the first regional view needs are sharper than the boot level. */
     const markSharp = () => {
@@ -756,7 +757,7 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
     }
 
     const upgrade = async () => {
-      const bitmaps = bitmapsSupported()
+      const bitmaps = bitmapsSupported() && !glx('whole')
       dropUnplanned(plan)
       for (const batch of planBatches(plan)) {
         if (ctl.signal.aborted || !current) return

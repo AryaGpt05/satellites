@@ -9,22 +9,28 @@
  *  - textures fail → an ink graticule sphere (see Earth.tsx); catalog fails → the scene runs without points.
  */
 import { Canvas } from '@react-three/fiber'
-import { Component, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Color } from 'three'
 import { STACKED_QUERY } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import { useMediaQuery } from '@/ui/system/media'
 import { palette } from '@/ui/system/palette'
+import { GL_DEBUG, glFixedDpr, glProbe } from './debugGl'
 import { GlobeOverlay } from './GlobeOverlay'
 import { detectMobile, dprLevels, prefersReducedMotion, provisionalTier } from './quality'
 import { createRuntime } from './runtime'
 import { GlobeScene } from './Scene'
 import s from './GlobeCanvas.module.css'
 
+/** The `?debug=gl` panel: its own chunk, never fetched outside debug mode. */
+const DebugGl = lazy(() => import('./DebugGl'))
+
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ')
 
 /** Starting DPR: phones 1.5 (they earn 2.0 by holding 58 fps), desktops min(2, device); never above 2 (G-M2). */
 function initialDpr(mobile: boolean): number {
+  const fixed = glFixedDpr()
+  if (fixed) return fixed
   return dprLevels(mobile, typeof window === 'undefined' ? 1 : window.devicePixelRatio).start
 }
 
@@ -93,13 +99,22 @@ export function GlobeCanvas({ className }: { className?: string }) {
               ;(camera as typeof camera & { manual?: boolean }).manual = true
               gl.setClearColor(new Color(palette.ink0), 1)
               // Program info-log round trips on every link are a development aid, not a production cost.
-              gl.debug.checkShaderErrors = import.meta.env.DEV
+              gl.debug.checkShaderErrors = import.meta.env.DEV || GL_DEBUG
+              if (GL_DEBUG) {
+                gl.domElement.addEventListener('webglcontextlost', () => glProbe.contextLost++)
+                gl.domElement.addEventListener('webglcontextrestored', () => glProbe.contextRestored++)
+              }
             }}
             aria-hidden
           >
             <GlobeScene runtime={runtime} />
           </Canvas>
           <GlobeOverlay runtime={runtime} />
+          {GL_DEBUG && (
+            <Suspense fallback={null}>
+              <DebugGl />
+            </Suspense>
+          )}
         </SceneBoundary>
       )}
     </div>
