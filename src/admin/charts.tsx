@@ -215,7 +215,7 @@ export function WorldMap({ cells }: { cells: Ranked | undefined }) {
 export function Split({ rows, names, total: whole }: { rows: Ranked | undefined; names?: Record<string, string>; total?: number }) {
   const list = (rows ?? []).filter(([v]) => v)
   const total = Math.max(whole ?? 0, list.reduce((a, r) => a + r[1], 0))
-  if (!total) return <p className="a-empty">Nothing yet</p>
+  if (!list.length || !total) return <p className="a-empty">Nothing yet</p>
   return (
     <div className="a-split">
       <div className="a-split-bar" aria-hidden>

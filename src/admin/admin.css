@@ -754,3 +754,13 @@ a {
   letter-spacing: 0.2em;
   font-variant-numeric: tabular-nums;
 }
+.a-warn {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--warn);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-meta);
+  letter-spacing: 0.04em;
+  color: var(--warn);
+}

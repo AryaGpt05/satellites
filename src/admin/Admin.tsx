@@ -7,11 +7,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Wordmark } from '@/ui/system/Wordmark'
 import { RANGES, currentSession, fetchStats, sendMagicLink, signOut, supabase, takeAuthError, verifyCode, type AdminStats, type Range } from './api'
 import { ActivityChart, Funnel, RankList, Split, WorldMap } from './charts'
-import { ACTION_NAMES, DEVICE_NAMES, SOURCE_NAMES, VERDICT_NAMES, countryName, fmtAgo, fmtInt, fmtPct, fmtSec, fmtStamp } from './format'
+import { ACTION_NAMES, DEVICE_NAMES, SOURCE_NAMES, VERDICT_NAMES, countryName, fmtAgo, fmtInt, fmtPct, fmtSec, fmtStamp, maintBehind } from './format'
 
 type View =
   | { kind: 'loading' }
-  | { kind: 'signed-out'; sent?: string; error?: string }
+  | { kind: 'signed-out'; sent?: string; error?: string; email?: string }
   | { kind: 'denied'; email?: string; message: string }
   | { kind: 'ready'; email?: string; mock?: boolean }
 
@@ -91,7 +91,17 @@ export function Admin() {
   }, [view.kind, range, load])
 
   if (view.kind === 'loading') return <Shell />
-  if (view.kind === 'signed-out') return <SignIn sent={view.sent} error={view.error} onSent={(email) => setView({ kind: 'signed-out', sent: email })} />
+  if (view.kind === 'signed-out')
+    return (
+      <SignIn
+        key={view.sent ?? 'form'}
+        sent={view.sent}
+        error={view.error}
+        initialEmail={view.email}
+        onSent={(email) => setView({ kind: 'signed-out', sent: email })}
+        onReset={() => setView({ kind: 'signed-out', email: view.sent })}
+      />
+    )
   if (view.kind === 'denied')
     return (
       <Shell>
@@ -170,8 +180,14 @@ function RangePicker({ value, onChange }: { value: Range; onChange: (r: Range) =
   )
 }
 
-function SignIn({ sent, error, onSent }: { sent?: string; error?: string; onSent: (email: string) => void }) {
-  const [email, setEmail] = useState('')
+/**
+ * Off: the project sends mail with Supabase's default provider, whose templates can't carry a {{ .Token }} code.
+ * Turn on (and add the code to the Magic Link + Confirm signup templates) once a custom SMTP sender is set up.
+ */
+const CODE_SIGN_IN = false
+
+function SignIn({ sent, error, initialEmail, onSent, onReset }: { sent?: string; error?: string; initialEmail?: string; onSent: (email: string) => void; onReset: () => void }) {
+  const [email, setEmail] = useState(initialEmail ?? '')
   const [code, setCode] = useState('')
   const [pending, setPending] = useState(false)
   const [msg, setMsg] = useState<string | null>(error ?? null)
@@ -199,20 +215,27 @@ function SignIn({ sent, error, onSent }: { sent?: string; error?: string; onSent
       <section className="a-gate">
         <p className="a-label">SIGN IN</p>
         {sent ? (
-          <form onSubmit={submitCode} className="a-form">
+          <div className="a-form">
             <h1 className="a-gate-h">Check your inbox.</h1>
             <p className="a-gate-p">
-              A sign-in email is on its way to <span className="a-mono">{sent}</span>. Open its link on this device, or, if the email shows a code, type it here.
+              A sign-in link is on its way to <span className="a-mono">{sent}</span>. Tap it on this device and it brings you back here, signed in.
             </p>
-            <label className="a-label" htmlFor="a-code">
-              CODE
-            </label>
-            <input id="a-code" className="a-input a-input-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="12345678" />
-            <button type="submit" className="a-btn a-btn-primary" disabled={pending}>
-              {pending ? 'Checking…' : 'Sign in'}
-            </button>
+            {CODE_SIGN_IN && (
+              <form onSubmit={submitCode} className="a-form">
+                <label className="a-label" htmlFor="a-code">
+                  CODE
+                </label>
+                <input id="a-code" className="a-input a-input-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
+                <button type="submit" className="a-btn a-btn-primary" disabled={pending}>
+                  {pending ? 'Checking…' : 'Sign in'}
+                </button>
+              </form>
+            )}
             {msg && <p className="a-error">{msg}</p>}
-          </form>
+            <button type="button" className="a-btn" onClick={onReset}>
+              Send a new link
+            </button>
+          </div>
         ) : (
           <form onSubmit={submit} className="a-form">
             <h1 className="a-gate-h">Stats are for the owner.</h1>
@@ -288,6 +311,13 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
 
   return (
     <div className={busy ? 'a-dash a-busy' : 'a-dash'}>
+      {maintBehind(s) && (
+        <p className="a-warn">
+          STATS MAINTENANCE IS BEHIND · LAST RUN {s.maintLastAt ? fmtAgo(s.maintLastAt, s.generatedAt) : 'NEVER'}
+          {s.rolledThrough ? ` · DAILY TOTALS THROUGH ${s.rolledThrough}` : ''}. Recent days are counted from raw events meanwhile; check the
+          watched-events-maintain cron job.
+        </p>
+      )}
       <p className="a-status">
         <span>{RANGE_WORDS[s.range].toUpperCase()}</span>
         <span className="a-dim">GENERATED {fmtStamp(s.generatedAt)}</span>

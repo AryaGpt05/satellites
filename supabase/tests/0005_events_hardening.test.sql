@@ -85,8 +85,10 @@ end
 $$;
 
 -- ── DB-6: the admin is a confirmed, non-anonymous auth user, not just an email claim ────────
+-- A test-only admin (the real admin's account may exist: a second row with that email would collide).
+insert into overflight_private.admins (email) values ('test-admin@watched.invalid');
 insert into auth.users (id, email, email_confirmed_at, aud, role, is_anonymous) values
-  ('00000000-0000-0000-0000-00000000a001', 'a585gupt@uwaterloo.ca', now(), 'authenticated', 'authenticated', false),
+  ('00000000-0000-0000-0000-00000000a001', 'test-admin@watched.invalid', now(), 'authenticated', 'authenticated', false),
   ('00000000-0000-0000-0000-00000000a002', 'someone@example.com',   now(), 'authenticated', 'authenticated', false);
 
 create or replace function pg_temp.as_user(sub text, email text, extra jsonb default '{}') returns void language sql as $$
@@ -94,7 +96,7 @@ create or replace function pg_temp.as_user(sub text, email text, extra jsonb def
 $$;
 
 -- an anonymous / unknown user carrying the admin's email claim
-select pg_temp.as_user('00000000-0000-0000-0000-00000000a0ff', 'a585gupt@uwaterloo.ca', '{"is_anonymous": true}');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000a0ff', 'test-admin@watched.invalid', '{"is_anonymous": true}');
 set local role authenticated;
 do $$ begin
   perform public.admin_stats('24h');
@@ -103,7 +105,7 @@ exception when insufficient_privilege then null; end $$;
 reset role;
 
 -- a real non-admin user claiming the admin email
-select pg_temp.as_user('00000000-0000-0000-0000-00000000a002', 'a585gupt@uwaterloo.ca');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000a002', 'test-admin@watched.invalid');
 set local role authenticated;
 do $$ begin
   perform public.admin_stats('24h');
@@ -113,7 +115,7 @@ reset role;
 
 -- the admin, before confirming the email
 update auth.users set email_confirmed_at = null where id = '00000000-0000-0000-0000-00000000a001';
-select pg_temp.as_user('00000000-0000-0000-0000-00000000a001', 'a585gupt@uwaterloo.ca');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000a001', 'test-admin@watched.invalid');
 set local role authenticated;
 do $$ begin
   perform public.admin_stats('24h');
@@ -164,7 +166,7 @@ begin
 end
 $$;
 
-select pg_temp.as_user('00000000-0000-0000-0000-00000000a001', 'a585gupt@uwaterloo.ca');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000a001', 'test-admin@watched.invalid');
 set local role authenticated;
 do $$
 declare

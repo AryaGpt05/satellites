@@ -13,22 +13,34 @@ export { cityLevelLabel } from '@/lib/backend'
 
 export interface Arrival {
   entry: 'landing' | 'deep_link' | 'share_link'
+  /** `?noanalytics=1` on this page or the /s/ page that redirected here (held for the tab in sessionStorage too) */
+  optedOut: boolean
   referrer: string
   search: string
 }
 
+const OPT_OUT = /[?&]noanalytics=1(?:&|$)/
+
 function readArrival(): Arrival {
   const search = location.search
   let via: { r?: unknown; q?: unknown } = {}
+  let stored = false
   try {
-    if (/[?&]noanalytics=1(?:&|$)/.test(search)) sessionStorage.setItem('watched.noanalytics', '1')
     via = JSON.parse(sessionStorage.getItem('watched.via') ?? '{}') as typeof via
     sessionStorage.removeItem('watched.via')
+    stored = sessionStorage.getItem('watched.noanalytics') === '1'
   } catch {
-    /* storage blocked: the opt-out still holds for this page via location.search */
+    /* storage blocked: `optedOut` below still carries this page's opt-out */
   }
   const viaQ = typeof via.q === 'string' ? via.q : ''
+  const optedOut = stored || OPT_OUT.test(search) || OPT_OUT.test(viaQ)
+  try {
+    if (optedOut) sessionStorage.setItem('watched.noanalytics', '1')
+  } catch {
+    /* as above */
+  }
   return {
+    optedOut,
     entry: /^\/s\//.test(location.pathname) || /[?&]s=/.test(search) ? 'share_link' : /[?&]q=/.test(search) ? 'deep_link' : 'landing',
     referrer: typeof via.r === 'string' ? via.r : document.referrer,
     search: /[?&]utm_/.test(search) || !viaQ ? search : viaQ,

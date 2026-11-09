@@ -184,3 +184,54 @@ describe('the geocoder flags street-level results (src/imagery/geocode.ts)', () 
     expect(photonToPlace(f({ name: 'Rijksmuseum', osm_key: 'tourism', osm_value: 'museum', type: 'house', city: 'Amsterdam' }))?.streetLevel).toBe(true)
   })
 })
+
+describe('record_lookup labels are city-only too (src/lib/backend.ts lookupLabel)', () => {
+  it('street-level results are saved as their city', async () => {
+    const { lookupLabel } = await import('./backend')
+    expect(lookupLabel({ label: 'Kalverstraat', sublabel: 'Amsterdam, North Holland, Netherlands', streetLevel: true })).toBe('Amsterdam')
+    expect(lookupLabel({ label: 'Rijksmuseum', sublabel: 'Amsterdam, Netherlands', streetLevel: true })).toBe('Amsterdam')
+    expect(lookupLabel({ label: 'Damrak 12', sublabel: '1012 LG, Netherlands', streetLevel: true })).toBe('Netherlands')
+    expect(lookupLabel({ label: 'Waterloo', sublabel: 'Ontario, Canada' })).toBe('Waterloo')
+  })
+})
+
+describe('the boot-time arrival record (src/app/telemetryDeps.ts)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+  const store = (init: Record<string, string> = {}, throws = false) => {
+    const m = new Map(Object.entries(init))
+    const no = () => { throw new Error('blocked') }
+    return {
+      getItem: throws ? no : (k: string) => m.get(k) ?? null,
+      setItem: throws ? no : (k: string, v: string) => void m.set(k, v),
+      removeItem: throws ? no : (k: string) => void m.delete(k),
+      m,
+    }
+  }
+  const boot = async (pathname: string, search: string, ss: ReturnType<typeof store>, referrer = '') => {
+    vi.stubGlobal('location', { pathname, search, hostname: 'www.watched.earth' })
+    vi.stubGlobal('document', { referrer })
+    vi.stubGlobal('sessionStorage', ss)
+    vi.doMock('@/state/store', () => ({ useApp: {} }))
+    vi.doMock('@/engine/catalog', () => ({ getSatInfo: () => undefined }))
+    return (await import('@/app/telemetryDeps')).arrival
+  }
+  it('?noanalytics=1 opts the tab out at boot, before the app rewrites the URL', async () => {
+    const ss = store()
+    expect((await boot('/', '?noanalytics=1', ss)).optedOut).toBe(true)
+    expect(ss.m.get('watched.noanalytics')).toBe('1')
+  })
+  it('a /s/ share page with ?noanalytics=1 opts out too, and its referrer and UTM tags survive the redirect', async () => {
+    const ss = store({ 'watched.via': JSON.stringify({ r: 'https://t.co/x', q: '?noanalytics=1&utm_source=x' }) })
+    const a = await boot('/', '?s=abcdefgh', ss)
+    expect(a).toMatchObject({ entry: 'share_link', optedOut: true, referrer: 'https://t.co/x', search: '?noanalytics=1&utm_source=x' })
+    expect(ss.m.has('watched.via')).toBe(false)
+  })
+  it('blocked storage: the boot flag still opts out', async () => {
+    expect((await boot('/', '?q=1,2&noanalytics=1', store({}, true))).optedOut).toBe(true)
+    vi.resetModules()
+    expect(await boot('/', '?q=1,2', store({}, true))).toMatchObject({ optedOut: false, entry: 'deep_link' })
+  })
+})

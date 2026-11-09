@@ -66,6 +66,8 @@ export function mockStats(range: Range, now = Date.now()): AdminStats {
     range,
     generatedAt: now,
     dimTotals: {},
+    maintLastAt: now - 20 * 60e3,
+    rolledThrough: new Date(now - 86400e3).toISOString().slice(0, 10),
     bucket: hourly ? 'hour' : 'day',
     totals: {
       session: sessions,

@@ -79,9 +79,13 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
   // ── store ───────────────────────────────────────────────────────────────────────────────
   let search: { place: object; t0?: number; catchUp: boolean; first: boolean; final: boolean } | undefined
 
-  /** `retry`: the same place ran again straight out of the error phase (the notice's Retry). */
-  const onSearch = (st: AppState, t0: number | undefined, retry = false, catchUp = false) => {
+  let lastSearchAt = -Infinity
+  /** A retry is marked by the controller's retryReport ('overflight:retry') since the previous search started. */
+  const onSearch = (st: AppState, t0: number | undefined, catchUp = false) => {
     const place = st.place!
+    const retryMark = lastMark('retry')
+    const retry = retryMark !== undefined && retryMark >= lastSearchAt
+    lastSearchAt = performance.now()
     search = { place, t0, catchUp, first: false, final: false }
     track('search', {
       source: retry ? 'retry' : searchSource(st),
@@ -99,16 +103,16 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
     const now = performance.now()
     if (!search.first) {
       search.first = true
-      track('results', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('results')) : since(now) })
+      track('results', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('results') ?? now) : since(now) })
     }
     if (!search.final && !r.partial) {
       search.final = true
-      track('results_final', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('final-report')) : since(now) })
+      track('results_final', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('final-report') ?? now) : since(now) })
     }
   }
 
   const onChange = (st: AppState, prev: AppState) => {
-    if (st.phase === 'computing' && prev.phase !== 'computing' && st.place) onSearch(st, performance.now(), prev.phase === 'error' && st.place === prev.place)
+    if (st.phase === 'computing' && prev.phase !== 'computing' && st.place) onSearch(st, performance.now())
     if (st.report !== prev.report || (st.phase === 'results' && prev.phase !== 'results')) onReport(st)
     // A pass the controller preselects lands with the report (or the phase) in one update: not an "open".
     if (st.selectedPassId && st.selectedPassId !== prev.selectedPassId && st.report === prev.report && st.phase === prev.phase && st.phase === 'results')
@@ -120,7 +124,8 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
   // Whatever happened before this module loaded (a deep link computes during boot).
   const now = useApp.getState()
   if ((now.phase === 'computing' || now.phase === 'results') && now.place) {
-    onSearch(now, lastMark('run-report'), false, true)
+    // Timed by the controller's marks only if the results were already up; a search still computing is timed live.
+    onSearch(now, lastMark('run-report'), now.phase === 'results')
     onReport(now)
   } else if (now.phase === 'error') track('error', { where: 'phase', msg: scrubMessage(now.error ?? 'error') })
   useApp.subscribe(onChange)

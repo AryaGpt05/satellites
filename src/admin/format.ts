@@ -79,3 +79,8 @@ export const ACTION_NAMES: Record<string, string> = {
 export const DEVICE_NAMES: Record<string, string> = { desktop: 'Desktop', phone: 'Phone', tablet: 'Tablet' }
 
 export const VERDICT_NAMES: Record<string, string> = { imaged: 'Watched', likely: 'Likely watched', could: 'Could have pointed here', overhead: 'Passed overhead' }
+
+/** The hourly maintenance cron job hasn't run for over 2 hours (or never has). */
+export function maintBehind(s: { maintLastAt: number | null; generatedAt: number }): boolean {
+  return s.maintLastAt == null || s.generatedAt - s.maintLastAt > 2 * 3600e3
+}

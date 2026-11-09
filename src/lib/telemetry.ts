@@ -62,7 +62,7 @@ export const OPT_OUT_RE = /[?&]noanalytics=1(?:&|$)/
 /** False for bots, dev builds, non-production hosts, and tabs opened with `?noanalytics=1`. */
 export function telemetryAllowed(env: TelemetryEnv = currentEnv()): boolean {
   if (env.dev) return false
-  if (env.optedOut || OPT_OUT_RE.test(env.search ?? '')) return false
+  if (env.optedOut || OPT_OUT_RE.test(env.search ?? '')) return false // `search`: for tests and callers without a boot record
   if (env.e2e) return true
   if (env.webdriver) return false
   return !!env.hostname && PRODUCTION_HOSTS.includes(env.hostname.toLowerCase())
@@ -74,8 +74,7 @@ function currentEnv(): TelemetryEnv {
     webdriver: typeof navigator !== 'undefined' && navigator.webdriver === true,
     dev: !!import.meta.env?.DEV,
     hostname: location.hostname,
-    search: location.search,
-    optedOut: readOptOut(),
+    optedOut: !!arrival?.optedOut || readOptOut(),
     e2e: import.meta.env?.VITE_TELEMETRY_E2E === '1',
   }
 }
@@ -235,10 +234,11 @@ let sender: Sender = defaultSender
 let ctxCache: Record<string, string> | undefined
 /** Captured at boot (src/app/telemetryDeps.ts): the referrer and query the visit arrived with, before any
  *  redirect (/s/<id> → /?s=<id>) or URL rewrite lost them. */
-let arrival: { referrer: string; search: string } | undefined
+let arrival: { referrer: string; search: string; optedOut?: boolean } | undefined
 
-export function setArrival(a: { referrer: string; search: string }): void {
+export function setArrival(a: { referrer: string; search: string; optedOut?: boolean }): void {
   arrival = a
+  allowed = undefined // decide again with the boot-time opt-out
 }
 
 function isAllowed(): boolean {

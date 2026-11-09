@@ -31,6 +31,10 @@ export interface AdminStats {
   vitals: { n: number; lcp: number | null; inp: number | null; cls: number | null }
   recentSearches: { t: number; label?: string; country?: string; source?: string; cell?: string; device?: string }[]
   recentErrors: { t: number; where?: string; msg?: string }[]
+  /** When the hourly maintenance (rollup + prune, pg_cron) last ran, ms; null if it never has */
+  maintLastAt: number | null
+  /** The last UTC day rolled into the daily totals, 'YYYY-MM-DD' */
+  rolledThrough: string | null
 }
 
 let client: SupabaseClient | null | undefined
@@ -57,7 +61,10 @@ export async function sendMagicLink(email: string): Promise<string | null> {
   return error ? error.message : null
 }
 
-/** The code from the same email (Microsoft 365 Safe Links can open, and so use up, the link before you do). */
+/**
+ * A one-time code from the sign-in email. Unused while the project sends with Supabase's default mailer, whose
+ * templates can't be edited (no {{ .Token }} in the email): see CODE_SIGN_IN in Admin.tsx.
+ */
 export async function verifyCode(email: string, token: string): Promise<string | null> {
   const sb = supabase()
   if (!sb) return 'Supabase is not configured for this build.'
@@ -76,7 +83,7 @@ export function takeAuthError(): string | null {
     if (!desc) continue
     history.replaceState(null, '', location.pathname)
     const code = p.get('error_code')
-    if (code === 'otp_expired') return 'That sign-in link has expired or was already used (some mail scanners open links before you do). Send a new one; if the email shows a code, type that instead.'
+    if (code === 'otp_expired') return 'That sign-in link was already used or has expired. Send a new one. If links keep arriving already used (some mail scanners open them first), a second address can be added to the admin list.'
     return desc.replace(/\+/g, ' ')
   }
   return null
@@ -123,6 +130,8 @@ export function parseStats(v: unknown): AdminStats | null {
     results: { n: num(r.n), p50Ms: numOrNull(r.p50Ms), p90Ms: numOrNull(r.p90Ms), partial: num(r.partial), archiveFailed: num(r.archiveFailed) },
     vitals: { n: num(vi.n), lcp: numOrNull(vi.lcp), inp: numOrNull(vi.inp), cls: numOrNull(vi.cls) },
     recentSearches: Array.isArray(v.recentSearches) ? (v.recentSearches.filter(isObj) as AdminStats['recentSearches']) : [],
+    maintLastAt: numOrNull(v.maintLastAt),
+    rolledThrough: typeof v.rolledThrough === 'string' ? v.rolledThrough : null,
     recentErrors: Array.isArray(v.recentErrors) ? (v.recentErrors.filter(isObj) as AdminStats['recentErrors']) : [],
   }
 }

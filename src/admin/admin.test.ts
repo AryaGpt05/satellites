@@ -36,3 +36,14 @@ describe('formats', () => {
     expect(fmtBucket(Date.UTC(2026, 10, 8), 'day')).toBe('NOV 08')
   })
 })
+
+describe('maintenance note', () => {
+  it('shows when the hourly job is over 2 h late or never ran', async () => {
+    const { maintBehind } = await import('./format')
+    const now = Date.UTC(2026, 10, 9, 12)
+    expect(maintBehind({ generatedAt: now, maintLastAt: now - 30 * 60e3 })).toBe(false)
+    expect(maintBehind({ generatedAt: now, maintLastAt: now - 3 * 3600e3 })).toBe(true)
+    expect(maintBehind({ generatedAt: now, maintLastAt: null })).toBe(true)
+    expect(parseStats({ range: '7d', maintLastAt: now, rolledThrough: '2026-11-08' })).toMatchObject({ maintLastAt: now, rolledThrough: '2026-11-08' })
+  })
+})
