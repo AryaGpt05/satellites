@@ -417,12 +417,14 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   // ── GIBS daily mosaics: start as soon as the GIBS satellites' passes exist ──
   let verifying = false // progress for the GIBS leg is only shown once it is what we wait for
   let onLate: ((c: Capture, byRule: boolean) => void) | undefined
+  let onLateSettled: ((left: number) => void) | undefined
   const weather = startWeatherLeg(latLon, gibsPasses, {
     signal,
     onSettle: (n, total) => {
       if (verifying) emit('match', `VERIFYING NASA WEATHER MOSAICS · ${nf.format(n)} / ${nf.format(total)}`, 0.86 + 0.13 * (n / total))
     },
     onLate: (c, byRule) => onLate?.(c, byRule),
+    onLateSettled: (left) => onLateSettled?.(left),
     // Stragglers only keep probing when someone listens for the patches.
     lateMs: opts.onUpdate ? undefined : 0,
   })
@@ -480,6 +482,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       partial,
       archiveFailed,
       coverPending: !!coverP && !cover.done,
+      // PH-02: the final report says its photo count can still grow (stragglers still probing), so the UI reads
+      // "At least K" and settles in place, never shows a definite number that then changes.
+      ...(!partial && opts.onUpdate && weather.lateLeft() > 0 ? { lateChecks: weather.lateLeft() } : {}),
       ...(partial && finalDueAt !== undefined ? { finalDueAt } : {}),
       ...(clearCover ? { clearCover } : {}),
       timings: {
@@ -643,6 +648,12 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       weatherCaps.push(c)
       missing = Math.max(0, missing - 1)
       weatherNotes = gibsNotes()
+      latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+      safely(opts.onUpdate, latest)
+    }
+    // The last straggler settled with nothing to add (no data, a failure, the late cut): the same report, now final.
+    onLateSettled = (left) => {
+      if (signal?.aborted || left > 0 || !latest.lateChecks) return
       latest = build(current, [...stac, ...weatherCaps], false, firstMs)
       safely(opts.onUpdate, latest)
     }

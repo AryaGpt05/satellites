@@ -21,6 +21,13 @@ import s from './results.module.css'
 /** A window that ended more than an hour ago is described by its dates, not as "the last 7 days". */
 export const isOldWindow = (model: ResultsModel) => model.report.windowEnd < Date.now() - 3_600_000
 
+/**
+ * The photo count can still grow: a partial report, or a final one whose weather mosaics are still being checked in
+ * the background (PH-02: those patched "23 photos" to 27 and 28 after a definite paint). Reads "At least K" and
+ * settles in place.
+ */
+export const countPending = (report: { partial?: boolean; lateChecks?: number }) => !!report.partial || (report.lateChecks ?? 0) > 0
+
 /** Stagger slot for the handoff entrance (headline 0, hero 1, verdicts 2, notes 3 → 60 ms apart). */
 export const enterStyle = (i: number) => ({ '--i': i }) as CSSProperties
 
@@ -98,7 +105,7 @@ export function MoreLine({ model, compact = false, enter = false, onRetry }: { m
   const k = head.images
   const line = (
     <p className={cls} style={style}>
-      {k > 0 ? <PhotosCount k={k} partial={!!report.partial} /> : photosLine(0, { week: weekWord(model) })}
+      {k > 0 ? <PhotosCount k={k} partial={countPending(report)} /> : photosLine(0, { week: weekWord(model) })}
     </p>
   )
   if (k > 0) return line
@@ -215,7 +222,7 @@ export function headlineText(model: ResultsModel): string {
   const n = head.flewOver
   const label = report.place.label
   const first = n === 0 ? `No satellite we track watched ${label} ${weekWord(model)}.` : `${windowPhrase(model)}, ${watchedPhrase(n)} ${label}.`
-  const second = model.archiveFailed ? ARCHIVE_DOWN_LINE : photosLine(head.images, { partial: !!report.partial, week: weekWord(model) })
+  const second = model.archiveFailed ? ARCHIVE_DOWN_LINE : photosLine(head.images, { partial: countPending(report), week: weekWord(model) })
   return plain([first, ' ', second])
 }
 

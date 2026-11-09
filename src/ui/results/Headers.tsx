@@ -26,7 +26,7 @@ import { secs } from './ComputingBody'
 import { Mark } from './Mark'
 import { useOnce } from './once'
 import { ReplayStrip } from './ReplayControls'
-import { Headline, MoreLine } from './Summary'
+import { Headline, MoreLine, countPending } from './Summary'
 import { clearPass } from './actions'
 import { ONE_LINE_TITLE_QUERY, SHORT_DESK_QUERY } from './shell'
 import { glyphForPass, markColorVar } from './lib/meta'
@@ -73,7 +73,7 @@ interface OverviewHeaderProps {
 export function OverviewHeader(props: OverviewHeaderProps) {
   const { place, model, computing, mobile, enter, searching } = props
   const tz = model?.tz ?? (place ? timeZoneAt(place.lat, place.lon) : undefined)
-  const partial = !computing && !!model?.report.partial
+  const partial = !computing && !!model && countPending(model.report)
   const showPlaceRow = !!place && (!mobile || computing) && !searching
 
   return (

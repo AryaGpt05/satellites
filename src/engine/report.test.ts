@@ -237,16 +237,18 @@ describe('computeReport', () => {
       return [capture({ id: `G@${p.id}`, provider: 'gibs', platform: 'terra', collection: 'gibs-modis-terra', norad: p.norad, datetime: p.tClosest, gsdM: 250 })]
     })
     const ctl = new AbortController()
-    const updates: { imaged: number; notes: string[] }[] = []
+    const updates: { imaged: number; notes: string[]; late?: number }[] = []
     const report = await computeReport(waterloo, {
       now,
       budgetMs: 200,
       signal: ctl.signal,
-      onUpdate: (r) => updates.push({ imaged: r.counts.imaged, notes: r.notes }),
+      onUpdate: (r) => updates.push({ imaged: r.counts.imaged, notes: r.notes, late: r.lateChecks }),
     })
     const before = report.counts.imaged
     const terraBefore = report.passes.filter((p) => p.norad === 25994 && p.verdict === 'imaged').length
     expect(terraBefore).toBe(0)
+    // PH-02: the final report says its photo count can still grow while the stragglers probe.
+    expect(report.lateChecks).toBeGreaterThan(0)
     release()
     await new Promise((r) => setTimeout(r, 50))
     expect(updates.length).toBeGreaterThan(0)
@@ -255,7 +257,41 @@ describe('computeReport', () => {
     expect(report.counts.imaged).toBe(before)
     expect(report.passes.filter((p) => p.norad === 25994 && p.verdict === 'imaged')).toHaveLength(0)
     expect(updates[updates.length - 1].notes.some((n) => /shown as likely/.test(n))).toBe(false)
+    // …and the patch that settles the last straggler says the count is final.
+    expect(updates[updates.length - 1].late ?? 0).toBe(0)
     ctl.abort()
+  })
+
+  it('settles lateChecks with one patch when the last straggler has nothing to add', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    imagery.weatherCaptures.mockImplementation(async (_place: LatLon, passes: Pass[]) => {
+      const p = passes.find((x) => x.inSwath && x.sunElevationDeg > 5)
+      if (!p) return []
+      if (p.norad === 25994) {
+        await gate // Terra answers late, with no data at the place
+        return []
+      }
+      return [capture({ id: `G@${p.id}`, provider: 'gibs', platform: 'aqua', collection: 'gibs-modis-aqua', norad: p.norad, datetime: p.tClosest, gsdM: 250 })]
+    })
+    const ctl = new AbortController()
+    const updates: { imaged: number; late?: number }[] = []
+    const report = await computeReport(waterloo, { now, budgetMs: 200, signal: ctl.signal, onUpdate: (r) => updates.push({ imaged: r.counts.imaged, late: r.lateChecks }) })
+    expect(report.lateChecks).toBeGreaterThan(0)
+    release()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(updates.length).toBe(1)
+    expect(updates[0].imaged).toBe(report.counts.imaged)
+    expect(updates[0].late ?? 0).toBe(0)
+    ctl.abort()
+  })
+
+  it('never sets lateChecks without a listener for the patches', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockImplementation(async () => new Promise<never>(() => undefined))
+    const report = await computeReport(waterloo, { now, budgetMs: 100 })
+    expect(report.lateChecks).toBeUndefined()
   })
 
   it('reads the spot class for the clearest scenes before the partial report', async () => {

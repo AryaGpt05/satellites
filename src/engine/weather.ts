@@ -46,6 +46,12 @@ export interface WeatherLeg {
   stop(): number
   /** performance.now() of the first request (0 if none was needed) and of the end (0 while running) */
   timing(): { startedAt: number; finishedAt: number }
+  /**
+   * After `stop()`: stragglers still probing whose mosaics are NOT counted by rule (an answer with pixels would add
+   * a photo). Each one that settles (pixels, no data, failure, or the `lateMs` abort) leaves this count; the last
+   * one calls `onLateSettled(0)`.
+   */
+  lateLeft(): number
 }
 
 export interface WeatherLegOptions {
@@ -58,6 +64,11 @@ export interface WeatherLegOptions {
   onLate?: (c: Capture, byRule: boolean) => void
   /** How long stragglers may keep probing after `stop()` (default 20 s). */
   lateMs?: number
+  /**
+   * A straggler that was not counted by rule settled after `stop()` (after its `onLate` calls, if it had pixels):
+   * `left` of them are still out.
+   */
+  onLateSettled?: (left: number) => void
 }
 
 const LATE_MS = 20_000
@@ -97,6 +108,8 @@ export function startWeatherLeg(place: LatLon, passes: Promise<Pass[]>, opts: We
   /** Groups still being verified, by index, with the candidate each would produce. */
   const inFlight = new Map<number, Pass[]>()
   const counted = new Set<string>()
+  /** Groups still out at stop() that are not counted by rule (their answer can add a photo). */
+  const lateOpen = new Set<number>()
   let total = 0
   let settledCount = 0
   let failed = 0
@@ -121,12 +134,19 @@ export function startWeatherLeg(place: LatLon, passes: Promise<Pass[]>, opts: We
           return weatherCaptures(place, group, ctl.signal)
             .then(
               (caps) => {
-                if (!stopped) found.push(...caps)
-                else for (const c of caps) opts.onLate?.(c, counted.has(c.id))
+                if (!stopped) {
+                  found.push(...caps)
+                  return
+                }
+                // Out of the open count before its patches go out, so they carry what is still left.
+                const open = lateOpen.delete(i)
+                for (const c of caps) opts.onLate?.(c, counted.has(c.id))
+                if (open) opts.onLateSettled?.(lateOpen.size)
               },
               () => {
                 // weatherCaptures only rejects on abort; anything else counts as an unanswered mosaic.
                 if (!stopped) failed++
+                else if (lateOpen.delete(i)) opts.onLateSettled?.(lateOpen.size)
               },
             )
             .finally(() => {
@@ -162,15 +182,19 @@ export function startWeatherLeg(place: LatLon, passes: Promise<Pass[]>, opts: We
         // VIIRS stragglers count by rule when the evidence allows (see the header); late answers for them
         // only confirm (onLate's byRule flag).
         const now = Date.now()
-        for (const group of inFlight.values()) {
-          if (!group.length || !isGapFreeMosaic(group[0].norad)) continue
-          for (const c of weatherCandidates(place, group)) {
-            if (now - c.datetime < PROCESSED_AFTER_MS) continue
-            const day = utcDay(c.datetime)
-            if (!found.some((f) => f.norad === c.norad && utcDay(f.datetime) > day)) continue
-            rule.push(c)
-            counted.add(c.id)
+        for (const [i, group] of inFlight) {
+          let byRule = false
+          if (group.length && isGapFreeMosaic(group[0].norad)) {
+            for (const c of weatherCandidates(place, group)) {
+              if (now - c.datetime < PROCESSED_AFTER_MS) continue
+              const day = utcDay(c.datetime)
+              if (!found.some((f) => f.norad === c.norad && utcDay(f.datetime) > day)) continue
+              rule.push(c)
+              counted.add(c.id)
+              byRule = true
+            }
           }
+          if (!byRule) lateOpen.add(i)
         }
         // Let the stragglers finish in the background, within reason (or not at all: nobody listens).
         const lateMs = opts.lateMs ?? LATE_MS
@@ -181,5 +205,6 @@ export function startWeatherLeg(place: LatLon, passes: Promise<Pass[]>, opts: We
       return cut
     },
     timing: () => ({ startedAt, finishedAt }),
+    lateLeft: () => lateOpen.size,
   }
 }

@@ -188,7 +188,7 @@ export function summaryFacts(report: Report, placeLabel: string, meta: MetaFn): 
     // K is the headline's own count (it equals the imaged passes, the card's PHOTO readout).
     counts: { ...counts, imaged: head.images },
     archiveDown: down || undefined,
-    partial: !down && report.partial ? true : undefined,
+    partial: !down && (report.partial || (report.lateChecks ?? 0) > 0) ? true : undefined,
     windowEnd: report.windowEnd,
     best,
   }

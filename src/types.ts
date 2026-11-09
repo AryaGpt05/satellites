@@ -235,6 +235,12 @@ export interface Report {
   notes?: string[]
   /** True while archive/GIBS verification is still streaming in */
   partial?: boolean
+  /**
+   * A final report only: NASA GIBS weather mosaics still being checked in the background (they answered after the
+   * report's time budget). Each one that comes back with pixels patches the photo count upward in a later report;
+   * the report that settles the last one has none. Absent or 0: the photo count is final.
+   */
+  lateChecks?: number
   /** True when the Sentinel-2/Landsat search failed or timed out on every provider (≠ "answered with nothing") */
   archiveFailed?: boolean
   /**
