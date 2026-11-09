@@ -26,6 +26,8 @@ export function roundedPlace(lat: number, lon: number): { lat: number; lon: numb
 export interface DeepLinkPass {
   norad: number
   satName: string
+  /** N, the satellites that watched the place that week: the card's "7 satellites watched Waterloo." */
+  satellites?: number
   verdict: Pass['verdict']
   tClosest: number
   altitudeKm?: number
@@ -41,7 +43,7 @@ export interface DeepLinkPass {
 }
 
 /** The query keys a fallback link adds for its pass (api/_lib/share.ts reads the same set). */
-export const DEEP_LINK_PASS_KEYS = ['sat', 'norad', 'verdict', 't', 'alt', 'off', 'hdg', 'collection', 'item', 'cloud', 'gsd', 'spot'] as const
+export const DEEP_LINK_PASS_KEYS = ['sat', 'norad', 'verdict', 't', 'alt', 'off', 'hdg', 'collection', 'item', 'cloud', 'gsd', 'spot', 'sv'] as const
 
 const finite = (v: number | undefined): v is number => v !== undefined && Number.isFinite(v)
 
@@ -72,6 +74,8 @@ export function deepLink(origin: string, label: string, lat: number, lon: number
       if (finite(c.gsdM)) p.set('gsd', String(Math.round(c.gsdM * 100) / 100))
       if (c.spot) p.set('spot', c.spot)
     }
+    // N: the card's "7 satellites watched Waterloo." (owner)
+    if (finite(pass.satellites) && pass.satellites >= 1) p.set('sv', String(Math.round(pass.satellites)))
   }
   return `${origin}/?${p.toString()}`
 }

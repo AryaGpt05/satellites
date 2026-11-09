@@ -58,6 +58,8 @@ export interface CreateShareInput {
   capture?: Capture
   /** Display name for the card headline ("Sentinel-2C"); derived from the capture if omitted. */
   satName?: string
+  /** N, the satellites that watched the place that week: the card reads "7 satellites watched Waterloo." (stored as pass.weekSatellites) */
+  satellites?: number
 }
 
 export interface CreatedShare {
@@ -263,6 +265,7 @@ export function sharePayload(input: CreateShareInput): Record<string, unknown> |
   void _track
   const p: Record<string, unknown> = { ...rest }
   for (const [k, v] of Object.entries(p)) if (typeof v === 'number' && !Number.isFinite(v)) delete p[k]
+  if (finite(input.satellites) && input.satellites >= 1) p.weekSatellites = Math.round(input.satellites)
   return {
     // The server caps labels at 120 characters (code points).
     placeLabel: Array.from(label).length > 120 ? `${clip(label, 119).trimEnd()}…` : label,

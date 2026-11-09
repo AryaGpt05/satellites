@@ -20,7 +20,6 @@ import {
   PANEL,
   TONE_COLOR,
   hatchPath,
-  verdictGlyphPrims,
   type Chip,
   type ImagePlate,
   type PlanPlate,
@@ -61,17 +60,6 @@ export function ShareCard({ spec }: { spec: CardSpec }) {
           {spec.stamp ? <span className={s.row} style={{ color: CARD_COLOR.bone2 }}>{spec.stamp}</span> : null}
         </Row>
         <Hair y={PANEL.rule1} />
-        <Row box={PANEL.verdict}>
-          <span className={s.verdict}>
-            <Svg size={14} prims={verdictGlyphPrims(spec.verdict)} />
-            <span className={s.row} style={{ color: TONE_COLOR[spec.verdictTone] }}>
-              {spec.verdictLabel}
-            </span>
-          </span>
-          <span className={s.row} style={{ color: CARD_COLOR.bone3 }}>
-            {spec.coords}
-          </span>
-        </Row>
 
         <div className={s.head} style={{ left: PANEL.x, top: PANEL.headTop, width: PANEL.w, height: PANEL.headBottom - PANEL.headTop }}>
           <div className={s.lead} style={{ fontSize: S, lineHeight: HEAD.leadLH, letterSpacing: -0.02 * S }}>

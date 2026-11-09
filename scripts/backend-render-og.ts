@@ -49,7 +49,7 @@ async function loadEnv(): Promise<void> {
   }
 }
 
-const WATERLOO = { place: 'Waterloo', lat: '43.4723', lon: '-80.5449' }
+const WATERLOO = { place: 'Waterloo', lat: '43.4723', lon: '-80.5449', sv: '256' }
 
 const CASES: Record<string, Record<string, string>> = {
   'default': {},

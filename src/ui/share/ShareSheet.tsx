@@ -43,7 +43,7 @@ import { captureFor, slug } from '../results/lib/captures'
 import { satMeta } from '../results/sats'
 import { fmtLocalDay, fmtLocalTime } from '../results/lib/time'
 import { createShareSafe, peekShare, type CreateShareInput } from './backend'
-import { cardSpec, renderCardPng, summaryCardSpec, summaryFacts, type CardSpec } from './card'
+import { cardSpec, renderCardPng, summaryCardSpec, summaryFacts, weekSatellites, type CardSpec } from './card'
 import { deepLink, postText, roundedPlace, shareLink, summaryLink, summaryPostText, xIntentUrl } from './links'
 import { ShareCard } from './ShareCard'
 import s from './ShareSheet.module.css'
@@ -136,7 +136,9 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
   const capture = captureFor(report, pass)
   const rounded = roundedPlace(place.lat, place.lon)
   const label = publicLabelOf(place)
-  const spec = cardSpec(pass, { ...report, place: { ...place, label } }, meta, tz, host, { clouded })
+  // The card leads with the week's N, as the results headline does (owner): "7 satellites watched Waterloo."
+  const satellites = weekSatellites(report, satMeta)
+  const spec = cardSpec(pass, { ...report, place: { ...place, label } }, meta, tz, host, { clouded, satellites })
   return {
     title: 'Share this pass',
     spec,
@@ -152,10 +154,11 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
       cloud: capture && spec.sub !== undefined ? { pct: capture.cloudCoverPct, spot: capture.spot } : undefined,
     }),
     fileName: `watched-${slug(meta.name)}-${slug(label)}-${new Date(pass.tClosest).toISOString().slice(0, 10)}.png`,
-    input: { placeLabel: label, lat: rounded.lat, lon: rounded.lon, pass, capture, satName: meta.name },
+    input: { placeLabel: label, lat: rounded.lat, lon: rounded.lon, pass, capture, satName: meta.name, satellites },
     fallbackUrl: deepLink(origin(), label, place.lat, place.lon, pass.id, {
       norad: pass.norad,
       satName: meta.name,
+      satellites,
       verdict: pass.verdict,
       tClosest: pass.tClosest,
       altitudeKm: pass.altitudeKm,

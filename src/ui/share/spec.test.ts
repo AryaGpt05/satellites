@@ -10,7 +10,7 @@ import { waterlooReport } from '../results/__fixtures__/waterloo'
 import { shareHeadline } from '../results/lib/copy'
 import { VERDICT_META, VERDICTS, type SatMeta } from '../results/lib/meta'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from '../results/lib/time'
-import { PLATE, buildSummarySpec, cornerTickPrim } from '../../../api/_lib/cardSpec'
+import { PLATE, VERDICT_WORDS, buildSummarySpec, cornerTickPrim } from '../../../api/_lib/cardSpec'
 import { cardSpec, summaryCardSpec, summaryFacts } from './card'
 import { roundedPlace, summaryLink, summaryPostText } from './links'
 
@@ -100,7 +100,6 @@ describe('share card spec', () => {
     expect(client.lead).toMatch(/^\d+ satellites watched$/)
     expect(`${client.place}${client.tail}`).toBe('Waterloo this week.')
     expect(client.sub).toMatch(/^\d+ photos were made public\.$/)
-    expect(client.verdictLabel).toMatch(/^Closest look · \w{3} \d{1,2} \w{3}$/)
     expect(client.plate.kind === 'image' && client.plate.chip.segs[0].text).toMatch(/^Closest look · Sentinel-2C · 10 m$/)
     expect(client.readouts.map((r) => r.label)).toEqual(['Photo', 'Likely', 'Could', 'Overhead'])
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, photos: 12 })).toBe(
@@ -160,7 +159,10 @@ describe('share card spec', () => {
     }
     for (const v of VERDICTS) {
       const a = headlineParts(v, 'Sentinel-2C', 'Waterloo')
-      const label = buildCardSpec({ verdict: v, satName: 'X', placeLabel: 'Y', lat: 0, lon: 0, pass: {}, host: '' }).verdictLabel
+      const label = VERDICT_WORDS[v].title
+      // Owner: the card leads with the week's N when it is known, the satellite's own sentence only without it.
+      expect(buildCardSpec({ verdict: v, satName: 'X', placeLabel: 'Y', satellites: 7, lat: 0, lon: 0, pass: {}, host: '' }).lead).toBe('7 satellites watched')
+      expect(buildCardSpec({ verdict: v, satName: 'X', placeLabel: 'Y', lat: 0, lon: 0, pass: {}, host: '' }).lead).toBe(headlineParts(v, 'X', 'Y').lead)
       expect(a.lead).toBe(OWNER[v].lead)
       expect(label).toBe(OWNER[v].title)
       // The results vocabulary says the same once main's 'watched' hotfix (77a2435) is in this branch: until the

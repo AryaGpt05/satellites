@@ -6,7 +6,7 @@
  * are anyone's). Each field is re-validated and clamped before it reaches a renderer.
  */
 import tzlookup from '@photostructure/tz-lookup'
-import { VERDICT_WORDS, cloudWords, localStamp, photosSentence, summaryHeadline, type CardInput, type SummaryInput } from './cardSpec.js'
+import { VERDICT_WORDS, cloudWords, localStamp, photosSentence, summaryHeadline, watchedLead, type CardInput, type SummaryInput } from './cardSpec.js'
 import { supabaseConfig } from './env.js'
 
 export type Verdict = 'imaged' | 'likely' | 'could' | 'overhead'
@@ -55,6 +55,8 @@ export interface SharePass {
   sunElevationDeg?: number
   inSwath?: boolean
   verdict?: Verdict
+  /** N: the satellites that watched the place that week (create_share keeps it since 0003; older shares lack it) */
+  weekSatellites?: number
 }
 
 /** A share, normalised. Times are epoch ms. */
@@ -69,6 +71,8 @@ export interface ShareRecord {
   tClosest?: number
   capture?: ShareCapture
   pass: SharePass
+  /** N for the card's headline ("7 satellites watched Waterloo."), when the share carries it */
+  satellites?: number
 }
 
 export const SHARE_ID_RE = /^[0-9a-z]{8}$/
@@ -137,7 +141,13 @@ function passOf(v: unknown): SharePass {
     sunElevationDeg: num(v.sunElevationDeg, -90, 90),
     inSwath: typeof v.inSwath === 'boolean' ? v.inSwath : undefined,
     verdict: verdictOf(v.verdict),
+    weekSatellites: whole(num(v.weekSatellites, 1, 100_000)),
   }
+}
+
+/** A count: rounded, or undefined. */
+function whole(n: number | undefined): number | undefined {
+  return n === undefined ? undefined : Math.round(n)
 }
 
 /** Normalise the `get_share` RPC's JSON. Null if it isn't a usable share. */
@@ -160,6 +170,7 @@ export function shareFromRpc(v: unknown): ShareRecord | null {
     tClosest: num(v.tClosest, 0, 8.64e15) ?? pass.tClosest,
     capture: captureOf(v.capture),
     pass,
+    satellites: pass.weekSatellites,
   }
 }
 
@@ -167,7 +178,8 @@ export function shareFromRpc(v: unknown): ShareRecord | null {
  * Explicit-parameter fallback, for a card without a stored share:
  *   /api/og?sat=Sentinel-2C&norad=60989&place=Waterloo&lat=43.47&lon=-80.54&t=<ms|ISO>
  *          &verdict=imaged&alt=786&off=0.9&cloud=25&dist=12&az=271&hdg=194
- *          &collection=sentinel-2-l2a&item=<STAC item id>&gsd=10&spot=clear
+ *          &collection=sentinel-2-l2a&item=<STAC item id>&gsd=10&spot=clear&sv=7
+ * (`sv`: N, the satellites that watched the place that week, for the "7 satellites watched Waterloo." headline)
  * Null unless at least place, lat, lon and verdict are valid.
  */
 export function shareFromParams(q: URLSearchParams): ShareRecord | null {
@@ -179,6 +191,7 @@ export function shareFromParams(q: URLSearchParams): ShareRecord | null {
   const tRaw = q.get('t')
   const tClosest = tRaw ? (num(tRaw, 0, 8.64e15) ?? (Number.isFinite(Date.parse(tRaw)) ? Date.parse(tRaw) : undefined)) : undefined
   const norad = num(q.get('norad'), 1, 999_999_999)
+  const satellites = whole(num(q.get('sv'), 1, 100_000))
   const capture = captureOf({
     collection: q.get('collection') ?? (q.get('item') ? 'sentinel-2-l2a' : undefined),
     itemId: q.get('item'),
@@ -197,6 +210,7 @@ export function shareFromParams(q: URLSearchParams): ShareRecord | null {
     verdict,
     tClosest,
     capture,
+    satellites,
     pass: {
       norad,
       tClosest,
@@ -213,7 +227,7 @@ export function shareFromParams(q: URLSearchParams): ShareRecord | null {
 }
 
 /** The pass keys a fallback deep link carries (src/ui/share/links.ts DEEP_LINK_PASS_KEYS). */
-export const DEEP_LINK_PASS_KEYS = ['sat', 'norad', 'verdict', 't', 'alt', 'off', 'hdg', 'collection', 'item', 'cloud', 'gsd', 'spot'] as const
+export const DEEP_LINK_PASS_KEYS = ['sat', 'norad', 'verdict', 't', 'alt', 'off', 'hdg', 'collection', 'item', 'cloud', 'gsd', 'spot', 'sv'] as const
 
 /**
  * A pass from the app's fallback deep link (share R2SH2): the place link `/?q=lat,lon&n=label&p=passId`
@@ -365,13 +379,17 @@ export function satLabel(s: ShareRecord): string {
 }
 
 /**
- * The headline, split so the renderer can set the place in the accent face:
+ * The headline, split so the renderer can set the place in the accent face. With the week's N (owner):
+ *   any      → "7 satellites watched | Waterloo | ."
+ * Older shares without N, by verdict:
  *   imaged   → "Sentinel-2C watched | Waterloo | ."
  *   likely   → "Sentinel-2C swept over | Waterloo | ."
  *   could    → "WorldView Legion 4 passed within view of | Waterloo | ."
  *   overhead → "ISS (ZARYA) passed over | Waterloo | ."
  */
 export function headlineParts(s: ShareRecord): { lead: string; place: string; tail: string } {
+  // The card's own words (owner): "7 satellites watched Waterloo." when the share carries N.
+  if (s.satellites !== undefined && s.satellites >= 1) return { lead: watchedLead(s.satellites), place: s.placeLabel, tail: s.placeLabel.endsWith('…') ? '' : '.' }
   const sat = satLabel(s)
   const verb = VERDICT_WORDS[s.verdict].verb
   // A place already cut short with an ellipsis takes no full stop ("…" not "….").
@@ -467,6 +485,7 @@ export function cardInputFromShare(s: ShareRecord, host: string, imageMiss?: Car
     verdict: s.verdict,
     satName: satLabel(s),
     placeLabel: s.placeLabel,
+    satellites: s.satellites,
     lat: s.lat,
     lon: s.lon,
     tClosest: momentOf(s),

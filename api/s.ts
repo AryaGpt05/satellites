@@ -46,8 +46,9 @@ import {
 /**
  * Bump when the card design changes so unfurler caches (which key on the URL) refetch.
  * 4 (round 3): "watched" vocabulary on pass cards, the summary card's N / K headline (R3-13).
+ * 5: no verdict row or coordinates; pass cards lead with the week's N ("7 satellites watched Waterloo.", owner).
  */
-export const CARD_VERSION = '4'
+export const CARD_VERSION = '5'
 
 const GENERIC = {
   title: 'Something watched you this week.',

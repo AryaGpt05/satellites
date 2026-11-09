@@ -16,6 +16,7 @@ describe('share links', () => {
     const url = deepLink('https://overflight.app', 'Waterloo', 43.4723, -80.5449, '60989-29892501', {
       norad: 60989,
       satName: 'Sentinel-2C',
+      satellites: 256.4,
       verdict: 'imaged',
       tClosest: 1793549661025.6,
       altitudeKm: 794.93,
@@ -38,6 +39,7 @@ describe('share links', () => {
       cloud: '25',
       gsd: '10',
       spot: 'clear',
+      sv: '256',
     })
     expect([...q.keys()]).toEqual(['q', 'n', 'p', ...DEEP_LINK_PASS_KEYS])
     expect(url).not.toContain('43.4723')

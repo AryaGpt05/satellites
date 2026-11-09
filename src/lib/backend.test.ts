@@ -245,6 +245,13 @@ describe('sharePayload', () => {
     expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
     expect(sharePayload({ placeLabel: 'Waterloo', lat: 1, lon: 1, pass: PASS })!.placeLabel).toBe('Waterloo')
   })
+  it('keeps the week\'s N on the pass for the card headline (owner: "7 satellites watched Waterloo.")', () => {
+    const pass = (i: Partial<Parameters<typeof sharePayload>[0]>) => sharePayload({ placeLabel: 'Waterloo', lat: 1, lon: 1, pass: PASS, ...i })!.pass as Record<string, unknown>
+    expect(pass({ satellites: 7.4 }).weekSatellites).toBe(7)
+    expect(pass({}).weekSatellites).toBeUndefined()
+    expect(pass({ satellites: 0 }).weekSatellites).toBeUndefined()
+    expect(pass({ satellites: Number.NaN }).weekSatellites).toBeUndefined()
+  })
 })
 
 describe('getStats', () => {

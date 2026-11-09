@@ -165,14 +165,6 @@
   letter-spacing: 0.5px;
   color: rgb(236 232 224 / 0.64);
 }
-.verdict {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.verdict svg {
-  display: block;
-}
 
 .head {
   position: absolute;

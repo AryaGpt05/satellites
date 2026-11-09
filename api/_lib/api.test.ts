@@ -143,7 +143,6 @@ describe('summary links (R3-13)', () => {
     const spec = buildSummarySpec({ ...sum, host: 'www.watched.earth' })
     expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('256 satellites watched Waterloo this week.')
     expect(spec.sub).toBe('31 photos were made public.')
-    expect(spec.verdictLabel).toMatch(/^Closest look · /)
     expect(spec.plate.kind === 'image' && spec.plate.chip.segs[0].text).toBe('Closest look · Sentinel-2C · 10 m')
     expect(summaryTitle({ satellites: 1, placeLabel: 'Waterloo' })).toBe('1 satellite watched Waterloo this week.')
     expect(summaryTitle({ satellites: 0, placeLabel: 'Waterloo' })).toBe('No satellite we track watched Waterloo this week.')
@@ -182,7 +181,7 @@ describe('summary links (R3-13)', () => {
     const card = new URL(/<meta property="og:image" content="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&'))
     expect(card.searchParams.get('kind')).toBe('summary')
     expect(card.searchParams.get('sv')).toBe('256')
-    expect(card.searchParams.get('v')).toBe('4')
+    expect(card.searchParams.get('v')).toBe('5')
     expect(body).not.toMatch(/photographed|in detail/i)
   })
 })
@@ -192,7 +191,16 @@ describe('card spec', () => {
     const s = shareFromRpc(ROW)!
     const spec = buildCardSpec(cardInputFromShare(s, 'overflight.app'))
     expect(spec.stamp).toBe('Sun 1 Nov 2026 · 11:21 EST')
-    expect(spec.verdictLabel).toBe('Watched')
+    // A share stored before N was kept: the satellite's own sentence.
+    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('Sentinel-2C watched Waterloo.')
+    // Since 0003 the share keeps N (pass.weekSatellites): the card, the page title and the description lead with it (owner).
+    const withN = shareFromRpc({ ...ROW, pass: { ...ROW.pass, weekSatellites: 7 } })!
+    expect(withN.satellites).toBe(7)
+    const specN = buildCardSpec(cardInputFromShare(withN, 'overflight.app'))
+    expect(`${specN.lead} ${specN.place}${specN.tail}`).toBe('7 satellites watched Waterloo.')
+    expect(headline(withN)).toBe('7 satellites watched Waterloo.')
+    expect(shareFromRpc({ ...ROW, pass: { ...ROW.pass, weekSatellites: 0 } })!.satellites).toBeUndefined()
+    expect(JSON.stringify(specN)).not.toMatch(/43\.47°N|◆/)
     expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind === 'image' && spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
     expect(spec.readouts.map((r) => `${r.label} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)).toEqual(['Altitude 795 km', 'Off-nadir 5.3°', 'Pixel 10 m'])
@@ -257,7 +265,7 @@ describe('share page', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/html')
     expect(body).toContain('<meta property="og:title" content="Sentinel-2C watched Waterloo.">')
-    expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=4">')
+    expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=5">')
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
     expect(body).toContain('<meta name="twitter:card" content="summary_large_image">')
     expect(body).toContain('<link rel="canonical" href="https://overflight.app/s/ab3d5f7h">')
@@ -342,7 +350,7 @@ describe('share page', () => {
       cloud: '25',
       gsd: '10',
       spot: 'clear',
-      v: '4',
+      v: '5',
     })
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
     expect(body).toContain('<meta property="og:image:alt" content="Sentinel-2C watched Waterloo.">')
@@ -394,7 +402,10 @@ describe('og card', () => {
     const q = new URL(image).searchParams
     const spec = buildCardSpec(cardInputFromShare(shareFromParams(q)!, 'overflight.app'))
     expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('Sentinel-2C watched Waterloo.')
-    expect(spec.coords).toBe('43.47°N 80.54°W')
+    // With N in the link (`sv`), the fallback card reads as the stored one does.
+    const qN = new URLSearchParams(q)
+    qN.set('sv', '12')
+    expect(buildCardSpec(cardInputFromShare(shareFromParams(qN)!, 'overflight.app')).lead).toBe('12 satellites watched')
     const { handleOg } = (await import('../og.tsx' as string)) as { handleOg: (r: Request) => Promise<Response> }
     const res = await handleOg(new Request(image))
     expect(res.status).toBe(200)
@@ -406,7 +417,7 @@ describe('og card', () => {
   it('renders a summary link’s card offline: the N / K headline over the instrument face (R3-13)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('offline'))))
     const { handleOg } = (await import('../og.tsx' as string)) as { handleOg: (r: Request) => Promise<Response> }
-    const q = 'kind=summary&q=43.47,-80.54&n=Waterloo&sv=256&sc=31,220,1544,66&sw=1793678400000&bc=sentinel-2-l2a&bi=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&bs=Sentinel-2C&bt=1793549661025&bg=10&v=4'
+    const q = 'kind=summary&q=43.47,-80.54&n=Waterloo&sv=256&sc=31,220,1544,66&sw=1793678400000&bc=sentinel-2-l2a&bi=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&bs=Sentinel-2C&bt=1793549661025&bg=10&v=5'
     const res = await handleOg(new Request(`https://www.watched.earth/api/og?${q}`))
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('image/jpeg')

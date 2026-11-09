@@ -4,7 +4,7 @@
  *
  * 1200 × 630 (OG size). Left: the real crop, centred on the ROUNDED place (privacy), with the reticle,
  * source chip, scale bar and the archive's credit; or the pass geometry when there is no picture.
- * Right: wordmark + local time, verdict row, headline, three readouts, the invitation footer.
+ * Right: wordmark + local time, headline ("7 satellites watched Waterloo."), three readouts, the invitation footer.
  *
  * The plate (share R2SH1): the pass view has already decoded a larger crop of the same scene around the
  * searched point (1024 px, ±5 km for Sentinel-2). The card's square, centred on the rounded share point,
@@ -33,7 +33,6 @@ import {
   buildSummarySpec,
   hatchPath,
   plateOrFallback,
-  verdictGlyphPrims,
   type CardCrop,
   type CardSpec,
   type Chip,
@@ -58,6 +57,11 @@ export { CARD_H, CARD_W, PLATE, type CardSpec, type PlateSource }
 export interface CardOptions {
   /** The picture is mostly cloud (results' isClouded): the clouded variant. */
   clouded?: boolean
+}
+
+/** N for a pass card's headline (owner): the results headline's count of satellites that watched the place this week. */
+export function weekSatellites(report: Report, meta: MetaFn): number {
+  return headline(report, meta).flewOver
 }
 
 /** Crop URL for a capture at the card's scale, centred on an arbitrary point (the rounded share point). */
@@ -117,13 +121,14 @@ export function cardSource(
 }
 
 /** The card for a pass, as the sharer sees it (the server builds the same from the stored share). */
-export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: string, host: string, opts: CardOptions = {}): CardSpec {
+export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: string, host: string, opts: CardOptions & { satellites?: number } = {}): CardSpec {
   const r = roundedPlace(report.place.lat, report.place.lon)
   const capture = captureFor(report, pass)
   const spec = buildCardSpec({
     verdict: pass.verdict,
     satName: meta.name,
     placeLabel: report.place.label,
+    satellites: opts.satellites,
     lat: r.lat,
     lon: r.lon,
     tClosest: pass.tClosest,
@@ -499,14 +504,6 @@ export async function renderCardPng(spec: CardSpec): Promise<Blob> {
   if (spec.stamp) rowText(ctx, spec.stamp, R, PANEL.top, C.bone2, monoFace(CARD_FS.row), 'right')
   ctx.fillStyle = C.line
   ctx.fillRect(X, PANEL.rule1, PANEL.w, 1)
-
-  // verdict row: glyph + verdict name, coordinates right
-  ctx.save()
-  ctx.translate(X, PANEL.verdict[0] + (PANEL.verdict[1] - 14) / 2)
-  drawPrims(ctx, verdictGlyphPrims(spec.verdict))
-  ctx.restore()
-  rowText(ctx, spec.verdictLabel, X + 14 + 10, PANEL.verdict, TONE_COLOR[spec.verdictTone], monoFace(CARD_FS.row))
-  rowText(ctx, spec.coords, R, PANEL.verdict, C.bone3, monoFace(CARD_FS.row), 'right')
 
   // headline, bottom-aligned: condensed lead lines, serif place, optional sub-line
   const S = spec.size

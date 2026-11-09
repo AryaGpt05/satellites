@@ -26,13 +26,11 @@ import {
   TONE_COLOR,
   TRACK,
   creditFor,
-  fmtCoords,
   hatchPath,
   imageOverlay,
   niceLength,
   plateFrame,
   reticlePrims,
-  verdictGlyphPrims,
   type CardSpec,
   type Chip,
   type ImagePlate,
@@ -220,10 +218,6 @@ function headline(spec: Pick<CardSpec, 'lead' | 'place' | 'tail' | 'sub' | 'size
   )
 }
 
-function glyph(spec: CardSpec): ReactElement {
-  return h('svg', { width: 14, height: 14, viewBox: '0 0 14 14' }, ...verdictGlyphPrims(spec.verdict).map((p) => (p.t === 'path' ? h('path', { d: p.d, fill: p.fill ?? 'none', stroke: p.stroke, strokeWidth: p.width }) : null)))
-}
-
 const tone = (t: Tone) => TONE_COLOR[t]
 
 function readouts(spec: CardSpec): ReactElement[] {
@@ -268,7 +262,6 @@ export function shareCard({ spec, image }: ShareCardInput): ReactElement {
     abs({ left: PLATE, top: 0, width: 1, height: CARD_H, background: C.lineStrong }),
     row(PANEL.top, lockup(), spec.stamp ? mono(spec.stamp, CARD_FS.row, C.bone2) : undefined),
     rule(PANEL.rule1),
-    row(PANEL.verdict, [glyph(spec), mono(spec.verdictLabel, CARD_FS.row, tone(spec.verdictTone))], mono(spec.coords, CARD_FS.row, C.bone3)),
     headline(spec),
     rule(PANEL.rule2),
     ...readouts(spec),
@@ -291,7 +284,8 @@ export const DEFAULT_PLATE = {
   lat: 25.1206,
   lon: 55.132,
   place: 'Palm Jumeirah, Dubai',
-  chip: 'Sentinel-2C · MSI · 10 m · 3 Nov 2026',
+  /** The plate names the place (the card has no place row: owner removed the ◆ row and the coordinates) */
+  chip: 'Palm Jumeirah · Sentinel-2C · 10 m',
 } as const
 
 export { DEFAULT_CARD_ALT }
@@ -366,12 +360,7 @@ export function defaultCard({ host, plateDataUri }: { host: string; plateDataUri
     abs({ left: PLATE, top: 0, width: 1, height: CARD_H, background: C.lineStrong }),
     row(PANEL.top, lockup(), mono('Last 7 days', CARD_FS.row, C.bone2)),
     rule(PANEL.rule1),
-    row(
-      PANEL.verdict,
-      [h('svg', { width: 14, height: 14, viewBox: '0 0 14 14' }, h('path', { d: 'M7 0.5L13.5 7L7 13.5L0.5 7Z', fill: C.signal })), mono(P.place, CARD_FS.row, C.signal)],
-      mono(fmtCoords(P.lat, P.lon), CARD_FS.row, C.bone3),
-    ),
-    // The hero sits optically centred between the verdict row and the footer rule.
+    // The hero sits bottom-aligned above the footer rule, with the top rule's air above it (no row between: owner).
     abs({ left: PANEL.x, top: PANEL.headTop, width: PANEL.w, height: 512 - PANEL.headTop, flexDirection: 'column', justifyContent: 'flex-end' }, heroLines(88)),
     rule(PANEL.rule3),
     row(PANEL.foot, mono('Enter any place on Earth', 15, C.bone), host ? mono(host, CARD_FS.row, C.bone2, { textTransform: 'none', letterSpacing: 0.5 }) : undefined),

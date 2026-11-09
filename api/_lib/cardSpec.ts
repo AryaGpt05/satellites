@@ -12,8 +12,8 @@
  *   ┌──────────── 630 ────────────┬──────────────── 570 ───────────────┐
  *   │ SENTINEL-2C · MSI · 10 M  ├1 KM┤│ Watched.      SUN 1 NOV 2026 · 11:21 EST│
  *   │                             │ ─────────────────────────────────── │
- *   │                             │ ◆ WATCHED             43.47°N 80.54°W│
- *   │            ⊕                │ Sentinel-2C                         │
+ *   │                             │                                     │
+ *   │            ⊕                │ 7 satellites                        │
  *   │   real crop (or geometry)   │ watched                             │
  *   │                             │ Waterloo.                           │
  *   │                             │ ─────────────────────────────────── │
@@ -62,7 +62,7 @@ export const CARD_FS = {
   chip: 13,
   /** The main picture chip (satellite · sensor · pixel) */
   chipLead: 14,
-  /** Mono rows of the panel: stamp, verdict row, readout labels, footer */
+  /** Mono rows of the panel: stamp, readout labels, footer */
   row: 13,
   lockup: 16,
   readout: 30,
@@ -83,8 +83,8 @@ export const PANEL = {
   w: CARD_W - PLATE - 104,
   top: [42, 22] as const,
   rule1: 82,
-  verdict: [100, 20] as const,
-  headTop: 136,
+  /** The headline block's top (it sits bottom-aligned at headBottom; no row between rule1 and it: owner) */
+  headTop: 112,
   headBottom: 440,
   rule2: 466,
   roLabel: [486, 16] as const,
@@ -184,11 +184,7 @@ export interface CardSpec {
   verdict: Verdict
   /** Top right: "Sun 1 Nov 2026 · 11:21 EST" ("" when unknown) */
   stamp: string
-  /** Verdict row: "Watched" (one vocabulary: docs/DESIGN.md §7) */
-  verdictLabel: string
-  verdictTone: Tone
-  /** "43.47°N 80.54°W" (the rounded share point) */
-  coords: string
+  /** "7 satellites watched" (owner: every card leads with the week's N; the satellite's own name when N is unknown) */
   lead: string
   place: string
   /** "." after the place (" this week." on the summary card), or "" when the place was cut short with an ellipsis */
@@ -223,6 +219,11 @@ export interface CardInput {
   verdict: Verdict
   satName: string
   placeLabel: string
+  /**
+   * N: the satellites that watched the place that week (the results headline's number). The card then reads
+   * "7 satellites watched Waterloo." (owner); a share stored before N was kept falls back to "Sentinel-2C watched Waterloo."
+   */
+  satellites?: number
   /** The rounded share point (2 decimals) */
   lat: number
   lon: number
@@ -309,6 +310,16 @@ export function headlineParts(verdict: Verdict, satName: string, placeLabel: str
   const place = cps.length > PLACE_MAX ? `${cps.slice(0, PLACE_MAX - 1).join('').trimEnd()}…` : placeLabel
   // "…." reads as a typo: a place already cut short ends on the ellipsis alone.
   return { lead: `${satName} ${VERDICT_WORDS[verdict].verb}`, place, tail: place.endsWith('…') ? '' : '.' }
+}
+
+/**
+ * A pass card's headline (owner): the week's N, "7 satellites watched | Waterloo | .", the same words as the results
+ * headline; the satellite's own sentence ("Sentinel-2C watched | Waterloo | .") only when N isn't known (older shares).
+ */
+export function passHeadlineParts(i: Pick<CardInput, 'verdict' | 'satName' | 'placeLabel' | 'satellites'>): { lead: string; place: string; tail: string } {
+  const h = headlineParts(i.verdict, i.satName, i.placeLabel)
+  const n = i.satellites
+  return n !== undefined && Number.isFinite(n) && n >= 1 ? { ...h, lead: watchedLead(n) } : h
 }
 
 /**
@@ -728,7 +739,7 @@ function readoutsFor(input: CardInput): Readout[] {
 
 /** Build the card from a normalised input (client: the selected pass; server: the stored share). */
 export function buildCardSpec(input: CardInput): CardSpec {
-  const h = headlineParts(input.verdict, input.satName, input.placeLabel)
+  const h = passHeadlineParts(input)
   const c = input.capture
   const clouded = input.verdict === 'imaged' && !!c && (input.clouded ?? isCloudedCapture(c))
   // The words for a clouded picture (R2SH3). A caller that calls it clouded on evidence the capture
@@ -756,9 +767,6 @@ export function buildCardSpec(input: CardInput): CardSpec {
   return {
     verdict: input.verdict,
     stamp: input.tClosest !== undefined ? localStamp(input.tClosest, input.timeZone) : '',
-    verdictLabel: VERDICT_WORDS[input.verdict].title,
-    verdictTone: input.verdict === 'imaged' || input.verdict === 'likely' ? 'signal' : 'bone2',
-    coords: fmtCoords(input.lat, input.lon),
     lead: h.lead,
     place: h.place,
     tail: h.tail,
@@ -861,9 +869,6 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
   return {
     verdict: n > 0 ? 'imaged' : 'overhead',
     stamp: day ? `7 days to ${day}` : 'Last 7 days',
-    verdictLabel: c && i.best ? `Closest look · ${i.best.tClosest !== undefined ? localStamp(i.best.tClosest, i.timeZone).split(' · ')[0].replace(/ \d{4}$/, '') : i.best.satName}` : 'This week',
-    verdictTone: n > 0 ? 'signal' : 'bone2',
-    coords: fmtCoords(i.lat, i.lon),
     lead,
     place,
     tail,
