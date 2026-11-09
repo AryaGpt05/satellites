@@ -139,14 +139,33 @@ export const THUMB_PX = 112
 export const thumbUrl = (c: Capture) => displayUrl(c, { ...cardSpec(c), px: THUMB_PX })
 
 /**
- * The lightbox's sharper render, if any: none. The card image already holds every pixel the archive has for the
- * area (Sentinel-2: its own 10 m pixels, copied 1:1 on the scene's grid; Landsat: an exact 2× of its 30 m), so
- * zooming in the lightbox shows real pixels from the photo that is already decoded: no second request, no 2048 px
- * render (it only upsampled the same 10 km: 4.7–7.1 s and ~1 s of toning for no new detail), no crossfade.
+ * The lightbox's sharper layer: the card's very box on the place's grid (the same native pixels, so it registers over
+ * the card exactly), rendered at HIRES_PX: Sentinel-2's 10 m pixels at 2×, Landsat's 30 m at 4×, resampled on the
+ * grid with Lanczos (no warp for a scene on it), then toned and sharpened by the same pipeline at that scale with the
+ * curve the card was shown with (pixels.ts: a magnified view). It holds no ground detail the card lacks; it spares
+ * the browser's own upscaling of the 1000 px card where the photo is shown larger than that in device pixels (a
+ * phone at 3×, a Retina laptop) or zoomed in (hiResHelps). Only the lightbox asks for it, once per photo (the
+ * gallery and the hero never do). Weather mosaics, geostationary frames and an archive thumbnail (no crop): none.
  */
-export function hiResUrl(_c: Capture): string | undefined {
-  return undefined
+export const HIRES_PX = 2000
+export function hiResUrl(c: Capture): string | undefined {
+  if (!isDetailed(c)) return undefined
+  const url = displayUrl(c, { ...cardSpec(c), px: HIRES_PX })
+  return url !== cardUrl(c) ? url : undefined
 }
+
+/** Device pixels across the shown photo past which the 1000 px card is magnified on screen (iPhone 15 Pro: 1179). */
+export const HIRES_DEVICE_PX = 1100
+/** Zoom past which the sharper layer is asked for on any screen (once per photo). */
+export const HIRES_ZOOM = 1.3
+/** A zoom this small already means the user is zooming in: the lightbox starts the sharper layer then, ahead of HIRES_ZOOM. */
+export const HIRES_INTENT_ZOOM = 1.05
+
+/**
+ * Whether the lightbox's sharper layer shows more than the card: the photo's side in device pixels already past
+ * HIRES_DEVICE_PX at 1× (a phone at 3×, a Retina laptop; never a 1× laptop, 688–900 px), or a zoom past HIRES_ZOOM.
+ */
+export const hiResHelps = (sideCssPx: number, dpr: number, zoom = 1) => sideCssPx * dpr > HIRES_DEVICE_PX || zoom > HIRES_ZOOM
 
 /** Crop width in km (the card and the lightbox show the same area). */
 export const cropWidthKm = (c: Pick<Capture, 'collection'>) => cardSpec(c).halfSizeKm * 2
@@ -154,7 +173,8 @@ export const cropWidthKm = (c: Pick<Capture, 'collection'>) => cardSpec(c).halfS
 /**
  * A compass bearing (the satellite's heading at closest approach) as drawn on the capture's photo, degrees clockwise
  * from the photo's up. Sentinel-2 / Landsat photos are cut on the place's UTM grid, whose up is grid north: true
- * north is turned from it by the meridian convergence (up to ~3°), and so is every heading overlaid on the photo.
+ * north is turned from it by the meridian convergence (under 3° in a standard 6° zone; up to 5.4° in south-west
+ * Norway's zone 32 and 6.0° in Svalbard's 12°-wide zones, api/_lib/utm.ts), and so is every heading overlaid on the photo.
  */
 export function photoHeadingDeg(c: Capture, headingDeg: number): number {
   let url: string

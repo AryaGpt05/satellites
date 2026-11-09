@@ -9,10 +9,11 @@
  *   laptops  the photo up to ~85vh, a metadata strip and a filmstrip. Wheel / trackpad pinch zooms around
  *            the cursor, drag pans, double-click toggles 2.5×, ← → move, + − 0 zoom, Esc / ✕ / F close.
  *
- * Detail when expanded: the decoded card image is the photo at full resolution (Sentinel-2's own 10 m pixels, cut
- * on the scene's grid; lib/photos hiResUrl asks for nothing more), so zooming shows real pixels at once, from the
- * one request. The resolution ("10 m / pixel") and a live scale bar ride on the frame; the reticle stays on the
- * place at any zoom.
+ * Detail when expanded: the decoded card image shows at once (Sentinel-2's own 10 m pixels, cut on the place's grid).
+ * Where it is shown larger than its 1000 px in device pixels (a phone at 3×, a Retina laptop) or the first time it is
+ * zoomed past 1.3×, the same box at 2000 px (lib/photos hiResUrl, toned with the card's curve) loads once and
+ * crossfades in over it (200 ms) when decoded: pixel for pixel on the card, so nothing moves but the sharpness. The
+ * resolution ("10 m / pixel") and a live scale bar ride on the frame; the reticle stays on the place at any zoom.
  *
  * Open / close: the photo grows from its exact rect in the panel (FLIP, 360 ms ease-out) and shrinks back to
  * the rect of whichever photo is current on close; the backdrop fades. Reduced motion: a 160 ms fade.
@@ -32,7 +33,7 @@ import { selectQuietly } from './actions'
 import { coverPinKey, pinnedOrder, useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
 import { Img } from './Img'
-import { cardSpec, cardUrl, cropWidthKm, filterPhotos, hiResUrl, photoHeadingDeg, placeOffset, thumbUrl, type Photo } from './lib/photos'
+import { cardSpec, cardUrl, cropWidthKm, filterPhotos, HIRES_INTENT_ZOOM, hiResHelps, hiResUrl, photoHeadingDeg, placeOffset, thumbUrl, type Photo } from './lib/photos'
 import { productLabel, scaleBarKm, sensorName } from './lib/captures'
 import { dec1, int } from './lib/copy'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from './lib/time'
@@ -125,6 +126,9 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const chromeRef = useRef<HTMLDivElement[]>([])
   const z = useRef({ s: 1, x: 0, y: 0 })
   const anim = useRef(0)
+  // Photos zoomed in this opening: their sharper layer loads even where 1× does not ask for it.
+  const zoomedRef = useRef(new Set<string>())
+  const [zoomedKeys, setZoomedKeys] = useState<ReadonlySet<string>>(zoomedRef.current)
   const reduced = prefersReducedMotion()
   const photo = items[index]
   const n = items.length
@@ -150,6 +154,13 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
     if (zoomTextRef.current) zoomTextRef.current.textContent = `${k.toFixed(1)}×`
     const box = boxRef.current
     if (box) box.dataset.zoomed = k > 1.001 ? 'true' : 'false'
+    // The first zoom intent asks for this photo's sharper layer (one render per photo, not per frame), so it is
+    // usually decoded by the time the zoom passes HIRES_ZOOM. Skipped where 1× already asks for it (phones, Retina):
+    // a re-render mid-pinch would change nothing.
+    if (p && k > HIRES_INTENT_ZOOM && !zoomedRef.current.has(p.key) && !hiResHelps(side, window.devicePixelRatio || 1)) {
+      zoomedRef.current = new Set(zoomedRef.current).add(p.key)
+      setZoomedKeys(zoomedRef.current)
+    }
   }, [items, place])
   const layoutRef = useRef(layout)
   layoutRef.current = layout
@@ -560,6 +571,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const spoken = photo.pass ? `Photo ${pos} of ${windowItems.length}${lead ? `, ${lead.toLowerCase()}` : ''}` : 'The last clear look, from before this week'
   const side = layout.side
   const boxStyle: CSSProperties = { left: layout.left, top: layout.top, width: side, height: side }
+  // Shown larger than the card in device pixels already at 1×: every photo viewed gets its sharper layer.
+  const hiAt1x = hiResHelps(side, window.devicePixelRatio || 1)
   const setChrome = (i: number) => (el: HTMLDivElement | null) => {
     if (el) chromeRef.current[i] = el
   }
@@ -602,7 +615,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
             return (
               <div key={p.key} className={s.slide} style={{ transform: `translateX(${d * (side + GAP)}px)` }} aria-hidden={d !== 0 || undefined}>
                 <div ref={d === 0 ? zoomRef : undefined} className={s.zoom}>
-                  <LbPhoto photo={p} model={model} hires={opened && !closing && d === 0} reveal={p.key === revealKey} />
+                  <LbPhoto photo={p} model={model} hires={opened && !closing && d === 0 && (hiAt1x || zoomedKeys.has(p.key))} reveal={p.key === revealKey} />
                 </div>
               </div>
             )
@@ -685,13 +698,24 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   )
 }
 
-/** One photo in the viewer: the decoded card image at once (a sharper render would crossfade in if hiResUrl gave one). */
+/** Sharper layers that failed this session: the photo stays on its card, and nothing asks again. */
+const hiFailed = new Set<string>()
+
+/**
+ * One photo in the viewer: the decoded card image at once; with `hires`, its sharper layer (lib/photos hiResUrl) loads
+ * once the card shows (so the card's curve is the one it is toned with) and crossfades in over it, the same box pixel
+ * for pixel. A layer already decoded this session shows in the first frame. A failure leaves the card, silently.
+ */
 function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: ResultsModel; hires: boolean; reveal: boolean }) {
   const base = cardUrl(photo.capture)
   const hi = hiResUrl(photo.capture)
   const [baseOk, setBaseOk] = useState(() => !!decodedPhoto(base) || hasPhotoElement('lightbox', base))
   const [hiOk, setHiOk] = useState(() => !!(hi && (decodedPhoto(hi) || hasPhotoElement('lightbox-hi', hi))))
   const [hiFade, setHiFade] = useState(false)
+  // A photo revealed here (never shown before) takes its sharper layer once the scan is done.
+  const [revealed, setRevealed] = useState(false)
+  // A 'last clear look' (no pass) is drawn as the plain card even when revealed here: gate on what is drawn.
+  const cardShown = reveal && photo.pass ? revealed : baseOk
   useEffect(() => {
     if (baseOk) return
     const ctl = new AbortController()
@@ -701,7 +725,7 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
     return () => ctl.abort()
   }, [base, baseOk])
   useEffect(() => {
-    if (!hires || !hi || hiOk) return
+    if (!hires || !hi || hiOk || !cardShown || hiFailed.has(hi)) return
     const ctl = new AbortController()
     loadPhoto(hi, ctl.signal)
       .then(() => {
@@ -709,29 +733,37 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
         setHiFade(true)
         setHiOk(true)
       })
-      .catch(() => undefined)
+      .catch(() => {
+        // Not when this view stopped waiting (the shared load goes on, and is a cache hit later).
+        if (!ctl.signal.aborted) hiFailed.add(hi)
+      })
     return () => ctl.abort()
-  }, [hires, hi, hiOk])
+  }, [hires, hi, hiOk, cardShown])
   const alt = `${model.meta(photo.pass?.norad ?? photo.capture.norad ?? 0).name} image of ${model.report.place.label}. The place is at the centre.`
   const dim = photo.clouded ? ((photo.capture.cloudCoverPct ?? 0) >= 90 ? s.dimOvercast : s.dimCloud) : undefined
+  const hiLayer = hiOk && hi ? <Img view="lightbox-hi" url={hi} alt="" ariaHidden className={cx(s.img, dim)} fadeClass={hiFade ? s.hiFade : undefined} /> : null
   if (reveal && photo.pass)
     return (
-      <PushbroomReveal
-        src={base}
-        view="lightbox"
-        headingDeg={photoHeadingDeg(photo.capture, photo.pass.headingDeg)}
-        lines={cardSpec(photo.capture).px}
-        alt={alt}
-        startAt="now"
-        seenKey={seenKeyOf(photo)}
-        className={s.fill}
-        frameClassName={cx(s.fillFrame, dim)}
-      />
+      <>
+        <PushbroomReveal
+          src={base}
+          view="lightbox"
+          headingDeg={photoHeadingDeg(photo.capture, photo.pass.headingDeg)}
+          lines={cardSpec(photo.capture).px}
+          alt={alt}
+          startAt="now"
+          seenKey={seenKeyOf(photo)}
+          className={s.fill}
+          frameClassName={cx(s.fillFrame, dim)}
+          onPhase={(ph) => ph === 'done' && setRevealed(true)}
+        />
+        {revealed ? hiLayer : null}
+      </>
     )
   return (
     <>
       {baseOk ? <Img view="lightbox" url={base} alt={alt} className={cx(s.img, dim)} /> : <span className={s.acquiring}>Acquiring</span>}
-      {hiOk && hi ? <Img view="lightbox-hi" url={hi} alt="" ariaHidden className={cx(s.img, dim)} fadeClass={hiFade ? s.hiFade : undefined} /> : null}
+      {baseOk ? hiLayer : null}
     </>
   )
 }

@@ -34,8 +34,8 @@
  *    fraction for the ranking (src/imagery/cloud.ts).
  */
 
-import { ENC_TOP_REFL, NATIVE_GSD_M, crsOfQuery, isToneCollection, type Box, type ToneCollection, type TonePlan } from './toneRender.js'
-import { utmForward, utmInverse } from './utm.js'
+import { ENC_TOP_REFL, NATIVE_GSD_M, isToneCollection, type Box, type ToneCollection, type TonePlan } from './toneRender.js'
+import { utmInverse } from './utm.js'
 
 export * from './toneRender.js'
 
@@ -100,10 +100,8 @@ export type Cell = (typeof Cell)[keyof typeof Cell]
 
 export interface ToneMask {
   collection: ToneCollection
-  /** The mask's square, in `crs` */
+  /** The mask's square, lon/lat degrees (always: toneRender maskUrl; crops on a UTM grid read it through toMaskCrs) */
   box: Box
-  /** 4326 (box in degrees) or the scene's UTM EPSG (box in grid metres): the geometry of the crops it tones */
-  crs: number
   w: number
   h: number
   /** Raw class values (SCL value / QA_PIXEL bits), row 0 = north */
@@ -134,7 +132,7 @@ export function qaCell(v: number): Cell {
 }
 
 /** The mask grid from titiler's npy (bands × h × w: the class band, then the validity mask 0 / 255). */
-export function maskFromNpy(collection: ToneCollection, box: Box, npy: Npy, crs = 4326): ToneMask {
+export function maskFromNpy(collection: ToneCollection, box: Box, npy: Npy): ToneMask {
   const [bands, h, w] = npy.shape.length === 3 ? npy.shape : [1, npy.shape[0], npy.shape[1]]
   if (!(h > 0 && w > 0) || npy.data.length < bands * h * w) throw new Error('bad mask shape')
   const n = w * h
@@ -148,22 +146,22 @@ export function maskFromNpy(collection: ToneCollection, box: Box, npy: Npy, crs 
     const valid = !hasValid || Number(npy.data[(bands - 1) * n + i]) > 0
     cls[i] = valid ? toCell(v) : Cell.NoData
   }
-  return { collection, box, crs, w, h, raw, cls }
+  return { collection, box, w, h, raw, cls }
 }
 
 const MASK_URL_RE = /\/item\/bbox\/(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\/\d+x\d+\.npy\?(.*)$/
 
-/** The mask grid from a `maskUrl` and its npy body (the URL says the collection, the square and its CRS). */
+/** The mask grid from a `maskUrl` and its npy body (the URL says the collection and the square, in lon/lat). */
 export function maskFromResponse(url: string, body: ArrayBuffer | Uint8Array): ToneMask {
   const m = MASK_URL_RE.exec(url)
   const q = m ? new URLSearchParams(m[5]) : null
   const collection = q?.get('collection') ?? ''
-  const crs = q ? crsOfQuery(q) : null
-  if (!m || !isToneCollection(collection) || crs === null) throw new Error('not a mask URL')
-  return maskFromNpy(collection, [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])], parseNpy(body), crs)
+  // maskUrl never asks for a grid (coord_crs / dst_crs): a box in metres is not one of ours.
+  if (!m || !q || !isToneCollection(collection) || q.has('coord_crs') || q.has('dst_crs')) throw new Error('not a mask URL')
+  return maskFromNpy(collection, [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])], parseNpy(body))
 }
 
-/** Mask cell under a point in the mask's own CRS (lon/lat for 4326, grid metres otherwise), or −1 off the grid. */
+/** Mask cell under a lon/lat (`x` = lon, `y` = lat, on the mask's side of the antimeridian), or −1 off the grid. */
 export function maskCellAt(m: ToneMask, x: number, y: number): number {
   const i = Math.floor(((x - m.box[0]) / (m.box[2] - m.box[0])) * m.w)
   const j = Math.floor(((m.box[3] - y) / (m.box[3] - m.box[1])) * m.h)
@@ -171,16 +169,15 @@ export function maskCellAt(m: ToneMask, x: number, y: number): number {
 }
 
 /**
- * A lat/lon in the mask's CRS ([lon, lat] for 4326, [easting, northing] on its grid). A longitude is taken on the
- * mask's side of the antimeridian (a box near ±180° runs past it).
+ * A lat/lon as the mask's [lon, lat], the longitude taken on the mask's side of the antimeridian (a box near ±180°
+ * runs past it).
  */
-export function maskPoint(m: Pick<ToneMask, 'crs' | 'box'>, lat: number, lon: number): [number, number] {
-  if (m.crs !== 4326) return utmForward(m.crs, lat, lon)
+export function maskPoint(m: Pick<ToneMask, 'box'>, lat: number, lon: number): [number, number] {
   const c = (m.box[0] + m.box[2]) / 2
   return [lon + 360 * Math.round((c - lon) / 360), lat]
 }
 
-/** Mask cell under a lat/lon, whatever the mask's CRS, or −1 off the grid. */
+/** Mask cell under a lat/lon (either side of the antimeridian), or −1 off the grid. */
 export function maskCellAtLatLon(m: ToneMask, lat: number, lon: number): number {
   const [x, y] = maskPoint(m, lat, lon)
   return maskCellAt(m, x, y)
@@ -190,15 +187,15 @@ export function maskCellAtLatLon(m: ToneMask, lat: number, lon: number): number 
 const MAP_CELLS = 8
 
 /**
- * A point of a crop in `crs` → the same ground point in the mask's CRS, or null when both share a geometry (a
- * lon/lat crop and its lon/lat mask). A crop on a UTM grid reads the lon/lat mask through lat/lon: projected exactly
- * on an 8 × 8 lattice over the crop and bilinearly within its cells (≤ 0.2 m off over a 15 km crop, against 156 m
- * mask cells; a projection per sample would cost ~0.3 s a photo).
+ * A point of a crop in `crs` → the same ground point in the (lon/lat) mask, or null for a lon/lat crop (the mask's
+ * own geometry). A crop on a UTM grid reads the mask through lat/lon: projected exactly on an 8 × 8 lattice over the
+ * crop and bilinearly within its cells (≤ 0.2 m off over a 15 km crop, against 156 m mask cells; a projection per
+ * sample would cost ~0.3 s a photo).
  */
 export function toMaskCrs(m: ToneMask, crs: number, box: Box): ((x: number, y: number) => [number, number]) | null {
-  if (m.crs === crs) return null
+  if (crs === 4326) return null
   const exact = (x: number, y: number): [number, number] => {
-    const [lat, lon] = crs === 4326 ? [y, x] : utmInverse(crs, x, y)
+    const [lat, lon] = utmInverse(crs, x, y)
     return maskPoint(m, lat, lon)
   }
   const N = MAP_CELLS

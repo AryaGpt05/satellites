@@ -4,7 +4,7 @@ import pcLandsat from './__fixtures__/pc-landsat-waterloo.json'
 import esS2 from './__fixtures__/es-s2-waterloo.json'
 import clearS2 from './__fixtures__/pc-clear-sentinel-2-l2a-waterloo.json'
 import clearLs from './__fixtures__/pc-clear-landsat-c2-l2-waterloo.json'
-import { pcCropUrl } from './endpoints'
+import { pcCropUrl } from './pcCrop'
 import {
   dedupeCandidates,
   earthSearchItemToCandidate,

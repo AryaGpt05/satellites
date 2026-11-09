@@ -1,10 +1,11 @@
 /**
  * Endpoints and pure URL builders for the public archives (see docs/ARCHITECTURE.md, "Data sources").
- * Everything here is synchronous and side-effect free so it can be unit tested exactly.
+ * Everything here is synchronous and side-effect free so it can be unit tested exactly. The first screen imports
+ * this module (the geocoder's host), so it carries no grid arithmetic: the Sentinel-2 / Landsat crop and mask URLs
+ * are ./pcCrop.ts.
  */
 import { bboxAround } from '@/lib/geo'
 import type { LatLon } from '@/types'
-import { maskUrl, pcCropUrlAt, tonePlanForUrl } from '../../api/_lib/toneRender'
 
 export const PC_STAC_SEARCH = 'https://planetarycomputer.microsoft.com/api/stac/v1/search'
 export const PC_DATA = 'https://planetarycomputer.microsoft.com/api/data/v1'
@@ -30,31 +31,6 @@ export function sanitizeCrop({ halfSizeKm, px }: CropOpts): CropOpts {
   const h = Number.isFinite(halfSizeKm) && halfSizeKm > 0 ? halfSizeKm : 3
   const p = Number.isFinite(px) ? Math.round(px) : 512
   return { halfSizeKm: Math.min(h, 2000), px: Math.min(2048, Math.max(8, p)) }
-}
-
-/**
- * Square crop of one STAC item, centred on `place`, rendered by Planetary Computer as the shared encoded render
- * (api/_lib/toneRender.ts: surface reflectance, square-root encoded). On the place's UTM grid (toneRender placeGrid:
- * whole native pixels; a scene on that grid is copied as it is, one from the neighbouring zone warped onto it with
- * Lanczos), else (`geographic`, or beyond UTM's latitudes) in lon/lat with a Lanczos warp. It is never shown as it
- * comes: image.ts tones it in the pixels worker (one global curve per photo) before anything displays it, and the
- * server's share card does the same, so every renderer shows the same pixels.
- */
-export function pcCropUrl(collection: StacCollection, itemId: string, place: LatLon, opts: CropOpts): string {
-  const { halfSizeKm, px } = sanitizeCrop(opts)
-  return pcCropUrlAt(collection, itemId, place.lat, place.lon, halfSizeKm, px, 'png', !!opts.geographic)
-}
-
-/** A Sentinel-2 / Landsat crop of the encoded render: toned (image.ts) before anything shows it. */
-export const isTonedUrl = (url: string) => tonePlanForUrl(url) !== null
-
-/**
- * The capture's cloud classification (Sentinel-2 SCL / Landsat QA_PIXEL) over the photo's square around the place
- * rounded to 0.01°, as a 64 px numpy array in lon/lat: the spot check, the clear fraction and the photo's tone all
- * read it (one request per capture and place).
- */
-export function pcMaskUrl(collection: StacCollection, itemId: string, place: LatLon): string {
-  return maskUrl(collection, itemId, place.lat, place.lon)
 }
 
 /** Human-facing map of one PC item (HTML). */

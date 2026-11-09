@@ -13,9 +13,10 @@
  * orbit (|Δt| ≲ 15 min) and display the pass time, not `Capture.datetime`.
  */
 import type { Capture, LatLon } from '@/types'
-import { ES_STAC_SEARCH, PC_STAC_SEARCH, pcCropUrl, type CropOpts, type StacCollection } from './endpoints'
+import { ES_STAC_SEARCH, PC_STAC_SEARCH, type CropOpts, type StacCollection } from './endpoints'
+import { pcCropUrl } from './pcCrop'
 import { fetchJson, isAbortError, throwIfAborted } from './net'
-import { CROP_HALF_KM, gridFromStac, s2GridFromItemId, sceneOnPlaceGrid } from '../../api/_lib/toneRender'
+import { CROP_HALF_KM, s2EpsgFromItemId, sceneEpsgFromStac, sceneOnPlaceGrid } from '../../api/_lib/toneRender'
 
 // ── STAC wire types (only what we read) ────────────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ export function pcItemToCandidate(item: StacItem, place: LatLon): Candidate | un
   const sunElevationDeg = num(p['view:sun_elevation']) ?? (zenith !== undefined ? 90 - zenith : undefined)
   const itemId = item.id
   // The scene's own CRS (Sentinel-2's also follows from its tile id): dedupe prefers the scene on the place's grid.
-  const epsg = (gridFromStac(collection, p, item.assets as Record<string, Record<string, unknown>> | undefined) ?? (collection === 'sentinel-2-l2a' ? s2GridFromItemId(itemId) : null))?.epsg
+  const epsg = sceneEpsgFromStac(collection, p, item.assets as Record<string, Record<string, unknown>> | undefined) ?? (collection === 'sentinel-2-l2a' ? s2EpsgFromItemId(itemId) : null) ?? undefined
   const capture: Capture = {
     id: itemId,
     provider: 'planetary-computer',
@@ -226,7 +227,7 @@ export function earthSearchItemToCandidate(item: StacItem, place: LatLon): Candi
     processing: `${str(p['s2:processing_baseline']) ?? ''}|${productUri ? s2GenerationStamp(productUri) : ''}`,
     tile: grid.every((g) => g !== undefined) ? grid.join('') : undefined,
     // Its zone as Planetary Computer's copy is gridded (the tile id), else as Earth Search's properties say.
-    epsg: (pcId ? s2GridFromItemId(pcId)?.epsg : undefined) ?? (zone && band ? (band >= 'N' ? 32600 : 32700) + zone : undefined),
+    epsg: (pcId ? s2EpsgFromItemId(pcId) : null) ?? (zone && band ? (band >= 'N' ? 32600 : 32700) + zone : undefined),
   }
 }
 

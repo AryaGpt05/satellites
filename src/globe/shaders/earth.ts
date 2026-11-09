@@ -33,6 +33,7 @@ export const earthFragment = glsl`
   uniform vec3 uFreshColor;     // fresh-exposure tint (signal)
   uniform float uDayLod;        // mip level of the day map at the context patch's tone-matching scale
   uniform float uPanelHalf;     // the panel photo's half extent, in decal patch units (0 = none)
+  uniform vec2 uPanelTurn;      // (cos, sin) of the panel photo's turn on the map, counter-clockwise from north up
   uniform vec3 uPanelColor;
 
   uniform sampler2D uDay;
@@ -191,9 +192,12 @@ export const earthFragment = glsl`
 
     // ── the developing image: a short over-exposed band right behind the scan line, settling to true colour
     col += (col * 1.6 + uFreshColor * 0.06) * fresh * decal.a;
-    // ── the panel photo's extent: a 1 px hairline square at the place, once it is big enough to mean something
+    // ── the panel photo's extent: a 1 px hairline square at the place, once it is big enough to mean something. The
+    //    decal is lon/lat (north up) and the panel photo grid-north-up, so the square is turned by the meridian
+    //    convergence: p is read in the photo's own axes (right, up).
     if (uPanelHalf > 0.0 && decal.a > 0.01) {
-      vec2 p = patchCoord(suv, uDecalUv) - 0.5;
+      vec2 pm = patchCoord(suv, uDecalUv) - 0.5;
+      vec2 p = vec2(dot(pm, vec2(uPanelTurn.x, uPanelTurn.y)), dot(pm, vec2(-uPanelTurn.y, uPanelTurn.x)));
       vec2 fwq = max(fwidth(p), vec2(1e-7));
       float sidePx = 2.0 * uPanelHalf / max(fwq.x, fwq.y);
       vec2 d = abs(abs(p) - uPanelHalf) / fwq;

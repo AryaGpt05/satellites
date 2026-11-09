@@ -346,6 +346,10 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                     'Touch-ups',
                     'Sentinel-2 and Landsat photos are colour-balanced, smoothed and lightly sharpened for your screen, the same way across the whole picture. Nothing is added or removed.',
                   ],
+                  [
+                    'Which way is up',
+                    'Sentinel-2 and Landsat photos keep the archive’s own map grid for your place, so north can sit a few degrees off straight up. When you open a photo, its N arrow shows exactly where.',
+                  ],
                 ]}
               />
             </Section>

@@ -20,7 +20,7 @@
 import type { Capture, LatLon } from '@/types'
 import { bboxAround } from '@/lib/geo'
 import { clearFraction, maskCellAtLatLon, maskPoint, type ToneMask } from '../../api/_lib/tone'
-import { pcMaskUrl } from './endpoints'
+import { pcMaskUrl } from './pcCrop'
 import { fetchMask } from './pixelsClient'
 import { Lru, memoAsync } from './lru'
 import { HttpError, isAbortError, raceAbort, throwIfAborted, withRetry } from './net'
@@ -115,10 +115,11 @@ const AREA_HALF_KM = 0.5
 
 /**
  * The spot class from a mask: the majority of the cells whose centres lie in the 1 km box around the place (else the
- * cell under it). The box is drawn in the mask's own geometry: lon/lat, or 1 km of grid metres on a native mask.
+ * cell under it). The mask is lon/lat (toneRender maskUrl); the place is taken on its side of the antimeridian.
  */
 export function spotFromMask(mask: ToneMask, place: LatLon): SpotCloud {
-  const [w, s, e, n] = mask.crs === 4326 ? bboxAround(place.lat, place.lon, AREA_HALF_KM) : areaOnGrid(mask, place)
+  const [lon, lat] = maskPoint(mask, place.lat, place.lon)
+  const [w, s, e, n] = bboxAround(lat, lon, AREA_HALF_KM)
   const values: number[] = []
   const cw = (mask.box[2] - mask.box[0]) / mask.w
   const ch = (mask.box[3] - mask.box[1]) / mask.h
@@ -137,13 +138,6 @@ export function spotFromMask(mask: ToneMask, place: LatLon): SpotCloud {
     values.push(mask.raw[c])
   }
   return mask.collection === 'sentinel-2-l2a' ? classifySclArea(values) : classifyQaArea(values)
-}
-
-/** The 1 km square around the place in a native mask's grid metres. */
-function areaOnGrid(mask: ToneMask, place: LatLon): [number, number, number, number] {
-  const [x, y] = maskPoint(mask, place.lat, place.lon)
-  const h = AREA_HALF_KM * 1000
-  return [x - h, y - h, x + h, y + h]
 }
 
 const cache = /* @__PURE__ */ new Lru<string, Promise<SpotCheck>>(512)

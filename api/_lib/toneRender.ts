@@ -1,7 +1,7 @@
 /**
  * The Sentinel-2 / Landsat render every renderer asks Planetary Computer for, its cloud-mask request, and which
- * region a crop's tone is measured over (see ./tone.ts for the whole method). Only URL arithmetic: small, so the
- * first screen (which reaches these builders through src/imagery/endpoints.ts) carries none of the pixel code.
+ * region a crop's tone is measured over (see ./tone.ts for the whole method). Only URL arithmetic, none of the pixel
+ * code; the app reaches it through src/imagery/pcCrop.ts, loaded with the search (never by the first screen).
  * Self-contained but for ./utm.ts (no other imports): the browser bundle and the functions share both.
  *
  * Two geometries:
@@ -15,7 +15,8 @@
  *    exact 2× Lanczos for Landsat (500 native px shown at 1000); `reproject=lanczos` is then a no-op (measured:
  *    byte-identical). A scene of the neighbouring zone (a place near a zone edge that only it covers), or Landsat
  *    over Antarctica (polar stereographic), is warped onto the grid with Lanczos. Up is grid north, which differs
- *    from true north by the meridian convergence (utm.ts gridBearingOfNorthDeg, up to ~3°); the place is within
+ *    from true north by the meridian convergence (utm.ts gridBearingOfNorthDeg: under 3° in a standard zone, up to 5.4°
+ *    in south-west Norway's zone 32 and 6.0° in Svalbard's 12°-wide zones); the place is within
  *    half a native pixel of the centre (one pixel when it lies within a few metres of a 0.01° line, see nativeBox).
  *  - GEOGRAPHIC (lon/lat, EPSG:4326): places beyond UTM's latitudes, and the globe's decals, which are mapped onto
  *    the sphere in lon/lat: warped with Lanczos.
@@ -47,6 +48,13 @@ export const CROP_HALF_KM: Record<ToneCollection, number> = { 'sentinel-2-l2a': 
  */
 export const REF_HALF_KM: Record<ToneCollection, number> = { 'sentinel-2-l2a': 3.15, 'landsat-c2-l2': 4.725 }
 
+/**
+ * Output side of the app's photo, px (src/ui/results/lib/captures.ts DETAILED_PX): Sentinel-2's own pixels, Landsat's
+ * at 2×. A crop of the same capture with more pixels than this is a magnified view of that photo (the lightbox's
+ * sharper layer, lib/photos hiResUrl).
+ */
+export const PHOTO_PX = 1000
+
 /** Native pixels across the app's photo and the mask (10 km of 10 m, 15 km of 30 m). */
 export const PHOTO_NATIVE_PX: Record<ToneCollection, number> = { 'sentinel-2-l2a': 1000, 'landsat-c2-l2': 500 }
 /** Native pixels across the share card's square, the measuring region (6.3 km of 10 m, 9.45 km of 30 m). */
@@ -72,7 +80,7 @@ const gridPath = (b: Box) => `${fm(b[0])},${fm(b[1])},${fm(b[2])},${fm(b[3])}`
 
 // ── The grids ───────────────────────────────────────────────────────────────────────────────
 
-/** A scene's pixel grid: its UTM CRS and where its pixel corners fall (the STAC item's proj:transform origin). */
+/** A pixel grid on a UTM zone: its CRS and where its pixel corners fall (placeGrid: the place's, as the archive delivers it). */
 export interface NativeGrid {
   /** EPSG:326zz / 327zz */
   epsg: number
@@ -86,40 +94,29 @@ export interface NativeGrid {
 const mod = (v: number, m: number) => ((v % m) + m) % m
 
 /**
- * A Sentinel-2 L2A scene's grid from its item id alone: the MGRS tile (T33UUU: zone 33, latitude band U, north)
- * names the UTM zone, and every tile's pixel corners lie on the 10 m lattice of that zone (tile origins are
- * multiples of 60 m: 300000 / 5900040 for T33UUU). Null for anything else.
+ * A Sentinel-2 L2A scene's UTM CRS from its item id alone: the MGRS tile (T33UUU: zone 33, latitude band U, north)
+ * names the zone and the hemisphere. Null for anything else.
  */
-export function s2GridFromItemId(itemId: string): NativeGrid | null {
+export function s2EpsgFromItemId(itemId: string): number | null {
   const m = /_T(\d{2})([C-HJ-NP-X])[A-Z]{2}_/.exec(itemId)
   if (!m) return null
   const zone = Number(m[1])
   if (!(zone >= 1 && zone <= 60)) return null
-  return { epsg: (m[2] >= 'N' ? 32600 : 32700) + zone, gsd: NATIVE_GSD_M['sentinel-2-l2a'], ox: 0, oy: 0 }
+  return (m[2] >= 'N' ? 32600 : 32700) + zone
 }
 
 type StacAssets = Record<string, Record<string, unknown> | undefined> | undefined
 
 /**
- * A scene's own grid from its STAC item (`proj:code` / `proj:epsg`, and the red band's `proj:transform`, else the
- * item's): null unless it is a north-up UTM grid of the collection's native pixel size (Landsat over Antarctica is
- * polar stereographic, EPSG:3031). Which scene of an overflight to show prefers one on the place's grid
- * (sceneOnPlaceGrid); the crop itself is always on the place's grid (placeGrid).
+ * A scene's own CRS from its STAC item (`proj:code` / `proj:epsg` of the red band, else the item's), or null unless it
+ * is a UTM zone (Landsat over Antarctica is polar stereographic, EPSG:3031). Which scene of an overflight to show
+ * prefers one in the place's zone (sceneOnPlaceGrid: copied 1:1); the crop itself is always on the place's grid.
  */
-export function gridFromStac(collection: ToneCollection, properties: Record<string, unknown>, assets?: StacAssets): NativeGrid | null {
+export function sceneEpsgFromStac(collection: ToneCollection, properties: Record<string, unknown>, assets?: StacAssets): number | null {
   const band = assets?.[collection === 'sentinel-2-l2a' ? 'B04' : 'red']
   const code = band?.['proj:code'] ?? properties['proj:code']
   const epsg = typeof code === 'string' && /^EPSG:\d+$/.test(code) ? Number(code.slice(5)) : (band?.['proj:epsg'] ?? properties['proj:epsg'])
-  if (typeof epsg !== 'number' || !utmZoneOf(epsg)) return null
-  const gsd = NATIVE_GSD_M[collection]
-  const t = band?.['proj:transform'] ?? properties['proj:transform']
-  if (Array.isArray(t) && t.length >= 6 && t.slice(0, 6).every((v) => typeof v === 'number' && Number.isFinite(v))) {
-    const [a, b, c, d, e, f] = t as number[]
-    if (a !== gsd || e !== -gsd || b !== 0 || d !== 0) return null
-    return { epsg, gsd, ox: mod(c, gsd), oy: mod(f, gsd) }
-  }
-  // No transform: Sentinel-2 tiles sit on the 10 m lattice; Landsat's corners at 15 m (pixel centres on 30 m).
-  return collection === 'sentinel-2-l2a' ? { epsg, gsd, ox: 0, oy: 0 } : { epsg, gsd, ox: gsd / 2, oy: gsd / 2 }
+  return typeof epsg === 'number' && utmZoneOf(epsg) ? epsg : null
 }
 
 /** The UTM zone of a place rounded to 0.01° (MGRS's, utm.ts utmZoneAt), or null beyond UTM's latitudes. */
@@ -296,6 +293,8 @@ export interface TonePlan {
   /** Measuring region (the card's square around the rounded point), in `crs` */
   ref: Box
   maskUrl: string
+  /** Output side, px */
+  px: number
   /** Ground metres per output pixel */
   metresPerPx: number
   /** Key of the shared curve for this capture at this place */
@@ -357,6 +356,7 @@ export function tonePlanForUrl(url: string): TonePlan | null {
       lon,
       ref: nativeBox(grid, lat, lon, CARD_NATIVE_PX[collection]),
       maskUrl: maskUrl(collection, itemId, lat, lon),
+      px,
       metresPerPx: (box[2] - box[0]) / px,
       key: planKey(collection, itemId, lat, lon),
       jpeg,
@@ -374,34 +374,21 @@ export function tonePlanForUrl(url: string): TonePlan | null {
     lon,
     ref: boxAround(lat, lon, REF_HALF_KM[collection]),
     maskUrl: maskUrl(collection, itemId, lat, lon),
+    px,
     metresPerPx: (heightKm * 1000) / px,
     key: planKey(collection, itemId, lat, lon),
     jpeg,
   }
 }
 
-const PC_MASK_RE = /^https:\/\/planetarycomputer\.microsoft\.com\/api\/data\/v1\/item\/bbox\/(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\/\d+x\d+\.npy\?(.*)$/
-
-/**
- * The curve key a mask URL serves (`TonePlan.key`: capture and rounded place), or null for any other URL: a crop
- * finds its capture's mask by it.
- */
-export function maskKeyForUrl(url: string): string | null {
-  const m = PC_MASK_RE.exec(url)
-  if (!m) return null
-  const q = new URLSearchParams(m[5])
-  const collection = q.get('collection') ?? ''
-  const itemId = q.get('item') ?? ''
-  const crs = crsOfQuery(q)
-  if (!isToneCollection(collection) || !itemId || crs === null) return null
-  const b: Box = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
-  if (!b.every(Number.isFinite)) return null
-  const [lat, lon] = crs === 4326 ? [(b[1] + b[3]) / 2, (b[0] + b[2]) / 2] : nativeCentre(crs, b)
-  return planKey(collection, itemId, round2(lat), round2(lon))
-}
-
 /** Crops this close to native resolution measure a curve worth sharing with the capture's other sizes. */
 export const canShareCurve = (p: Pick<TonePlan, 'collection' | 'metresPerPx'>) => p.metresPerPx <= NATIVE_GSD_M[p.collection] * 1.6
+
+/**
+ * A magnified view of the app's photo (more pixels than PHOTO_PX, near native or finer: the lightbox's sharper layer):
+ * it crossfades in over the photo, so it is toned with the very curve the photo was shown with, never one of its own.
+ */
+export const isMagnifiedView = (p: Pick<TonePlan, 'collection' | 'metresPerPx' | 'px'>) => p.px > PHOTO_PX && canShareCurve(p)
 
 // ── Where a place sits in a crop ────────────────────────────────────────────────────────────
 
@@ -422,14 +409,14 @@ export function placeInCrop(url: string, lat: number, lon: number): { fx: number
 
 /**
  * Which way true north points in a crop, degrees clockwise from the picture's up: the meridian convergence at its
- * centre for a native crop (up is grid north; within ±3° in a UTM zone), 0 for a geographic one or any other image.
+ * centre for a native crop (up is grid north; within ±3° in a standard UTM zone, ±5.4° in Norway's zone 32, ±6.0° in
+ * Svalbard's), 0 for a geographic one or any other image.
  * A compass bearing drawn on the picture (the satellite's heading, the pushbroom's sweep) turns by this.
  */
 export function northInCropDeg(url: string): number {
-  const m = PC_BBOX_RE.exec(url) ?? PC_MASK_RE.exec(url)
+  const m = PC_BBOX_RE.exec(url)
   if (!m) return 0
-  const q = new URLSearchParams(m[m.length - 1])
-  const crs = crsOfQuery(q)
+  const crs = crsOfQuery(new URLSearchParams(m[8]))
   if (crs === null || crs === 4326) return 0
   const b: Box = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
   const [lat, lon] = nativeCentre(crs, b)

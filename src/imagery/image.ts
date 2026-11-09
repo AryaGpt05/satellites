@@ -21,7 +21,8 @@
  * reveal) or uploaded as WebGL textures. Consumers rendering `<img>` should set the same
  * `crossOrigin` so the browser reuses the decoded image instead of fetching it again.
  */
-import { GIBS_WMS, isTonedUrl } from './endpoints'
+import { GIBS_WMS } from './endpoints'
+import { isTonedUrl } from './pcCrop'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
 import { measureNoData } from './pixels'

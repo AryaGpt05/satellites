@@ -170,6 +170,36 @@ describe('fetchTonedHere', () => {
   })
 })
 
+describe('the lightbox’s sharper layer (a magnified view)', () => {
+  it('takes the curve its photo was shown with, even one measured before the mask came: only sharpness changes', async () => {
+    const id = 'S2A_MSIL2A_20261031T162419_R040_T17TNJ_20261031T200303'
+    const photo = pcCropUrlAt('sentinel-2-l2a', id, WATERLOO.lat, WATERLOO.lon, 5, 1000, 'jpg')
+    const hi = pcCropUrlAt('sentinel-2-l2a', id, WATERLOO.lat, WATERLOO.lon, 5, 2000, 'jpg')
+    let maskCalls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.includes('.npy?')
+          ? ++maskCalls === 1
+            ? new Response('upstream request timeout', { status: 504 })
+            : new Response(maskNpy(64, 64, (x) => (x < 32 ? 9 : 4))) // the mask, once it comes, says half is cloud
+          : new Response(new Uint8Array(2048), { headers: { 'content-type': 'image/jpeg' } }),
+      ),
+    )
+    size = 64
+    decoded = pixels(64, 11)
+    const shownWith = toneCrop(decoded.slice(), 64, 64, tonePlanForUrl(photo)!, null)
+    await fetchTonedHere(photo)
+    expect(sharedCurve(tonePlanForUrl(photo)!.key)).toBeUndefined() // toned without its mask: not shared
+    decoded = pixels(64, 12)
+    const want = decoded.slice()
+    toneCrop(want, 64, 64, tonePlanForUrl(hi)!, null, shownWith)
+    await fetchTonedHere(hi)
+    expect([...written!]).toEqual([...want])
+    expect(sharedCurve(tonePlanForUrl(photo)!.key)).toBeUndefined() // nor did the layer measure one of its own
+  })
+})
+
 describe('fetchMaskHere', () => {
   it('asks again after a transient HTTP error instead of keeping it for the session (CT-1)', async () => {
     let calls = 0

@@ -12,10 +12,8 @@ import {
   boxAround,
   canShareCurve,
   cropCrs,
-  gridFromStac,
   maskCellAtLatLon,
   maskFromResponse,
-  maskKeyForUrl,
   maskUrl,
   maskPoint,
   measureTone,
@@ -30,7 +28,8 @@ import {
   placeInCrop,
   placeZone,
   round2,
-  s2GridFromItemId,
+  s2EpsgFromItemId,
+  sceneEpsgFromStac,
   sceneOnPlaceGrid,
   toMaskCrs,
   tonePlanForUrl,
@@ -53,23 +52,21 @@ function rng(seed: number) {
   return () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32
 }
 
-describe('the scene’s grid', () => {
-  it('reads a Sentinel-2 tile id: zone and hemisphere from the MGRS tile, 10 m corners', () => {
-    expect(s2GridFromItemId(S2)).toEqual(G33)
-    expect(s2GridFromItemId(S2_SYD)).toEqual({ epsg: 32756, gsd: 10, ox: 0, oy: 0 }) // band H: south
-    expect(s2GridFromItemId('S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803')!.epsg).toBe(32617) // band T: north
-    expect(s2GridFromItemId('S2B_MSIL2A_20261108T101139_R022_T33XVG_20261108T143347')!.epsg).toBe(32633) // Svalbard
-    expect(s2GridFromItemId('LC09_L2SP_089084_20261101_02_T1')).toBeNull()
+describe('the scene’s zone (which scene of an overflight is on the place’s grid)', () => {
+  it('reads a Sentinel-2 tile id: zone and hemisphere from the MGRS tile', () => {
+    expect(s2EpsgFromItemId(S2)).toBe(32633)
+    expect(s2EpsgFromItemId(S2_SYD)).toBe(32756) // band H: south
+    expect(s2EpsgFromItemId('S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803')).toBe(32617) // band T: north
+    expect(s2EpsgFromItemId('S2B_MSIL2A_20261108T101139_R022_T33XVG_20261108T143347')).toBe(32633) // Svalbard
+    expect(s2EpsgFromItemId('LC09_L2SP_089084_20261101_02_T1')).toBeNull()
   })
-  it('reads STAC proj:* (code or epsg; the band’s transform, else the item’s) and refuses non-UTM or rotated grids', () => {
-    const s2Assets = { B04: { 'proj:transform': [10, 0, 300000, 0, -10, 5900040] } }
-    expect(gridFromStac('sentinel-2-l2a', { 'proj:epsg': 32633 }, s2Assets)).toEqual(G33)
-    expect(gridFromStac('sentinel-2-l2a', { 'proj:code': 'EPSG:32633' }, s2Assets)).toEqual(G33)
-    expect(gridFromStac('landsat-c2-l2', { 'proj:epsg': 32656, 'proj:transform': [30, 0, 235785, 0, -30, -3715185] })).toEqual(GLS)
-    expect(gridFromStac('landsat-c2-l2', { 'proj:epsg': 3031, 'proj:transform': [30, 0, 15, 0, -30, 15] })).toBeNull()
-    expect(gridFromStac('landsat-c2-l2', { 'proj:epsg': 32656, 'proj:transform': [30, 0.1, 15, 0, -30, 15] })).toBeNull()
-    expect(gridFromStac('sentinel-2-l2a', { 'proj:epsg': 32633 }, { B04: { 'proj:transform': [20, 0, 0, 0, -20, 0] } })).toBeNull()
-    expect(gridFromStac('landsat-c2-l2', {})).toBeNull()
+  it('reads STAC proj:* (code or epsg; the red band’s, else the item’s) and refuses anything but a UTM zone', () => {
+    expect(sceneEpsgFromStac('sentinel-2-l2a', { 'proj:epsg': 32633 })).toBe(32633)
+    expect(sceneEpsgFromStac('sentinel-2-l2a', { 'proj:code': 'EPSG:32633' })).toBe(32633)
+    expect(sceneEpsgFromStac('sentinel-2-l2a', { 'proj:epsg': 32632 }, { B04: { 'proj:code': 'EPSG:32633' } })).toBe(32633)
+    expect(sceneEpsgFromStac('landsat-c2-l2', { 'proj:epsg': 32656 })).toBe(32656)
+    expect(sceneEpsgFromStac('landsat-c2-l2', { 'proj:epsg': 3031 })).toBeNull() // Antarctica: polar stereographic
+    expect(sceneEpsgFromStac('landsat-c2-l2', {})).toBeNull()
   })
 })
 
@@ -183,7 +180,6 @@ describe('native crop URLs and their tone plan', () => {
     expect([(cx0 - px0) % 10, (py1 - cy1) % 10, cx1 - cx0]).toEqual([0, 0, CARD_NATIVE_PX['sentinel-2-l2a'] * 10])
     // The mask is the photo's square around the rounded point, warped to lon/lat by PC (each cell its centre's class).
     expect(photo.maskUrl).toMatch(/\/bbox\/[\d.]+,[\d.]+,[\d.]+,[\d.]+\/64x64\.npy\?collection=sentinel-2-l2a&item=S2A_[^&]+&assets=SCL$/)
-    expect(maskKeyForUrl(photo.maskUrl)).toBe(photo.key)
   })
 
   it('reads Landsat plans on its grid: 15 m photo and card pixels, the card square 315 native pixels', () => {
@@ -268,7 +264,6 @@ describe('the lon/lat mask under a crop on the grid', () => {
     const url = maskUrl('sentinel-2-l2a', S2, 52.52, 13.41)
     const mb = (JSON.parse(`[${/\/bbox\/([^/]+)\//.exec(url)![1]}]`) as number[]) as Box
     const mask = maskFromResponse(url, maskNpy(64, 64, (x) => (mb[0] + ((x + 0.5) / 64) * (mb[2] - mb[0]) < 13.39 ? 9 : 4)))
-    expect(mask.crs).toBe(4326)
     // The app's photo on the grid, 100 px for the test (100 m pixels).
     const plan = tonePlanForUrl(pcCropUrlAt('sentinel-2-l2a', S2, 52.52, 13.41, 5, 1000, 'jpg'))!
     const W = 100
@@ -287,8 +282,8 @@ describe('the lon/lat mask under a crop on the grid', () => {
     const masked = measureTone(px, W, W, plan.box, plan.ref, mask, undefined, 1, plan.crs)
     expect(unmasked.white).toBeGreaterThan(0.7) // the cloud sets it
     expect(masked.white).toBeLessThan(0.3) // the ground does: the lon/lat mask was found through lat/lon
-    // Reading the mask as if it were on the crop's grid would look the cloud up in the wrong place entirely.
-    const confused = measureTone(px, W, W, plan.box, plan.ref, { ...mask, crs: 32633 }, undefined, 1, plan.crs)
+    // Reading the grid's metres as if they were the mask's degrees would find no cell at all: the cloud stays in.
+    const confused = measureTone(px, W, W, plan.box, plan.ref, mask, undefined, 1, 4326)
     expect(confused.white).toBeGreaterThan(0.7)
   })
 })

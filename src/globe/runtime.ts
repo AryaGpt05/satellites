@@ -6,7 +6,7 @@
  * Ordering is fixed by useFrame priorities (see FRAME below).
  */
 import { createContext, useContext } from 'react'
-import { Vector3, Vector4, type Texture } from 'three'
+import { Vector2, Vector3, Vector4, type Texture } from 'three'
 import type { CameraIntent, Phase } from '@/state/store'
 import { createAcqState, type AcqState } from './acquisition'
 import type { TextureLevel } from './framing'
@@ -154,6 +154,8 @@ export interface PaintUniforms {
   uFull: { value: number }
   uFreshRad: { value: number }
   uPanelHalf: { value: number }
+  /** (cos, sin) of the panel photo's turn on the map (counter-clockwise from north up): the meridian convergence */
+  uPanelTurn: { value: Vector2 }
   uCloudFade: { value: number }
 }
 
@@ -175,6 +177,7 @@ export function createPaintUniforms(): PaintUniforms {
     uFull: { value: 1 },
     uFreshRad: { value: 0.001 },
     uPanelHalf: { value: 0 },
+    uPanelTurn: { value: new Vector2(1, 0) },
     uCloudFade: { value: 1 },
   }
 }

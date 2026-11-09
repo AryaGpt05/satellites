@@ -133,6 +133,11 @@ describe('meridian convergence and scale', () => {
     expect(gridBearingDeg(32633, 52.52, 13.405, 0)).toBeCloseTo(berlin, 9)
     expect(gridBearingDeg(32633, 59.33, 17.9, 1)).toBeCloseTo(358.51, 1)
   })
+  it('stays under 3° in a standard 6° zone, but reaches 5.4° in Norway’s zone 32 and 6° in Svalbard’s 12° zones', () => {
+    expect(Math.abs(gridBearingOfNorthDeg(32602, 83.9, -174))).toBeLessThan(3) // 3° off zone 2's meridian, 84° N
+    expect(gridBearingOfNorthDeg(32632, 63.99, 3)).toBeCloseTo(5.39, 1) // Norway: zone 32 runs 3°–12° E about 9° E
+    expect(gridBearingOfNorthDeg(32633, 83.9, 9)).toBeCloseTo(5.97, 1) // Svalbard: zone 33 runs 9°–21° E about 15° E
+  })
   it('agrees with the projection itself: the grid direction of a short step due north', () => {
     const [x0, y0] = utmForward(32627, 64.1466, -21.9426)
     const [x1, y1] = utmForward(32627, 64.1566, -21.9426)

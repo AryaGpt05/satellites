@@ -136,7 +136,8 @@ export function utmInverse(epsg: number, x: number, y: number): [number, number]
 /**
  * Grid bearing of true north at a place, degrees clockwise from grid north (the meridian convergence with the sign
  * that turns a compass bearing into a grid bearing: grid = true + this). East of the central meridian in the north
- * true north leans west of grid north (negative); about (λ − λ0)·sin φ in magnitude, up to ~3° within a zone.
+ * true north leans west of grid north (negative); tan γ = tan(λ − λ0)·sin φ, so under 3° in a standard 6° zone, but up to
+ * 5.4° in south-west Norway's zone 32 (3°–12° E around 9° E, to 64° N) and 6.0° in Svalbard's 12°-wide zones (to 84° N).
  */
 export function gridBearingOfNorthDeg(epsg: number, lat: number, lon: number): number {
   const d = 1e-4 // ≈ 11 m

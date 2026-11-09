@@ -15,10 +15,12 @@
  * render (api/_lib/tone.ts), decode it, apply the photo's one global curve + light sharpening, encode it again
  * (JPEG for display, PNG for "Download image") and hand back the bytes. The curve is measured once per capture and
  * place (on the first crop close to native resolution) and reused by its other sizes, so the card, the lightbox's
- * sharper render and the download match exactly. `fetchMaskHere` reads the cloud mask both the curve and the spot
- * check use (one request per capture and place, shared).
+ * sharper layer and the download match exactly; that layer (a magnified view) takes the curve the photo was shown
+ * with even when none was shared (the photo toned before its mask came), so its crossfade changes sharpness only.
+ * `fetchMaskHere` reads the cloud mask both the curve and the spot check use (one request per capture and place,
+ * shared).
  */
-import { canShareCurve, maskFromResponse, maskKeyForUrl, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams } from '../../api/_lib/tone'
+import { PHOTO_PX, canShareCurve, isMagnifiedView, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams, type TonePlan } from '../../api/_lib/tone'
 
 export interface Pixels {
   data: Uint8ClampedArray
@@ -153,15 +155,13 @@ export interface MaskFetch {
   mask?: ToneMask
 }
 
-/** Masks by URL, shared by the spot check and the photos' curve (one request each per session). */
+/**
+ * Masks by URL, shared by the spot check and the photos' curve (one request each per session). One URL per capture and
+ * rounded place whatever the crop's size or geometry (toneRender maskUrl, always lon/lat), so a crop finds its
+ * capture's mask by `TonePlan.maskUrl` alone.
+ */
 const masks = /* @__PURE__ */ new Map<string, Promise<MaskFetch>>()
 const MASKS_MAX = 96
-/**
- * The same masks by the curve they serve (capture and rounded place, tone.ts maskKeyForUrl). Every crop of a capture
- * at a place names the same lon/lat mask URL today (toneRender maskUrl); the key keeps a crop finding it should two
- * geometries ever ask for it under different URLs.
- */
-const masksByKey = /* @__PURE__ */ new Map<string, Promise<MaskFetch>>()
 
 /**
  * An answer worth asking again: the archive's server trouble (5xx, e.g. PC's 504 "upstream request timeout" on a cold
@@ -182,20 +182,14 @@ export function fetchMaskHere(url: string): Promise<MaskFetch> {
       return { status: res.status, mask: maskFromResponse(url, await res.arrayBuffer()) }
     })()
     p = req
-    const key = maskKeyForUrl(url)
     const forget = () => {
       if (masks.get(url) === req) masks.delete(url)
-      if (key && masksByKey.get(key) === req) masksByKey.delete(key)
     }
     req.then((r) => {
       if (isTransientStatus(r.status)) forget()
     }, forget)
     masks.set(url, req)
     if (masks.size > MASKS_MAX) masks.delete(masks.keys().next().value as string)
-    if (key) {
-      masksByKey.set(key, req)
-      if (masksByKey.size > MASKS_MAX) masksByKey.delete(masksByKey.keys().next().value as string)
-    }
   }
   return p
 }
@@ -235,6 +229,13 @@ function pause(): Promise<void> {
 
 /** Curves by capture and place (tone.ts TonePlan.key), measured on the first crop close to native resolution. */
 const curves = /* @__PURE__ */ new Map<string, ToneParams>()
+/**
+ * The curve each capture's photo (the PHOTO_PX crop) was toned with at a place, shared or not (a photo toned before its
+ * mask arrived measures its own): what a magnified view of that photo (tone.ts isMagnifiedView) must match.
+ */
+const shown = /* @__PURE__ */ new Map<string, ToneParams>()
+/** The curve a crop must use, if any: a magnified view the photo's own, any other the shared one. */
+const knownCurve = (plan: TonePlan) => (isMagnifiedView(plan) ? (shown.get(plan.key) ?? curves.get(plan.key)) : curves.get(plan.key))
 const CURVES_MAX = 128
 const MASK_WAIT_MS = 8_000
 const JPEG_QUALITY = 0.92
@@ -272,12 +273,13 @@ function encode(c: Canvas2D, type: string): Promise<Blob> {
  * Only a crop close to native resolution measured WITH its mask sets the shared curve (a curve measured without one
  * counts cloud in its white point: the next size measures again). A coarse crop (thumbnail, globe decal) never asks
  * for a mask of its own: it uses the shared curve when there is one, else measures its own with whatever mask is
- * already fetched or on its way (the spot check's).
+ * already fetched or on its way (the spot check's). A magnified view (the lightbox's sharper layer) uses the curve its
+ * photo was toned with.
  */
 export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jpeg' | 'png' = 'jpeg'): Promise<CheckedImage> {
   const plan = tonePlanForUrl(url)
   const shares = plan ? canShareCurve(plan) : false
-  const pending = plan ? (shares ? fetchMaskHere(plan.maskUrl) : (masks.get(plan.maskUrl) ?? masksByKey.get(plan.key))) : undefined
+  const pending = plan ? (shares ? fetchMaskHere(plan.maskUrl) : masks.get(plan.maskUrl)) : undefined
   pending?.catch(() => undefined)
   const res = await fetch(url, { signal })
   const contentType = res.headers.get('content-type') ?? ''
@@ -297,14 +299,21 @@ export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jp
   c.ctx.drawImage(bmp, 0, 0)
   bmp.close()
   const img = c.ctx.getImageData(0, 0, width, height)
-  let known = curves.get(plan.key)
+  let known = knownCurve(plan)
   const mask = known || !pending ? null : await maskWithin(pending, MASK_WAIT_MS)
-  known ??= curves.get(plan.key) // measured by another size while this one waited for the mask
+  known ??= knownCurve(plan) // measured by another size while this one waited for the mask
   const used = await toneCropAsync(img.data, width, height, plan, mask, known, pause)
   // The first curve measured with its mask wins: a size toned at the same time keeps what it showed, later ones reuse it.
   if (!known && shares && mask && !curves.has(plan.key)) {
     curves.set(plan.key, used)
     if (curves.size > CURVES_MAX) curves.delete(curves.keys().next().value as string)
+  }
+  // The curve of the card most recently toned for display (not a PNG download): a magnified view takes the curve
+  // of the card on screen, even after that card was evicted and toned again with the shared curve.
+  if (plan.px === PHOTO_PX && fmt !== 'png') {
+    shown.delete(plan.key)
+    shown.set(plan.key, used)
+    if (shown.size > CURVES_MAX) shown.delete(shown.keys().next().value as string)
   }
   c.ctx.putImageData(img, 0, 0)
   const type = fmt === 'png' ? 'image/png' : 'image/jpeg'

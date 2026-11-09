@@ -3,7 +3,8 @@ import type { Capture, Pass } from '@/types'
 import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
 import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline, watchedPhrase } from './copy'
-import { cardUrl, filterCounts, filterPhotos, hiResUrl, orderPhotos, photoHeadingDeg, placeOffset, thumbUrl } from './photos'
+import { cardUrl, filterCounts, filterPhotos, hiResHelps, hiResUrl, orderPhotos, photoHeadingDeg, placeOffset, thumbUrl } from './photos'
+import { isMagnifiedView, placeInCrop, tonePlanForUrl } from '../../../../api/_lib/toneRender'
 import { pcCropUrl, type CropOpts } from '@/imagery'
 import { groupPasses, visibleCount } from './groups'
 import { glyphForPass, markColorVar, VERDICT_META, VERDICT_TAG, VERDICT_TITLE, verdictUnit, type SatMeta } from './meta'
@@ -714,12 +715,53 @@ describe('photos: one order everywhere (owner B1 + D1)', () => {
     expect(set.photos.map((p) => p.key)).toEqual(['T2', 'V', 'T'])
   })
 
-  it('one canonical URL per (capture, size); the lightbox asks for nothing more (the card photo is full resolution)', () => {
+  it('one canonical URL per (capture, size); the lightbox’s sharper layer is the card’s box at 2000 px', () => {
     expect(cardUrl(s2)).toBe(displayUrl(s2, cropSpec('sentinel-2-l2a')))
     expect(cardUrl(s2)).toContain('/1000x1000.jpg?')
     expect(thumbUrl(s2)).toContain('/112x112.jpg?')
-    expect(hiResUrl(s2)).toBeUndefined()
+    expect(hiResUrl(s2)).toBe(displayUrl(s2, { ...cropSpec('sentinel-2-l2a'), px: 2000 }))
     expect(hiResUrl(viirs)).toBeUndefined()
+    // An Earth Search capture with no Planetary Computer id has one picture (its thumbnail): nothing sharper.
+    const thumbOnly = { ...s2, provider: 'earth-search' as const, cropUrl: () => 'https://earth-search.example/thumb.jpg' }
+    expect(hiResUrl(thumbOnly)).toBeUndefined()
+  })
+
+  it('the sharper layer is the very box of the card on the place’s grid: Sentinel-2 2×, Landsat 4×, the card’s curve', () => {
+    const at = { lat: 52.517, lon: 13.3889 }
+    for (const [coll, id, scale] of [
+      ['sentinel-2-l2a', 'S2A_MSIL2A_20261105T101121_R022_T33UUU_20261105T164009', 2],
+      ['landsat-c2-l2', 'LC09_L2SP_193023_20261101_02_T1', 4],
+    ] as const) {
+      const c = { ...s2, collection: coll, itemId: id, cropUrl: (o: CropOpts) => pcCropUrl(coll, id, at, o) }
+      const card = cardUrl(c)
+      const hi = hiResUrl(c)!
+      const box = (u: string) => /\/item\/bbox\/([^/]+)\//.exec(u)![1]
+      expect(box(hi)).toBe(box(card)) // the same native box: registers over the card pixel for pixel
+      expect(hi).toContain('/2000x2000.jpg?')
+      expect(hi).toContain('&coord_crs=EPSG:32633&dst_crs=EPSG:32633&')
+      expect(hi).toContain('&resampling=lanczos')
+      const pc = tonePlanForUrl(card)!
+      const ph = tonePlanForUrl(hi)!
+      expect(ph.key).toBe(pc.key) // one curve per capture and place
+      expect(ph.maskUrl).toBe(pc.maskUrl) // the mask already fetched
+      expect(pc.metresPerPx / ph.metresPerPx).toBe(2)
+      expect((ph.box[2] - ph.box[0]) / ph.metresPerPx / ((ph.box[2] - ph.box[0]) / (coll === 'sentinel-2-l2a' ? 10 : 30))).toBe(scale)
+      expect(isMagnifiedView(ph)).toBe(true) // toned with the curve the card was shown with
+      expect(isMagnifiedView(pc)).toBe(false)
+      expect(placeOffset(c, at)).toEqual(((): { dx: number; dy: number } => {
+        const o = placeInCrop(hi, at.lat, at.lon)!
+        return { dx: o.fx - 0.5, dy: o.fy - 0.5 }
+      })()) // the reticle sits on the same ground in both
+    }
+  })
+
+  it('asks for the sharper layer only where it shows more than the card', () => {
+    expect(hiResHelps(393, 3)).toBe(true) // iPhone 15 Pro: 1179 device px
+    expect(hiResHelps(688, 2)).toBe(true) // 1440×900 at 2×: 1376
+    expect(hiResHelps(688, 1)).toBe(false) // a 1× laptop at 1×
+    expect(hiResHelps(868, 1)).toBe(false) // 1920×1080 at 1×
+    expect(hiResHelps(688, 1, 1.25)).toBe(false)
+    expect(hiResHelps(688, 1, 1.31)).toBe(true) // the first zoom past 1.3×
   })
 
   it('turns a heading drawn on a grid-cut photo by the meridian convergence (grid north up), not on others', () => {

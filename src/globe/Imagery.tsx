@@ -22,12 +22,12 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
 import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector4, type Texture, type WebGLRenderer } from 'three'
-import { gibsWmsUrl, isTonedUrl } from '@/imagery'
-import { bboxAround, EARTH_RADIUS_KM } from '@/lib/geo'
+import { gibsWmsUrl } from '@/imagery'
+import { EARTH_RADIUS_KM } from '@/lib/geo'
 import { selectSelectedPass, useApp } from '@/state/store'
-import type { CaptureCollection } from '@/types'
 import { captureOf, coverPass, decalSpecFor, decalUrl } from './acquisition'
 import { kmPerTexel } from './framing'
+import { panelHalfKm, panelPhotoUrl, panelTurn, patchUv } from './panel'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
 import { canUpload, decodeImageBlob, decodeImageUrl, uploadStrip, type TexStrip } from './textures'
 
@@ -50,22 +50,6 @@ const FRESH_MIN_KM = 3
 /** The context patch keeps the global map's tone at this scale (km) and adds its own detail below it. */
 const TONE_KM = 60
 
-/**
- * Half extent of the panel's photo (results lib/captures cropSpec: Sentinel-2 ±5 km, Landsat ±7.5 km, daily mosaics
- * ±120 km), marked on the painted image as a hairline square.
- */
-function panelHalfKm(c: CaptureCollection): number {
-  if (c === 'sentinel-2-l2a') return 5
-  if (c === 'landsat-c2-l2') return 7.5
-  return 120
-}
-
-/** Patch bounds in sphere uv: (u centre, v centre, u width, v height). */
-function patchUv(lat: number, lon: number, halfKm: number, out: Vector4): Vector4 {
-  const [w, s, e, n] = bboxAround(lat, lon, halfKm)
-  return out.set(0.5 + lon / 360, 0.5 + lat / 180, (e - w) / 360, (n - s) / 180)
-}
-
 interface Entry {
   url: string
   /** loading → decoded (strips cut, off the main thread) → uploading (strip by strip) → ready */
@@ -77,6 +61,11 @@ interface Entry {
   tex?: Texture
   uv: Vector4
   panelHalf: number
+  /**
+   * (cos, sin) of the panel photo's turn on the map, counter-clockwise from north up: a Sentinel-2 / Landsat photo is
+   * grid-north-up, true north the meridian convergence away (api/_lib/toneRender.ts northInCropDeg); (1, 0) otherwise.
+   */
+  panelTurn: [number, number]
   usedAt: number
 }
 
@@ -95,25 +84,33 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     e.strips?.forEach((b) => b.close())
     e.strips = undefined
   }
-  /** The entry for an image, starting its fetch + decode the first time (`uv` is built only then). */
-  const load = (url: string, uv: () => Vector4, panelHalf: number): Entry => {
+  /**
+   * The entry for an image, starting its fetch + decode the first time (`uv` is built only then). `panelUrl`: the panel's
+   * photo of the same capture, whose turn the hairline square follows.
+   */
+  const load = (url: string, uv: () => Vector4, panelHalf: number, panelUrl?: () => string): Entry => {
     let e = entries.get(url)
     if (e) return e
-    e = { url, state: 'loading', next: 0, uv: uv(), panelHalf, usedAt: performance.now() }
+    e = { url, state: 'loading', next: 0, uv: uv(), panelHalf, panelTurn: [1, 0], usedAt: performance.now() }
     entries.set(url, e)
     const entry = e
     log('load', url)
     // One CORS request per URL for the session (globe-only crops: the panel never asks for these sizes); decoded and
     // cut into strips in the texture worker, so the main thread only ever uploads. Sentinel-2 / Landsat crops are toned
     // first in the imagery module's pixels worker (the same global curve the panel's photo of that capture uses); that
-    // loader is imported when the first decal needs it, so the globe's first-screen download never carries it. One
-    // retry after a short pause, as decodeImageUrl and the panel's preloadImage do (PC's tiler 5xxs on a cold scene).
+    // loader is imported when the first decal needs it, so the globe's first-screen download never carries it; so is
+    // the crops' grid arithmetic (pcCrop: which URL is toned, the panel photo's turn). One retry after a short pause, as
+    // decodeImageUrl and the panel's preloadImage do (PC's tiler 5xxs on a cold scene).
     const toned = () => import('@/imagery/image').then((m) => m.tonedImageBlob(url))
-    const decoded = isTonedUrl(url)
-      ? toned()
-          .catch(() => new Promise<void>((r) => setTimeout(r, 700 + Math.random() * 500)).then(toned))
-          .then(decodeImageBlob)
-      : decodeImageUrl(url)
+    const decoded = import('@/imagery/pcCrop').then((crops) => {
+      // Set before the image can be ready (the square is only drawn over a ready decal).
+      entry.panelTurn = panelTurn(panelUrl ? crops.northInCropDeg(panelUrl()) : 0)
+      return crops.isTonedUrl(url)
+        ? toned()
+            .catch(() => new Promise<void>((r) => setTimeout(r, 700 + Math.random() * 500)).then(toned))
+            .then(decodeImageBlob)
+        : decodeImageUrl(url)
+    })
     decoded
       .then(async (img) => {
         try {
@@ -304,6 +301,7 @@ export function Imagery() {
           decalUrl(cap, spec),
           () => patchUv(place.lat, place.lon, spec.halfSizeKm, new Vector4()),
           panelHalfKm(cap.collection) / (2 * spec.halfSizeKm),
+          () => panelPhotoUrl(cap),
         )
       }
     }
@@ -336,6 +334,7 @@ export function Imagery() {
             decalUrl(cap, spec),
             () => patchUv(place.lat, place.lon, spec.halfSizeKm, new Vector4()),
             panelHalfKm(cap.collection) / (2 * spec.halfSizeKm),
+            () => panelPhotoUrl(cap),
           )
       }
     }
@@ -361,6 +360,7 @@ export function Imagery() {
       p.uDecalMap.value = target.tex!
       p.uDecalUv.value.copy(target.uv)
       p.uPanelHalf.value = target.panelHalf
+      p.uPanelTurn.value.set(target.panelTurn[0], target.panelTurn[1])
     }
     if (target) {
       p.uDecalOn.value = Math.min(1, p.uDecalOn.value + step(DECAL_FADE_IN))
