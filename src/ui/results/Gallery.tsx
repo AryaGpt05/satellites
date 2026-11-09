@@ -24,9 +24,8 @@ import { Mark } from './Mark'
 import { PhotoFrame, coordsOf } from './PhotoFrame'
 import { isOldWindow } from './Summary'
 import { selectQuietly } from './actions'
-import { useGallery } from './gallery'
+import { coverPinKey, pinCover, pinnedOrder, useGallery } from './gallery'
 import { warmPhoto } from './images'
-import { snapshot } from './snapshot'
 import { filterCounts, filterPhotos, cardUrl, cropWidthKm, type Photo, type PhotoFilter } from './lib/photos'
 import { productLabel } from './lib/captures'
 import { dec1, int } from './lib/copy'
@@ -57,8 +56,17 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   const storeKey = useGallery((g) => g.key)
   const touched = useGallery((g) => g.touched)
   const detail = context === 'detail'
-  // The pass view only shows photos that have a pass (the clear cover from before the window has none).
-  const all = useMemo(() => (detail ? model.photos.filter((p) => !!p.pass) : model.photos), [model.photos, detail])
+  const pinKey = coverPinKey(model.report)
+  // R-M1: the cover the hero painted first stays first for this report (gallery.ts pinnedOrder). The pass view only
+  // shows photos that have a pass (the clear cover from before the window has none).
+  const all = useMemo(() => {
+    const ordered = pinnedOrder(model.photos, pinKey)
+    return detail ? ordered.filter((p) => !!p.pass) : ordered
+  }, [model.photos, detail, pinKey])
+  // The hero's first paint chooses the cover, once per report (before the paint: a layout effect).
+  useLayoutEffect(() => {
+    if (!detail) pinCover(pinKey, all[0]?.key)
+  }, [detail, pinKey, all])
   const counts = useMemo(() => filterCounts(all), [all])
   const items = useMemo(() => filterPhotos(all, filter), [all, filter])
   const selectedKey = detail && selectedId ? model.photoByPass.get(selectedId) : undefined
@@ -68,8 +76,9 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     if (selectedKey && !items.some((p) => p.key === selectedKey)) useGallery.setState({ filter: 'all' })
   }, [selectedKey, items])
 
-  // Untouched, the summary shows the cover (photo #1); once the user has moved it, the photo they left it on.
-  const wantKey = selectedKey ?? (touched ? storeKey : undefined) ?? model.cover?.photo.key
+  // Untouched, the summary shows photo #1 (the cover it painted first, R-M1); once the user has moved it, the photo
+  // they left it on.
+  const wantKey = selectedKey ?? (touched ? storeKey : undefined) ?? (detail ? model.cover?.photo.key : all[0]?.key)
   const wantIdx = Math.max(0, items.findIndex((p) => p.key === wantKey))
   const [idx, setIdx] = useState(wantIdx)
   const idxRef = useRef(idx)
@@ -301,38 +310,9 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantKey, items])
 
-  // The cover changed under an untouched summary gallery (the last clear look arrived after the first paint,
-  // owner D): cross-fade to it in place: the old picture fades out over the new one; nothing scrolls.
-  const coverKey = model.cover?.photo.key
-  const prevCover = useRef(coverKey)
-  useLayoutEffect(() => {
-    const prev = prevCover.current
-    prevCover.current = coverKey
-    const track = trackRef.current
-    if (detail || !prev || !coverKey || prev === coverKey || !track || useGallery.getState().touched) return
-    const viewport = track.parentElement
-    const old = track.querySelector<HTMLElement>(`[data-photo-frame="${CSS.escape(prev)}"]`)
-    const first = track.children[0] as HTMLElement | undefined
-    if (viewport && old && first && typeof old.animate === 'function' && !prefersReducedMotion()) {
-      // Painted from the decoded picture (no new <img>: no request, no load event, R3-1).
-      const ghost = snapshot(old).node
-      ghost.setAttribute('aria-hidden', 'true')
-      ghost.inert = true
-      Object.assign(ghost.style, { position: 'absolute', left: '0px', top: `${first.offsetTop}px`, width: `${old.offsetWidth}px`, height: `${old.offsetHeight}px`, pointerEvents: 'none', zIndex: '1' })
-      viewport.appendChild(ghost)
-      const a = ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 240, easing: 'linear', fill: 'forwards' })
-      a.onfinish = a.oncancel = () => ghost.remove()
-    }
-    target.current = null
-    track.scrollLeft = 0
-    idxRef.current = 0
-    setIdx(0)
-    paintChrome(0)
-    curKey.current = coverKey
-    committed.current = coverKey
-    useGallery.getState().setKey(coverKey, false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverKey])
+  // A cover that changes after the first paint (the last clear look from a background patch) no longer replaces the
+  // picture on screen (R-M1): the pinned order keeps photo #1 where it is and the new cover lands right after it; the
+  // identity rule above (R3-2) keeps whatever the gallery shows.
 
   // Preload ±2 (decoded before they are swiped to).
   useEffect(() => {

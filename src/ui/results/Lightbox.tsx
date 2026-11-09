@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import type { Pass } from '@/types'
-import { Button, Glyph, cx, prefersReducedMotion } from '@/ui/system'
+import { Button, Glyph, cx, prefersReducedMotion, useMediaQuery } from '@/ui/system'
 import { Ago } from './Ago'
 import { credit, galleryCtl } from './Gallery'
 import { Mark } from './Mark'
@@ -29,7 +29,7 @@ import { PushbroomReveal } from './PushbroomReveal'
 import { Reticle } from './Reticle'
 import { coordsOf, seenKeyOf } from './PhotoFrame'
 import { selectQuietly } from './actions'
-import { useGallery } from './gallery'
+import { coverPinKey, pinnedOrder, useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
 import { Img } from './Img'
 import { cardSpec, cardUrl, cropWidthKm, filterPhotos, hiResUrl, thumbUrl, type Photo } from './lib/photos'
@@ -72,10 +72,17 @@ function computeLayout(mobile: boolean): Layout {
   return { side, left: (W - side) / 2, top: topH + Math.max(0, (H - topH - metaH - filmH - side) / 2) }
 }
 
+/**
+ * Short viewports (a phone in landscape, ≤ 520 px tall) take the phone viewer: the laptop one stacks the top bar, the
+ * photo, its metadata and the filmstrip, which do not fit there (the metadata ran under the filmstrip, RS-M2).
+ */
+const SHORT_VIEWER_QUERY = '(max-height: 520px)'
+
 export function Lightbox({ model, mobile, onReplay }: { model: ResultsModel; mobile: boolean; onReplay?: (p: Pass) => void }) {
   const lb = useGallery((g) => g.lightbox)
+  const short = useMediaQuery(SHORT_VIEWER_QUERY)
   if (!lb) return null
-  return createPortal(<Viewer key={lb.id} id={lb.id} model={model} mobile={mobile} startKey={lb.key} from={lb.from} onReplay={onReplay} />, document.body)
+  return createPortal(<Viewer key={lb.id} id={lb.id} model={model} mobile={mobile || short} startKey={lb.key} from={lb.from} onReplay={onReplay} />, document.body)
 }
 
 interface ViewerProps {
@@ -90,10 +97,12 @@ interface ViewerProps {
 
 function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const filter = useGallery((g) => g.filter)
+  // The gallery's order (R-M1: the cover the hero painted first stays first).
   const items = useMemo(() => {
-    const list = filterPhotos(model.photos, filter)
-    return list.some((p) => p.key === startKey) ? list : model.photos
-  }, [model.photos, filter, startKey])
+    const ordered = pinnedOrder(model.photos, coverPinKey(model.report))
+    const list = filterPhotos(ordered, filter)
+    return list.some((p) => p.key === startKey) ? list : ordered
+  }, [model.photos, model.report, filter, startKey])
   const [index, setIndex] = useState(() => Math.max(0, items.findIndex((p) => p.key === startKey)))
   const indexRef = useRef(index)
   indexRef.current = index
@@ -540,7 +549,11 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const windowItems = items.filter((p) => !!p.pass)
   const pos = photo.pass ? windowItems.indexOf(photo) + 1 : 0
   const counter = photo.pass ? `${pos} / ${windowItems.length}` : 'Last clear look'
-  const spoken = photo.pass ? `Photo ${pos} of ${windowItems.length}` : 'The last clear look, from before this week'
+  // Why the cover leads ("Closest look" / "Clouded over") rides on the counter, where there is room: in the metadata
+  // strip it cut the first row short ("… 2 D…") whenever a Replay button and a status shared it.
+  const why = model.cover?.photo.key === photo.key ? model.cover.why : undefined
+  const lead = photo.pass ? (why === 'closest' ? 'Closest look' : why === 'clouded' ? 'Clouded over' : undefined) : undefined
+  const spoken = photo.pass ? `Photo ${pos} of ${windowItems.length}${lead ? `, ${lead.toLowerCase()}` : ''}` : 'The last clear look, from before this week'
   const side = layout.side
   const boxStyle: CSSProperties = { left: layout.left, top: layout.top, width: side, height: side }
   const setChrome = (i: number) => (el: HTMLDivElement | null) => {
@@ -553,6 +566,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
 
       <div ref={setChrome(0)} className={s.top}>
         <span className={s.counter}>
+          {lead ? <span className={cx(s.counterLead, why === 'clouded' && s.warn)}>{lead} · </span> : null}
           {counter}
           <span className="sr-only" aria-live="polite">
             {spoken}
@@ -576,7 +590,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
         </button>
       </div>
 
-      <div ref={boxRef} className={s.box} style={boxStyle} data-zoomed="false">
+      <div ref={boxRef} className={cx(s.box, side < 300 && s.smallBox)} style={boxStyle} data-zoomed="false">
         <div ref={stripRef} className={s.strip}>
           {[-1, 0, 1].map((d) => {
             const p = items[index + d]
@@ -639,7 +653,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
       ) : null}
 
       <div ref={setChrome(1)} className={s.meta} style={{ top: layout.top + side + 12, left: mobile ? 16 : layout.left, width: mobile ? undefined : side }}>
-        <MetaStrip photo={photo} model={model} cover={model.cover?.photo.key === photo.key ? model.cover.why : undefined} />
+        <MetaStrip photo={photo} model={model} />
         {photo.pass && onReplay ? (
           <Button
             size="sm"
@@ -716,22 +730,27 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
   )
 }
 
-function MetaStrip({ photo, model, cover }: { photo: Photo; model: ResultsModel; cover?: 'closest' | 'lastClear' | 'clouded' }) {
+/**
+ * Under the photo: who and when, what the picture shows at the place, the product line and the archive's credit. The
+ * first row never truncates: the relative time ("· 2 days ago") is dropped whole when the row is too narrow for it
+ * (it wraps into a clipped second line), so the satellite, day and time always read in full.
+ */
+function MetaStrip({ photo, model }: { photo: Photo; model: ResultsModel }) {
   const { capture, pass } = photo
   const meta = model.meta(pass?.norad ?? capture.norad ?? 0)
   const tz = model.tz
   const t = pass ? model.times(pass) : { day: fmtLocalDay(capture.datetime, tz), time: fmtLocalTime(capture.datetime, tz), zone: zoneAbbr(capture.datetime, tz) }
-  const lead = cover === 'closest' ? 'Closest look' : cover === 'lastClear' ? 'Last clear look' : cover === 'clouded' ? 'Clouded over' : undefined
   const w = cropWidthKm(capture)
   const status = photo.kind === 'mosaic' ? 'Daily mosaic' : photo.clouded ? `Clouded${capture.cloudCoverPct !== undefined ? ` · ${int(capture.cloudCoverPct)}%` : ''}` : capture.spot === 'clear' ? 'Clear at your spot' : capture.spot === 'cirrus' ? 'Thin cirrus' : undefined
   return (
     <div className={s.metaText}>
       <span className={s.metaRow}>
-        <span className={s.metaMain}>
-          {lead ? <b className={cx(s.lead, cover === 'clouded' && s.warn)}>{lead} · </b> : null}
-          <b>{meta.name}</b> · {t.day} · {t.time} {t.zone}
-          <span className={s.dim}>
-            {' · '}
+        <span className={cx(s.metaMain, s.metaFit)}>
+          <span className={s.metaKeep}>
+            <b>{meta.name}</b> · {t.day} · {t.time} {t.zone}
+          </span>
+          <span className={cx(s.dim, s.metaOpt)}>
+            {'\u00a0· '}
             <Ago t={pass?.tClosest ?? capture.datetime} base={model.clock} />
           </span>
         </span>

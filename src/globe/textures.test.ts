@@ -5,6 +5,7 @@ import { createRuntime } from './runtime'
 import { declineLevel, dprLevels } from './quality'
 import {
   canUpload,
+  CLOUD_ZOOM_REST_MS,
   cloudZoomWanted,
   createScheduler,
   criticalSteps,
@@ -14,6 +15,7 @@ import {
   INPUT_QUIET_MS,
   pageInput,
   planBatches,
+  restLatch,
   stripCount,
   stripRowsFor,
   STRIP_ROWS_MOBILE,
@@ -41,6 +43,23 @@ describe('upgradePlan (decision 9)', () => {
     expect(cloudZoomWanted(39.1 / 5, 9000)).toBe(false) // the regional view at the 2k floor: ~5 px
     expect(cloudZoomWanted(39.1 / 12, 2500)).toBe(true) // zoomed in
     expect(cloudZoomWanted(39.1 / 40, 400)).toBe(false) // so close the cloud layer has faded out
+  })
+  it("phones' cloud step needs the view to rest there: a settle or re-frame passing through never latches it", () => {
+    // The post-capture swing (a ~400 km dive out to the regional range in ~0.6 s at 60 fps) crosses the window.
+    const pass = restLatch(CLOUD_ZOOM_REST_MS)
+    let t = 0
+    for (let alt = 400; alt <= 7500; alt += 120, t += 1000 / 60) {
+      const km = (alt / 1000) * 1.0
+      expect(pass(cloudZoomWanted(km, alt), t)).toBe(false)
+    }
+    // A view the camera rests on: latches after the rest time, and stays latched.
+    const rest = restLatch(CLOUD_ZOOM_REST_MS)
+    expect(rest(true, 0)).toBe(false)
+    expect(rest(true, CLOUD_ZOOM_REST_MS - 1)).toBe(false)
+    expect(rest(false, CLOUD_ZOOM_REST_MS - 0.5)).toBe(false) // a break restarts the wait
+    expect(rest(true, CLOUD_ZOOM_REST_MS)).toBe(false)
+    expect(rest(true, 2 * CLOUD_ZOOM_REST_MS)).toBe(true)
+    expect(rest(false, 3 * CLOUD_ZOOM_REST_MS)).toBe(true)
   })
   it('desktop steps swap one at a time', () => {
     const plan = upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true })

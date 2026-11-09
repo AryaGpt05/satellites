@@ -73,7 +73,13 @@ function Scrubber({ pass, refs, dragging, compact = false }: { pass: Pass; refs:
   return (
     <div className={cx(s.scrub, compact && s.scrubCompact)}>
       <div className={s.track} aria-hidden>
-        {inField ? <span className={s.field} style={{ left: pct(pass.tStart), width: `calc(${pct(pass.tEnd)} - ${pct(pass.tStart)})` }} /> : null}
+        {/* Placed with a transform: a quiet pass change (a gallery swipe) moves the band without a layout shift. */}
+        {inField ? (
+          <span
+            className={s.field}
+            style={{ transform: `translateX(${(windowFraction(pass.tStart, w) * 100).toFixed(3)}%) scaleX(${(windowFraction(pass.tEnd, w) - windowFraction(pass.tStart, w)).toFixed(5)})` }}
+          />
+        ) : null}
         <span className={s.closest} style={{ left: pct(pass.tClosest) }} />
         <span ref={refs.progress} className={s.progress} />
         <span ref={refs.head} className={s.headRail}>

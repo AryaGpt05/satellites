@@ -49,6 +49,12 @@
   font-variant-numeric: tabular-nums;
   color: var(--bone-2);
 }
+.counterLead {
+  color: var(--bone);
+}
+.counterLead.warn {
+  color: var(--warn);
+}
 .zoomCtl {
   display: inline-flex;
   align-items: center;
@@ -229,6 +235,10 @@
   bottom: 10px;
   right: 10px;
 }
+/* A photo under 300 px (a phone in landscape): the sensor chip keeps the top edge (the metadata says the pixel size). */
+.smallBox .tr {
+  display: none;
+}
 .scale {
   position: absolute;
   left: 12px;
@@ -324,11 +334,23 @@
 .nowrap {
   white-space: nowrap;
 }
+/* The first row fits on one line or drops its optional tail (the relative time) whole: the tail wraps onto a second
+   line that is clipped away, so nothing is ever cut mid-word ("8 D…"). */
+.metaFit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  height: 1.4em;
+  line-height: 1.4em;
+}
+.metaKeep {
+  flex: none;
+}
+.metaOpt {
+  flex: none;
+}
 .metaMain b {
   font-weight: 400;
-  color: var(--bone);
-}
-.metaMain b.lead {
   color: var(--bone);
 }
 .status {
@@ -355,6 +377,11 @@
 }
 .mobile .metaText {
   white-space: normal;
+}
+/* Phones: the row wraps like prose (the relative time stays, after the time). */
+.mobile .metaFit {
+  display: block;
+  height: auto;
 }
 .mobile .metaRow {
   flex-wrap: wrap;

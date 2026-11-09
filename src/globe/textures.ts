@@ -4,7 +4,7 @@
  *   1k set (day, night, clouds, data; ~0.2 MB) → first frame → globeReady
  *   → phones:   the 2k day + night maps, built together and swapped in ONE frame (one sharpening at most); their
  *               download starts when this module evaluates, on every page. That is the final set on phones (G-M1):
- *               never a 4k map; the cloud map stays 1k unless the camera is zoomed in close enough for its texels
+ *               never a 4k map; the cloud map stays 1k unless the camera rests zoomed in close enough for its texels
  *               to show (then one 2k cloud step); the elevation / ocean mask stays 1k.
  *   → desktops: day 4k first, then night / clouds / data 4k at landing idle; day 8k (capable desktops) once the first
  *               results have settled with no pass open
@@ -132,7 +132,8 @@ const MAPS: EarthMap[] = ['day', 'night', 'clouds', 'data']
  *  idle    — at once (the upload itself still waits for canUpload, i.e. landing idle)
  *  place   — after the camera has first arrived at a place or pass (regional views need it, the landing doesn't)
  *  results — after the first results view has settled
- *  zoom    — once the camera has settled close enough for the 1k cloud map's texels to show (phones' clouds)
+ *  zoom    — once the camera has rested (CLOUD_ZOOM_REST_MS) close enough for the 1k cloud map's texels to show
+ *            (phones' clouds)
  */
 export type StepWhen = 'idle' | 'place' | 'results' | 'zoom'
 export interface UpgradeStep {
@@ -196,6 +197,29 @@ export const CLOUD_ZOOM_TEXEL_PX = 10
 export const CLOUD_ZOOM_MIN_KM = 600
 export const cloudZoomWanted = (kmPerPx: number, altitudeKm: number) =>
   altitudeKm > CLOUD_ZOOM_MIN_KM && kmPerTexel('1k') / Math.max(1e-6, kmPerPx) > CLOUD_ZOOM_TEXEL_PX
+/**
+ * ... and the view has RESTED there this long. Moves that are not flights pass through the window on their way
+ * elsewhere: the acquisition's settle and the re-frame when the phone sheet rises at the capture swing the camera
+ * from a ~400 km dive out to the regional range in ~0.6 s. Latching on such a frame cost phones the 458 KB cloud map
+ * and a visible cloud re-sharpening after every replay (verifier, G-M1).
+ */
+export const CLOUD_ZOOM_REST_MS = 1500
+
+/** A latch that turns true once `on` has held for `restMs` without a break (a view the camera rests on). */
+export function restLatch(restMs: number): (on: boolean, now: number) => boolean {
+  let since = -1
+  let latched = false
+  return (on, now) => {
+    if (latched) return true
+    if (!on) {
+      since = -1
+      return false
+    }
+    if (since < 0) since = now
+    latched = now - since >= restMs
+    return latched
+  }
+}
 
 /** Number of strips a map of this level is uploaded in. */
 export const stripCount = (res: TextureLevel, rows = STRIP_ROWS) => Math.max(1, Math.ceil(SIZE[res][1] / rows))
@@ -220,6 +244,18 @@ export function trackInput() {
   const opts = { capture: true, passive: true } as const
   const at = () => (pageInput.lastAt = performance.now())
   window.addEventListener('pointerdown', (e) => (pageInput.down.add(e.pointerId), at()), opts)
+  // A finger still moving (a long sheet drag, a slow pan of the globe) keeps the gate shut: only a pointer that has
+  // gone silent counts as lost (inputBusy's 8 s expiry), never one that is still dragging.
+  window.addEventListener(
+    'pointermove',
+    (e) => {
+      if (!pageInput.down.has(e.pointerId)) return
+      // Moving with no button pressed: its pointer-up was lost (released outside the window), so it is no longer down.
+      if (e.buttons === 0) pageInput.down.delete(e.pointerId)
+      at()
+    },
+    opts,
+  )
   const up = (e: PointerEvent) => (pageInput.down.delete(e.pointerId), at())
   window.addEventListener('pointerup', up, opts)
   window.addEventListener('pointercancel', up, opts)
@@ -227,7 +263,10 @@ export function trackInput() {
   window.addEventListener('wheel', at, opts)
 }
 
-/** A finger or pointer is down, or a scroll moved, within the quiet window. A lost pointer-up expires after 8 s. */
+/**
+ * A finger or pointer is down, or a scroll moved, within the quiet window. A pointer that is down but has sent no
+ * event (no move) for 8 s is taken as a lost pointer-up and expires.
+ */
 export function inputBusy(now: number): boolean {
   if (pageInput.down.size && now - pageInput.lastAt > 8000) pageInput.down.clear()
   return pageInput.down.size > 0 || now - pageInput.lastAt < INPUT_QUIET_MS
@@ -596,9 +635,14 @@ export function useEarthTextures(gl: WebGLRenderer, rt: GlobeRuntime, onFirstRea
       !rt.camera.flying &&
       (rt.camera.arrivedKind === 'place' || rt.camera.arrivedKind === 'pass') &&
       now - rt.camera.arrivedAt > 600
-    // Zoomed in with the cloud layer still showing, settled, outside an acquisition sequence (phones' cloud step).
+    // Zoomed in with the cloud layer still showing, outside flights and acquisition sequences, and RESTING there
+    // (CLOUD_ZOOM_REST_MS without a break: a settle or re-frame passing through does not count): phones' cloud step.
+    const zoomRest = restLatch(CLOUD_ZOOM_REST_MS)
     const settledZoomedIn = (now: number) =>
-      !rt.camera.flying && !rt.acq.armed && now - rt.camera.arrivedAt > 600 && cloudZoomWanted(rt.camera.kmPerPx, rt.camera.altitudeKm)
+      zoomRest(
+        !rt.camera.flying && !rt.acq.armed && now - rt.camera.arrivedAt > 600 && cloudZoomWanted(rt.camera.kmPerPx, rt.camera.altitudeKm),
+        now,
+      )
     const ready = (when: StepWhen) => () => {
       const now = performance.now()
       if (!placeSeen && settledAtPlace(now)) placeSeen = true

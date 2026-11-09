@@ -80,6 +80,13 @@
   .rate {
     height: 40px;
     min-width: 44px;
+    position: relative;
+  }
+  /* RS-M2: a 44 px touch target, drawn at 40 */
+  .rate::after {
+    content: '';
+    position: absolute;
+    inset: -2px 0;
   }
 }
 .clock {
@@ -121,8 +128,11 @@
 .field {
   position: absolute;
   top: -4px;
+  left: 0;
+  width: 100%;
   height: 9px;
   background: var(--signal-2);
+  transform-origin: 0 0;
 }
 .closest {
   position: absolute;

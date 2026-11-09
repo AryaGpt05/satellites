@@ -126,6 +126,13 @@
 @media (pointer: coarse) {
   .link {
     padding: 10px 0;
+    position: relative;
+  }
+  /* RS-M2: a 44 px touch target without taller rows */
+  .link::after {
+    content: '';
+    position: absolute;
+    inset: -4px 0;
   }
 }
 .link:disabled {

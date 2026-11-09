@@ -302,9 +302,10 @@
   transition-duration: 0ms;
 }
 @media (pointer: coarse) {
+  /* RS-M2: a ≥ 44 px touch target; the negative margins keep the row where it was */
   .crumb {
-    padding: 12px 4px;
-    margin: -12px -4px -12px -6px;
+    padding: 14px 4px;
+    margin: -14px -4px -14px -6px;
   }
 }
 .kbdHover {

@@ -44,3 +44,34 @@ export const useGallery = create<GalleryState>((set) => ({
   openLightbox: (key, from) => set({ lightbox: { key, from, id: ++opened } }),
   closeLightbox: () => set({ lightbox: null }),
 }))
+
+// ── the cover, chosen once (owner R-M1) ──────────────────────────────────────────────────────
+
+/**
+ * Owner R-M1 (phones, P0: "choose the cover once … then never swap to a different photo without a user action"):
+ * the photo the summary's hero first painted stays photo #1 for that report (place + window). A better cover that
+ * lands later (the last clear look from a background patch, a spot check settling) takes the next place, right
+ * after it (on phones it peeks at the right edge), instead of replacing the picture on screen. The hero, the pass
+ * view's gallery and the lightbox all use this one order.
+ */
+const pinned = new Map<string, string>()
+const MAX_PINS = 24
+
+/** The report a pin belongs to: its place and window (a new search is a new window, a new pin). */
+export const coverPinKey = (r: { windowEnd: number; place: { lat: number; lon: number } }) => `${r.windowEnd}:${r.place.lat},${r.place.lon}`
+
+/** Record the photo the hero painted first for this report (only the first call per report counts). */
+export function pinCover(reportKey: string, photoKey: string | undefined): void {
+  if (!photoKey || pinned.has(reportKey)) return
+  pinned.set(reportKey, photoKey)
+  if (pinned.size > MAX_PINS) pinned.delete(pinned.keys().next().value as string)
+}
+
+/** `photos` (cover first, then newest first) with the pinned photo kept first, when it is still there. */
+export function pinnedOrder<T extends { key: string }>(photos: T[], reportKey: string): T[] {
+  const pin = pinned.get(reportKey)
+  if (!pin || !photos.length || photos[0].key === pin) return photos
+  const i = photos.findIndex((p) => p.key === pin)
+  if (i < 0) return photos
+  return [photos[i], ...photos.slice(0, i), ...photos.slice(i + 1)]
+}

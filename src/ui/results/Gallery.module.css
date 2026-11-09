@@ -9,6 +9,8 @@
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  /* the bar compacts on narrow columns (container queries at the end of the bar rules) */
+  container: gallery / inline-size;
 }
 /* Phones, pass view: a tighter bar, so the image step keeps a band of globe above the sheet (R2R3). */
 .detail.mobile {
@@ -96,6 +98,15 @@
     height: 36px;
     padding: 0 11px;
   }
+  /* RS-M2: a 44 px touch target (the pass view's slimmer 32 px bar included), drawn no taller */
+  .seg {
+    position: relative;
+  }
+  .seg::after {
+    content: '';
+    position: absolute;
+    inset: -6px 0;
+  }
   /* the bar is as tall as the filter even before the filter shows (the final report adding the weather photos, A1) */
   .bar {
     min-height: 38px;
@@ -128,6 +139,37 @@
 }
 .navBtn:active:not(:disabled) {
   background: var(--ink-2);
+}
+/*
+ * Narrow columns (the dock on 1024–1440 px laptops, phones in landscape, ≤ 400 px): the filter, the counter and the
+ * ‹ › never overlap, whatever the counter says ("29 this week" on the last clear look is 12 characters, "3 / 29" is
+ * 6): the segments and gaps tighten. Touch screens drop the ‹ › there (swiping is native, and 32 px buttons are under
+ * the 44 px touch target); phones in portrait never show them.
+ */
+@container gallery (max-width: 400px) {
+  .bar {
+    gap: 8px;
+  }
+  .seg {
+    padding: 0 6px;
+  }
+  .nav {
+    gap: 2px;
+  }
+  .counter {
+    margin-right: 2px;
+  }
+}
+@container gallery (max-width: 360px) {
+  .seg,
+  .counter {
+    letter-spacing: 0.04em;
+  }
+}
+@media (pointer: coarse) {
+  .navBtn {
+    display: none;
+  }
 }
 /* Laptops up to 860 px tall (R2R1): a slimmer bar. */
 @media (min-width: 761px) and (orientation: landscape) and (max-height: 860px) and (pointer: fine), (min-width: 1101px) and (max-height: 860px) and (pointer: fine) {
