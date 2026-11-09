@@ -190,9 +190,9 @@ describe('summary counts detailed photographs (R2SH5)', () => {
     expect(f.satellites).toBeLessThan(imagedSats)
     const n = f.satellites
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: n, passes: 1800, best: { satName: 'Landsat 9', altitudeKm: 708 } })).toMatch(
-      new RegExp(`^${n} satellites photographed Waterloo in detail this week\\. The clearest one, Landsat 9, from 708 km up\\.`),
+      new RegExp(`^${n} satellites watched Waterloo up close this week\\. The clearest one, Landsat 9, from 708 km up\\.`),
     )
-    expect(summaryTitle({ satellites: n, placeLabel: 'Waterloo' })).toBe(`${n} satellites photographed Waterloo in detail this week`)
+    expect(summaryTitle({ satellites: n, placeLabel: 'Waterloo' })).toBe(`${n} satellites watched Waterloo up close this week`)
   })
 
   it('gives a mosaics-only week n = 0 and the plain fallback', async () => {

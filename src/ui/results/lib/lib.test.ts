@@ -210,11 +210,11 @@ describe('copy', () => {
 
   it('geostationary sentence', () => {
     const g = { norad: 1, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008 }
-    expect(plain(geoSentence(g, 7))).toBe('GOES-19 has photographed this spot every 10 minutes, all week: 1,008 times.')
+    expect(plain(geoSentence(g, 7))).toBe('GOES-19 has watched this spot every 10 minutes, all week: 1,008 times.')
   })
 
   it('share headline per verdict', () => {
-    expect(shareHeadline('imaged', 'Sentinel-2C', 'Waterloo')).toEqual({ lead: 'Sentinel-2C photographed', place: 'Waterloo' })
+    expect(shareHeadline('imaged', 'Sentinel-2C', 'Waterloo')).toEqual({ lead: 'Sentinel-2C watched', place: 'Waterloo' })
     expect(shareHeadline('could', 'Legion 1', 'Waterloo').lead).toBe('Legion 1 passed within view of')
   })
 })
@@ -439,7 +439,7 @@ describe('copy: degenerate geometry reads like a person wrote it', () => {
   it('a commercial pass straight over the place says "directly overhead", not "0 km to the west"', () => {
     const text = plain(passSentences({ pass: pass({ norad: 59625, verdict: 'could', inSwath: false, groundDistanceKm: 0.4, offNadirDeg: 0.04 }), meta: meta(59625), timeZone: TZ, placeLabel: 'Waterloo' }))
     expect(text).toContain('passed within view at 11:21 EST, directly overhead.')
-    expect(text).toContain('Looking straight down, it could have photographed Waterloo.')
+    expect(text).toContain('Looking straight down, it could have watched Waterloo.')
     expect(text).not.toMatch(/\b0 km|0\.0°/)
   })
   it('radar at nadir drops the 0.0° pointing clause', () => {
@@ -542,7 +542,7 @@ describe('groups: photographs in the gallery order (owner B1)', () => {
 describe('one vocabulary for verdicts (R9)', () => {
   it('derives titles, lane words and units from the single table', () => {
     expect(VERDICT_TITLE.likely).toBe(VERDICT_META.likely.title)
-    expect(VERDICT_META.likely.title).toBe('Likely photographed')
+    expect(VERDICT_META.likely.title).toBe('Likely watched')
     expect(VERDICT_TAG.imaged).toBe('Photo')
     expect(verdictUnit('imaged', 1)).toBe('image')
     expect(verdictUnit('imaged', 31)).toBe('images')
@@ -591,7 +591,7 @@ describe('honest copy (R7, R17)', () => {
     expect(placeInProse('Waterloo')).toBe('Waterloo')
     expect(placeParts('Pacific Ocean')).toEqual(['the ', 'Pacific Ocean'])
     const t = plain(passSentences({ pass: pass({ norad: 59625, verdict: 'could', offNadirDeg: 12 }), meta: meta(59625), timeZone: TZ, placeLabel: 'Pacific Ocean' }))
-    expect(t).toContain('it could have photographed the Pacific Ocean.')
+    expect(t).toContain('it could have watched the Pacific Ocean.')
   })
 })
 

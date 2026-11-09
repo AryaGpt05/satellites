@@ -257,7 +257,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
         <p className={s.sharedTag}>
           <span className={s.sharedDot} aria-hidden />
           <span className={s.sharedText}>
-            Shared with you · {shared.sat} photographed {shared.place}
+            Shared with you · {shared.sat} watched {shared.place}
           </span>
         </p>
       ) : null}

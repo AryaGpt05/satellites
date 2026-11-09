@@ -184,7 +184,7 @@ export interface CardSpec {
   verdict: Verdict
   /** Top right: "Sun 1 Nov 2026 · 11:21 EST" ("" when unknown) */
   stamp: string
-  /** Verdict row: "Photographed" (one vocabulary: docs/DESIGN.md §7) */
+  /** Verdict row: "Watched" (one vocabulary: docs/DESIGN.md §7) */
   verdictLabel: string
   verdictTone: Tone
   /** "43.47°N 80.54°W" (the rounded share point) */
@@ -248,8 +248,8 @@ export interface CardInput {
 
 /** The one verdict vocabulary (docs/DESIGN.md §7; mirrors src/ui/results/lib/meta.ts, kept equal by a test). */
 export const VERDICT_WORDS: Record<Verdict, { title: string; verb: string }> = {
-  imaged: { title: 'Photographed', verb: 'photographed' },
-  likely: { title: 'Likely photographed', verb: 'swept over' },
+  imaged: { title: 'Watched', verb: 'watched' },
+  likely: { title: 'Likely watched', verb: 'swept over' },
   could: { title: 'Could have pointed here', verb: 'passed within view of' },
   overhead: { title: 'Passed overhead', verb: 'passed over' },
 }
@@ -796,7 +796,7 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
   const passes = i.counts.likely + i.counts.could + i.counts.overhead
   // A week with no picture says so plainly, in the summary post's words. The count is of detailed
   // pictures (Sentinel-2 / Landsat), worded as the results headline: "… photographed Waterloo in detail."
-  const lead = n > 0 ? `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} photographed` : `${int(passes)} satellite ${passes === 1 ? 'pass' : 'passes'} crossed`
+  const lead = n > 0 ? `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} watched` : `${int(passes)} satellite ${passes === 1 ? 'pass' : 'passes'} crossed`
   const tail = place.endsWith('…') ? '' : n > 0 ? ' in detail.' : '.'
   let plate: Plate
   const c = i.best?.capture

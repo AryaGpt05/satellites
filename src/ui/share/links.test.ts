@@ -52,7 +52,7 @@ describe('share links', () => {
     const base = { satName: 'Sentinel-2C', placeLabel: 'Waterloo', altitudeKm: 795.4, localDay: 'Sun 1 Nov', localTime: '11:21' }
     const t = postText({ ...base, verdict: 'imaged', resolution: '10 m' })
     expect(t).toBe(
-      'Sentinel-2C photographed Waterloo from 795 km up on Sun 1 Nov at 11:21 local. 10 m per pixel; this is the actual image.\n\nSomething watched you this week too.',
+      'Sentinel-2C watched Waterloo from 795 km up on Sun 1 Nov at 11:21 local. 10 m per pixel; this is the actual image.\n\nSomething watched you this week too.',
     )
     const c = postText({ ...base, verdict: 'could', satName: 'WorldView Legion 4', altitudeKm: 520, localDay: 'Sat 31 Oct', localTime: '10:52' })
     expect(c).toBe(

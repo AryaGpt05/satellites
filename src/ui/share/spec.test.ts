@@ -93,11 +93,11 @@ describe('share card spec', () => {
     void _place
     const srv = buildSummarySpec({ ...input, timeZone: shareTimeZone(sum), host: 'overflight.app' })
     expect(strip(srv)).toEqual(strip(client))
-    expect(client.lead).toMatch(/^\d+ satellites photographed$/)
+    expect(client.lead).toMatch(/^\d+ satellites watched$/)
     expect(`${client.place}${client.tail}`).toBe('Waterloo in detail.')
     expect(client.readouts.map((r) => r.label)).toEqual(['Photo', 'Likely', 'Could', 'Overhead'])
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, passes: 1800, best: { satName: 'Sentinel-2C', altitudeKm: 795 } })).toBe(
-      '7 satellites photographed Waterloo in detail this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething watched you this week too.',
+      '7 satellites watched Waterloo up close this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething watched you this week too.',
     )
   })
 

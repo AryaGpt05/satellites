@@ -118,8 +118,8 @@ export function postText(i: PostTextInput): string {
     case 'imaged': {
       const words = i.cloud ? cloudWords(i.cloud.pct, i.cloud.spot) : undefined
       lead = words
-        ? `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. ${words.post}`
-        : `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. ${i.resolution ? `${i.resolution} per pixel; this` : 'This'} is the actual image.`
+        ? `${i.satName} watched ${i.placeLabel} from ${alt} up on ${when}. ${words.post}`
+        : `${i.satName} watched ${i.placeLabel} from ${alt} up on ${when}. ${i.resolution ? `${i.resolution} per pixel; this` : 'This'} is the actual image.`
       hook = HOOK.photographed
       break
     }
@@ -183,7 +183,7 @@ export function summaryPostText(i: { placeLabel: string; satellites: number; pas
   const n = i.satellites
   let lead: string
   if (n > 0) {
-    lead = `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${i.placeLabel} in detail this week.`
+    lead = `${n} ${n === 1 ? 'satellite' : 'satellites'} watched ${i.placeLabel} up close this week.`
     if (i.best) lead += ` The clearest one, ${i.best.satName}${i.best.altitudeKm !== undefined ? `, from ${Math.round(i.best.altitudeKm)} km up` : ''}.`
   } else lead = `${i.passes.toLocaleString('en-US')} satellite passes crossed ${i.placeLabel} this week. None caught a clear picture.`
   const full = `${lead}\n\n${n > 0 ? HOOK.photographed : HOOK.passed}`

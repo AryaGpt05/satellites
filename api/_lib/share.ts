@@ -307,7 +307,7 @@ export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
 /** "2 satellites photographed Waterloo in detail this week" (detailed pictures only, as the results headline) */
 export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>): string {
   const n = s.satellites
-  return n > 0 ? `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${s.placeLabel} in detail this week` : `What passed over ${s.placeLabel} this week`
+  return n > 0 ? `${n} ${n === 1 ? 'satellite' : 'satellites'} watched ${s.placeLabel} up close this week` : `What passed over ${s.placeLabel} this week`
 }
 
 export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel'>): string {

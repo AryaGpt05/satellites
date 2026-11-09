@@ -122,12 +122,12 @@ describe('share parsing', () => {
 describe('copy', () => {
   it('writes the headline and description in the product voice', () => {
     const s = shareFromRpc(ROW)!
-    expect(headline(s)).toBe('Sentinel-2C photographed Waterloo.')
+    expect(headline(s)).toBe('Sentinel-2C watched Waterloo.')
     expect(description(s)).toBe(
       'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What watched you this week?',
     )
     expect(headline({ ...s, verdict: 'could', satName: 'SkySat-C3' })).toBe('SkySat-C3 passed within view of Waterloo.')
-    expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 photographed Waterloo.')
+    expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 watched Waterloo.')
     expect(description({ ...s, verdict: 'could', satName: 'SkySat-C3', pass: { ...s.pass, headingDeg: 192 } })).toContain(
       "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What watched you this week?",
     )
@@ -139,7 +139,7 @@ describe('card spec', () => {
     const s = shareFromRpc(ROW)!
     const spec = buildCardSpec(cardInputFromShare(s, 'overflight.app'))
     expect(spec.stamp).toBe('Sun 1 Nov 2026 · 11:21 EST')
-    expect(spec.verdictLabel).toBe('Photographed')
+    expect(spec.verdictLabel).toBe('Watched')
     expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind === 'image' && spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
     expect(spec.readouts.map((r) => `${r.label} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)).toEqual(['Altitude 795 km', 'Off-nadir 5.3°', 'Pixel 10 m'])
@@ -203,7 +203,7 @@ describe('share page', () => {
     const body = await res.text()
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/html')
-    expect(body).toContain('<meta property="og:title" content="Sentinel-2C photographed Waterloo.">')
+    expect(body).toContain('<meta property="og:title" content="Sentinel-2C watched Waterloo.">')
     expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=3">')
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
     expect(body).toContain('<meta name="twitter:card" content="summary_large_image">')
@@ -268,7 +268,7 @@ describe('share page', () => {
     const res = await handleSharePage(new Request(`https://overflight.app/api/s?${DEEP}`))
     const body = await res.text()
     expect(res.status).toBe(200)
-    expect(body).toContain('<meta property="og:title" content="Sentinel-2C photographed Waterloo.">')
+    expect(body).toContain('<meta property="og:title" content="Sentinel-2C watched Waterloo.">')
     expect(body).toContain('<meta property="og:description" content="Sentinel-2C crossed 795 km above Waterloo at 11:14 EST on Sun 1 Nov 2026, moving south.')
     const image = /<meta property="og:image" content="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&')
     const card = new URL(image)
@@ -292,7 +292,7 @@ describe('share page', () => {
       v: '3',
     })
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
-    expect(body).toContain('<meta property="og:image:alt" content="Sentinel-2C photographed Waterloo.">')
+    expect(body).toContain('<meta property="og:image:alt" content="Sentinel-2C watched Waterloo.">')
     // People land on the same pass in the app; the canonical keeps q, n, p and the pass keys.
     const canonical = new URL(/<link rel="canonical" href="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&'))
     expect(canonical.searchParams.get('q')).toBe('43.47,-80.54')
@@ -306,7 +306,7 @@ describe('share page', () => {
     expect(bare).toContain('<meta property="og:title" content="What watched Waterloo this week">')
     expect(bare).toContain('kind=place&#38;place=Waterloo')
     const sum = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.47,-80.54&n=Waterloo&sv=4&sc=31,220,1544,66&sw=1793678400000'))).text()
-    expect(sum).toContain('<meta property="og:title" content="4 satellites photographed Waterloo in detail this week">')
+    expect(sum).toContain('<meta property="og:title" content="4 satellites watched Waterloo up close this week">')
     expect(sum).toContain('kind=summary')
   })
 
@@ -340,7 +340,7 @@ describe('og card', () => {
     const image = /<meta property="og:image" content="([^"]+)">/.exec(await page.text())![1].replace(/&#38;/g, '&')
     const q = new URL(image).searchParams
     const spec = buildCardSpec(cardInputFromShare(shareFromParams(q)!, 'overflight.app'))
-    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('Sentinel-2C photographed Waterloo.')
+    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('Sentinel-2C watched Waterloo.')
     expect(spec.coords).toBe('43.47°N 80.54°W')
     const { handleOg } = (await import('../og.tsx' as string)) as { handleOg: (r: Request) => Promise<Response> }
     const res = await handleOg(new Request(image))
