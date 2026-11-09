@@ -521,14 +521,8 @@
     width: 44px;
     height: 44px;
   }
-  /* The row reaches 6 px up into the sheet's grip to fit the 44 px buttons: only its controls take taps there; the
-     row itself lets them through, so the grip keeps its 44 px over the mark (U-3). */
   .detailHead .headTop {
     margin: -6px 0;
-    pointer-events: none;
-  }
-  .detailHead .headTop :is(button, a, [role='button']) {
-    pointer-events: auto;
   }
 }
 .passTitle {

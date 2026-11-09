@@ -111,15 +111,16 @@
   height: 28px;
   cursor: inherit;
 }
-/* A 44 px touch target with the same 28 px look (U-3): over the grip mark (88 px wide, centred) the hit area reaches
-   16 px above the sheet's top edge, the way a native sheet's grabber does. Centred and narrow, so at the top snap it
-   never reaches the HUD's 'How this works' in the band above (full width, it took 19 px of that link's taps). */
+/* A ≥ 44 px touch target with the same 28 px look (U-3): over the grip mark (88 px wide, centred) the hit area reaches
+   22 px above the sheet's top edge, the way a native sheet's grabber does (22, not 16: a pass header's first row
+   reaches 6 px up into the grip for its 44 px buttons). Centred and narrow, so at the top snap it never reaches the
+   HUD's 'How this works' in the band above (full width, it took 19 px of that link's taps). */
 .grip::before {
   content: '';
   position: absolute;
   left: calc(50% - 44px);
   right: calc(50% - 44px);
-  top: -16px;
+  top: -22px;
   bottom: 0;
 }
 .grip:focus-visible {

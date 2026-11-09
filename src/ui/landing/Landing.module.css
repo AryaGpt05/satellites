@@ -406,7 +406,8 @@
   color: var(--signal);
   transition-duration: 0ms;
 }
-/* Touch (U-6): a 44 px tall target for the 15 px line, reaching mostly downward (the chips' own targets are above). */
+/* Touch (U-6): a 44 px tall target for the 15 px line, reaching mostly downward: the chips' own 44 px targets end
+   ~6 px above it (10 px up took the bottom 3 px of the first chip's taps at 375 and 844 px wide). */
 @media (pointer: coarse) {
   .credit {
     position: relative;
@@ -416,8 +417,8 @@
     position: absolute;
     left: 0;
     right: 0;
-    top: -10px;
-    bottom: -19px;
+    top: -6px;
+    bottom: -23px;
   }
 }
 .stats {
