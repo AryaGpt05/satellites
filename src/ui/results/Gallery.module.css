@@ -407,6 +407,15 @@
   padding: 5px;
   background: color-mix(in srgb, var(--ink-0) 78%, transparent);
 }
+/* LAP-08: the focus ring goes round the visible glyph box, inside the clipped photo frame, not round the corner hit
+   box (whose ring was cut by the frame and drawn off the glyph). */
+.expand:focus-visible {
+  outline: none;
+}
+.expand:focus-visible svg {
+  outline: 1px solid var(--signal);
+  outline-offset: 2px;
+}
 @media (pointer: coarse) {
   .expand {
     width: 48px;
@@ -628,11 +637,28 @@ b.warn,
   color: var(--bone-3);
 }
 .mCap {
+  /* the caption adapts to the card's width (container query below) */
+  container-type: inline-size;
   display: flex;
   align-items: center;
   gap: 12px;
   margin-top: 8px;
   min-width: 0;
+}
+/* A narrow card (the 400 px panel at 1024, the short-landscape dock's half column; PH-14 / LAP-09): the replay control
+   is its glyph and the status leaves the second line, so both lines keep the time whole instead of truncating it. */
+@container (max-width: 360px) {
+  .gallery:not(.mobile) .mReplayText {
+    display: none;
+  }
+  .gallery:not(.mobile) .mReplay {
+    justify-content: center;
+    width: 44px;
+    padding-left: 0;
+  }
+  .gallery:not(.mobile) .mStatus {
+    display: none;
+  }
 }
 .mLines {
   flex: 1;

@@ -275,7 +275,9 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
     >
       <section ref={columnRef} className={s.column} style={balance} aria-labelledby="landing-headline">
         <div ref={contentRef} className={s.content}>
-          <Kicker delay={delay} skip={!first} />
+          {/* The kicker wipes in after the headline's lines have started: on laptops it sits on the top row the boot
+              curtain's wordmark slides along on its way to the HUD (PH-05: at 1280×800 it crossed the kicker mid-wipe). */}
+          <Kicker delay={delay + 260} skip={!first} />
 
           <h1 ref={headlineRef} id="landing-headline" className={s.headline} data-hero-copy>
             <Reveal as="span" className={s.hl} delay={delay + 140} skip={!first}>

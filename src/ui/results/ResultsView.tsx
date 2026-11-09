@@ -68,6 +68,9 @@ const SHEET_STALL_MS = 1500
 const SHEET_REPLAY_STALL_MS = 4500
 /** Phones: the globe band (px, below the HUD band) the capture snap keeps when the pass photo can stay ≥ 240 px (U-4). */
 const PHONE_CAPTURE_BAND = 150
+/** …else at least this band with a pass photo of at least PHONE_MIN_SQUARE px; shorter than that, the top snap (R2R3). */
+const PHONE_MIN_BAND = 120
+const PHONE_MIN_SQUARE = 200
 /** Never hold the sheet low longer than this (a real approach + dive takes 6–8 s). */
 const SHEET_CAP_MS = 14_000
 /** Phone snaps that are fractions of the viewport (the measured ones are px). */
@@ -342,7 +345,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     // R2R3: on a short phone the globe band above the sheet would be under ~120 px: the image step goes to
     // the top snap (the sheet meets the HUD band; the globe is simply out of view).
     const band = vh - imageSnap - useApp.getState().uiInsets.top
-    const image = band < 120 ? vh * TOP - 1 : Math.max(Math.min(imageSnap, vh * (TOP - 0.02)), flight + 40)
+    const image = band < PHONE_MIN_BAND - 8 ? vh * TOP - 1 : Math.max(Math.min(imageSnap, vh * (TOP - 0.02)), flight + 40)
     const list = [flight, image, TOP]
     if (mobile) sheetMemo[shownKey === 'photo' ? 'photo' : 'plan'] = { key: '', vh, snaps: list }
     return list
@@ -521,8 +524,12 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         // square gets the top snap instead (then the square fits under the HUD band, caption above the footer).
         const pad = parseFloat(getComputedStyle(body).paddingTop) || 20
         const chrome = headHeight(body) + pad + offset + caption + (foot?.offsetHeight ?? 0) + 6
-        const withBand = vh - useApp.getState().uiInsets.top - PHONE_CAPTURE_BAND - chrome
-        const room = withBand >= 240 ? withBand : Math.min(vh * TOP, vh - 64 - safeAreaTop()) - chrome
+        const top = useApp.getState().uiInsets.top
+        const withBand = vh - top - PHONE_CAPTURE_BAND - chrome
+        // PH-16: a short phone (390×664, or 844 minus a notch) keeps a smaller band and a smaller square before it gives
+        // the globe up: the capture's settle (the globe photo lining up with the panel's) stays in view.
+        const withMinBand = vh - top - PHONE_MIN_BAND - chrome
+        const room = withBand >= 240 ? withBand : withMinBand >= PHONE_MIN_SQUARE ? withMinBand : Math.min(vh * TOP, vh - 64 - safeAreaTop()) - chrome
         sec.style.setProperty('--detail-chrome', `${Math.round(vh - room)}px`)
         return
       }

@@ -39,6 +39,8 @@ export const galleryCtl: { current: null | { step: (dir: 1 | -1) => boolean; exp
 const SETTLE_MS = 140
 const SELECT_DEBOUNCE_MS = 250
 const NEAR = 2
+/** Slides this far from the one on screen are mounted (and stay mounted); farther ones are an empty frame. */
+const MOUNT_NEAR = 4
 
 export interface GalleryProps {
   model: ResultsModel
@@ -81,6 +83,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   const wantKey = selectedKey ?? (touched ? storeKey : undefined) ?? (detail ? model.cover?.photo.key : all[0]?.key)
   const wantIdx = Math.max(0, items.findIndex((p) => p.key === wantKey))
   const [idx, setIdx] = useState(wantIdx)
+  /** Slides mounted so far (they stay mounted: a photo shown once never remounts, A2). */
+  const mountedSlides = useRef(new Set<string>())
   const idxRef = useRef(idx)
   idxRef.current = idx
   /**
@@ -371,6 +375,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   }, [n, items, goTo, open, paintChrome])
 
   if (!n) return null
+  for (let i = Math.max(0, idx - MOUNT_NEAR); i <= Math.min(n - 1, idx + MOUNT_NEAR); i++) mountedSlides.current.add(items[i].key)
   const showFilter = counts.detailed > 0 && counts.weather > 0
   const hero = !detail
 
@@ -397,7 +402,16 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
 
       <div className={s.viewport}>
         <div ref={trackRef} className={s.track} role="group" aria-roledescription="carousel" aria-label="Photos of this place, swipe for more">
-          {items.map((p, i) => (
+          {items.map((p, i) =>
+            // PH-06 / U-1: a slide far from the one on screen is an empty frame until it comes within MOUNT_NEAR (then it
+            // stays): the results' arrival lays out 5 slides, not all 29 (~30 nodes each), in the frame the panel mounts.
+            Math.abs(i - idx) > MOUNT_NEAR && !mountedSlides.current.has(p.key) ? (
+              <figure key={p.key} className={s.slide} aria-hidden>
+                <div className={s.figure}>
+                  <div className={s.frame} />
+                </div>
+              </figure>
+            ) : (
             <Slide
               key={p.key}
               photo={p}
@@ -415,7 +429,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
               onReplay={hero ? onReplay : undefined}
               onShare={hero ? onShare : undefined}
             />
-          ))}
+            ),
+          )}
         </div>
         {n > 1 ? (
           <span className={s.rail} aria-hidden>
@@ -554,7 +569,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
               {' · '}
               <Ago t={when} base={model.clock} />
             </span>
-            {status ? <span> · {status}</span> : null}
+            {status ? <span className={s.mStatus}> · {status}</span> : null}
           </span>
         </span>
         {replay ? (

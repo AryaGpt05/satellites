@@ -599,7 +599,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
             return (
               <div key={p.key} className={s.slide} style={{ transform: `translateX(${d * (side + GAP)}px)` }} aria-hidden={d !== 0 || undefined}>
                 <div ref={d === 0 ? zoomRef : undefined} className={s.zoom}>
-                  <LbPhoto photo={p} model={model} hires={opened && d === 0} reveal={p.key === revealKey} />
+                  <LbPhoto photo={p} model={model} hires={opened && !closing && d === 0} reveal={p.key === revealKey} />
                 </div>
               </div>
             )

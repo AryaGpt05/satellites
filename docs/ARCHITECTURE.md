@@ -75,6 +75,9 @@ export function computeReport(place: Place, opts?: ReportOptions): Promise<Engin
 //   onUpdate(r)      after the final report: background patches (GIBS stragglers, a late clear cover); counts only go up
 // EngineReport = Report + notes, partial, timings, coverPending (the week needs a clear cover and it is still being
 // checked: a later report carries it or says there is none) and finalDueAt (partial reports: when the final is due)
+// Report.lateChecks (final reports, only with onUpdate): GIBS stragglers still probing whose answer could add a photo;
+// the UI reads the photo count as "At least K" with the "Verifying weather mosaics" line while it is > 0, and the patch
+// that settles the last straggler (pixels, no data, failure or the 20 s cut) has none: the count is final.
 export function profileFor(norad: number): SatProfile | undefined
 ```
 The shader must reproduce: ECI position from Kepler + J2 secular drift, then ECI → ECEF via GMST (`src/lib/geo.ts gmst`), then ECEF → world (`ecefToWorld`).
@@ -123,6 +126,9 @@ full stop, painted before any script runs (DESIGN §10). React never renders a b
   If the HUD's wordmark can't be measured, it is shown at once and the centred one fades with the ink.
 - `dropBootCurtain()` removes it immediately (dev sandboxes). Nothing may set the phase back to `boot` after it has
   left: a retry of the catalog (controller `retryCatalog`) loads it behind the fault notice instead.
+- The HUD's other lines and the landing's headline wipe in under the fading ink on CSS time (`<Reveal>` is a CSS
+  animation whose delay is set at mount), from the curtain's first frame: a busy main thread can drop frames of them but
+  never pushes their start back. The HUD's version and About lines start at 780 / 820 ms, after the 760 ms glide.
 - Boot leaves no sooner than 650 ms after navigation start and once the globe's first light and the first faces are
   in, waiting at most 12 s for first light and 4 s more for the faces once the script runs (the script's own download
   comes first: measured on a 40 KB/s link, the wordmark held ~19 s, its "Slow connection" line from 6 s); deep and
@@ -136,12 +142,31 @@ renders a fresh frame in the same frame the attribute goes, with no stale frame 
 About page (it restores an earlier `'lightbox'` value on close), and the share sheet on stacked layouts only (the
 desktop and landscape-phone share dialogs leave the globe visible around them, so they don't set it).
 
+### UI entrance → globe frame: `watched:ui-entrance` (`src/lib/uiEvents.ts`)
+The results panel's handoff dispatches this window event from its commit's layout effect (with `holdMotion(900)`). On
+the phone tier the globe skips its composer render in the next frame (the canvas keeps its last image), so the
+browser's style / layout / paint of the new panel and the globe's draw are two tasks, not one long one (U-1).
+
+### Renders read the cached viewport (`src/ui/system/viewport.ts`)
+Components never read `window.innerHeight` (or a safe-area inset) during a render: that forces a synchronous layout
+of whatever the last commit mounted (114 ms at 4× CPU on a phone). `useViewportHeight()` / `viewportHeight()` and
+`safeAreaTop()` / `safeAreaSides()` are cached, updated once per frame on window and visual-viewport resizes.
+
 ### ui-results → `src/ui/results/index.ts`, `src/ui/share/index.ts`
 `<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>`.
 
 `prewarmResultsModel(report: Report): void`, exported from `src/ui/results/index.ts`: builds and caches the
 `ResultsModel` for that `Report` object. The controller calls it in idle time, and only through a dynamic
 `import('@/ui/results')` (never a static import, so the results chunk stays out of the boot bundle).
+
+Phone results arrival: the overview's pass list mounts on the final report (a partial one waits, at most 8 s, with a
+"Checking the archives" line under 02 / PASSES), so verified mosaics never re-sort rows under the reader; short
+landscape phones (the dock, ≤ 540 px tall) set the summary in two columns, the photo beside the words. The sheet header
+keeps its computing form until the overview swaps in (one headline entrance, one sheet glide), and a view change moves
+the sheet to the incoming view's snap in the same beat as the outgoing view fades (the last measured snaps of that kind
+of view; a pass view's flight snap is estimated the first time). The Sheet draws its body below the overlaid header
+from the header's ResizeObserver (no forced layout): a header that grows over the same content glides the body 240 ms;
+a swapped view is placed at once.
 
 ### backend
 - `supabase/migrations/*.sql`: tables `lookups`, `shares`; RLS on, no direct anon table access; `security definer` RPCs `record_lookup`, `create_share`, `get_share`, `get_stats`.

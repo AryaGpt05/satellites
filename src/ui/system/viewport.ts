@@ -23,11 +23,16 @@ function readSafeTop(): number {
   if (!probe) {
     probe = document.createElement('div')
     probe.setAttribute('aria-hidden', 'true')
-    probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px)'
+    probe.style.cssText =
+      'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) 0 env(safe-area-inset-left,0px)'
     document.documentElement.appendChild(probe)
   }
-  return Number.parseFloat(getComputedStyle(probe).paddingTop) || 0
+  const cs = getComputedStyle(probe)
+  sides = { left: Number.parseFloat(cs.paddingLeft) || 0, right: Number.parseFloat(cs.paddingRight) || 0 }
+  return Number.parseFloat(cs.paddingTop) || 0
 }
+/** The side safe-area insets (a landscape notch and the rounded corners), read with the top one. */
+let sides = { left: 0, right: 0 }
 
 function onResize() {
   if (raf) return
@@ -64,3 +69,6 @@ export function useViewportHeight(): number {
 
 /** The top safe-area inset (px) as of the last frame: safe to read in a render (changes re-render useViewportHeight users). */
 export const safeAreaTop = (): number => safeTop
+
+/** The left / right safe-area insets (px) as of the last frame (a landscape notch and the rounded corners). */
+export const safeAreaSides = (): { left: number; right: number } => sides

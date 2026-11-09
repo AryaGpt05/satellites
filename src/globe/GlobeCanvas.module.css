@@ -175,7 +175,7 @@
 .coordBelow .coord {
   left: 0;
   top: 24px;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + var(--below-dx, 0px)));
 }
 
 /* The capture line under the coordinates: signal, snapping in with a short mask wipe (one entrance per capture). */

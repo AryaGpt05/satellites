@@ -74,7 +74,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
 | `--fs-panel-h` | 34px | 34px | panel headline (condensed) |
 | `--fs-panel-sub` | 22px | 22px | panel sub-headline |
 
-The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public photos (Sentinel-2, Landsat and the daily weather mosaics) are counted on the second line, the only one that can read "At least…" and settle in place.
+The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public photos (Sentinel-2, Landsat and the daily weather mosaics) are counted on the second line, the only one that can read "At least…" and settle in place: it does while the archives answer (a partial report) and while late weather mosaics are still being checked after the report (`lateChecks`), so a number shown without "At least" never changes.
 
 ## 4. Layout
 
@@ -97,7 +97,7 @@ The results headline integer is static: it does not count up. It counts the dist
 - Text reveal: line-by-line mask wipe (clip-path), 60ms stagger. Numbers count up with tabular digits over 600–900ms using ease-out.
 - Code-like strings (NORAD IDs, coordinates) may do a brief **glyph scramble** (≤ 400ms), only on first appearance. Never on prose.
 - Camera: moves take 2.4–3.6s with ease-in-out. **The pass camera frames north-up** (oblique ~35°, track visible); never south-up by default. Always ease the target and distance together, never a straight linear lerp. Respect `prefers-reduced-motion` with cuts and fades.
-- **The signature moment, the pushbroom reveal:** when a captured image is shown, it is revealed **line by line in the satellite's along-track direction**, the way a pushbroom sensor actually builds an image. A 1px signal-coloured scan line leads the reveal with a faint trailing glow (6px, 30% to 0). Duration ≈ 1.6s. A mono readout beside it counts `LINE 0000 → 1024`.
+- **The signature moment, the pushbroom reveal:** when a captured image is shown, it is revealed **line by line in the satellite's along-track direction**, the way a pushbroom sensor actually builds an image. A 2px signal-coloured front with a 1px bone core leads the reveal with a faint trailing glow (8px, 42% to 0, alpha-blended); ahead of it the unread part is a fine raster on ink (lines waiting to be read). Duration ≈ 1.6s. A mono readout on the image counts `LINE 0000 → 1024`. It is compositor-only: the view's own session `<img>` under one transform animation of the raster / glow / front layer (no canvas, no per-frame script). Reduced motion: a 200 ms fade.
 
 ## 6. The globe (3D art direction)
 
@@ -174,7 +174,10 @@ rises and shrinks first, then slides left along the top, so it never crosses the
 the same pixels; the ink fades off the globe (560 ms after 120 ms); in the frame it lands, `html[data-boot]` goes, the
 HUD's wordmark shows in its place and the curtain is removed. Transform and opacity only. The HUD's other lines and
 the landing wipe in under the fading ink. Reduced motion: one 200 ms fade, nothing moves. Never on screen: two
-wordmarks at once, the landing before the logo, the logo after the HUD's wordmark, a white or black flash.
+wordmarks at once, the landing before the logo, the logo after the HUD's wordmark, a white or black flash. The
+landing's first headline line starts its wipe 340 ms into the exit (the ink about half gone) and the HUD's version and
+About lines after the glide has landed (780 / 820 ms); these wipes run on CSS time from the exit's first frame, so a
+busy main thread never makes them late.
 
 
 ## Brand

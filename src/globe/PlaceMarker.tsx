@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Matrix4, Mesh, PerspectiveCamera, PlaneGeometry, Vector3 } from 'three'
 import { clamp, DEG, latLonToWorld } from '@/lib/geo'
 import { easeInOut, easeOut } from '@/lib/ease'
+import { isStacked } from '@/lib/layout'
 import { useApp } from '@/state/store'
 import { createReticleMaterial } from './materials'
 import { createAnchor, FRAME, useRuntime } from './runtime'
@@ -43,6 +44,9 @@ const smoothstep = (a: number, b: number, x: number) => {
 type PlaceRef = { key: string; lat: number; lon: number }
 const keyOf = (p: { lat: number; lon: number }) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`
 /** Anchor id of a place's coordinate label (GlobeOverlay reads the same id). */
+/** Stacked layouts: a free globe band (between the HUD and the sheet) narrower than this hides the reticle and its label. */
+const CRAMPED_BAND_PX = 120
+
 export const placeAnchorId = (key: string) => `place:${key}`
 
 export function PlaceMarker() {
@@ -123,6 +127,9 @@ function Reticle({ id, lat, lon, onGone }: { id: string; lat: number; lon: numbe
     const st = useApp.getState()
     const cur = st.report?.place ?? st.place
     const active = !!cur && keyOf(cur) === id
+    const W = state.size.width
+    const H = state.size.height
+    const cramped = isStacked(W, H) && H - st.uiInsets.top - st.uiInsets.bottom < CRAMPED_BAND_PX
 
     // Constant on-screen size: world units per CSS px at the place's distance.
     const dist = tmp.v.copy(frame.pos).sub(cam.position).length()
@@ -167,8 +174,10 @@ function Reticle({ id, lat, lon, onGone }: { id: string; lat: number; lon: numbe
         onGone()
       }
     } else {
-      const target = rt.camera.flying && !waiting ? 0.55 : 1
-      a.opacity += (target - a.opacity) * Math.min(1, dt / 0.25)
+      // A phone sheet that leaves only a sliver of globe under the HUD (its top snap): the reticle and its label would
+      // show cut by the sheet's edge, so they fade out until the band opens again (PH-12 / INT-07).
+      const target = cramped ? 0 : rt.camera.flying && !waiting ? 0.55 : 1
+      a.opacity += (target - a.opacity) * Math.min(1, dt / (cramped ? 0.12 : 0.25))
     }
     // Grazing angles: the quad is flat and a constant ~110 px wide, so near the limb its outer ring rises off
     // the curved surface and would poke past the horizon. Fade it out as the place turns edge-on (the same
@@ -190,7 +199,7 @@ function Reticle({ id, lat, lon, onGone }: { id: string; lat: number; lon: numbe
     // Coordinate label anchor: shown once locked, hidden when the place turns away or the reticle leaves.
     const anchor = rt.anchors.get(anchorId)
     if (anchor) {
-      anchor.visible = active && facing > 0.15 && a.lock >= 0.999
+      anchor.visible = active && !cramped && facing > 0.15 && a.lock >= 0.999
       if (anchor.visible) {
         tmp.ndc.copy(frame.pos).project(cam)
         anchor.x = (tmp.ndc.x * 0.5 + 0.5) * state.size.width

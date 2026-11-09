@@ -51,6 +51,16 @@
 .hud[data-scene] :is(.dim, .version, .about, .pending, .mob) {
   color: var(--bone-2);
 }
+/* Short landscape phones (PH-15): the landing globe's satellite halo reaches the top corners, so the top scrim is
+   always up there and the quiet lines are bone-2 over it. */
+@media (orientation: landscape) and (max-height: 540px) {
+  .hud::before {
+    opacity: 1;
+  }
+  .hud :is(.dim, .version, .about, .pending, .mob) {
+    color: var(--bone-2);
+  }
+}
 
 .line {
   display: inline-flex;

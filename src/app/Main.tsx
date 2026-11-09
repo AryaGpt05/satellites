@@ -126,14 +126,15 @@ const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<Re
 const closeAbout = () => useApp.getState().setAboutOpen(false)
 
 /**
- * Landing entrance delay after `prev` (K5). After boot the headline's first line starts wiping (delay + 140 ms) at
- * 440 ms, with the loading screen's ink about half gone (bootCurtain: the ink fades 120 → 680 ms), so the landing
- * wipes in under the fading ink (DESIGN §10; the wipes are CSS-timed from the curtain's first frame, PH-05). Quickly
- * after a results exit.
+ * Landing entrance delay after `prev` (K5). After boot the kicker starts at 200 ms and the headline's first line
+ * (delay + 140 ms) at 340 ms, with the loading screen's ink about half gone (bootCurtain: the ink fades 120 → 680 ms),
+ * so the landing wipes in under the fading ink (DESIGN §10; the wipes are CSS-timed from the curtain's first frame,
+ * PH-05). By then the gliding wordmark has risen above the headline (measured at 1440×900 and the phones: no visible
+ * overlap). Quickly after a results exit.
  */
 function enterDelayAfter(prev: Phase): number {
   if (prefersReducedMotion()) return 0
-  if (prev === 'boot') return 300
+  if (prev === 'boot') return 200
   return 160
 }
 

@@ -1082,6 +1082,13 @@
   padding: 32px 0;
 }
 
+/* The 400 px panel of narrow laptops (1024): a long verdict name takes two lines rather than be cut (LAP-09). */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .verdictLabel {
+    white-space: normal;
+  }
+}
+
 /* ── stacked layouts ──────────────────────────────────────────── */
 @media (max-width: 760px), (orientation: portrait) and (max-width: 1100px) {
   .body.body {

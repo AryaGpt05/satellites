@@ -1,5 +1,5 @@
 .overlay {
-  --content-w: calc(100vw - 2 * (var(--bezel-inset) + var(--margin)));
+  --content-w: calc(100vw - 2 * (var(--bezel-inset) + var(--margin)) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   --bar-h: calc(var(--bezel-inset) + 60px);
   position: fixed;
   inset: 0;
@@ -66,7 +66,7 @@
   align-items: center;
   justify-content: space-between;
   height: var(--bar-h);
-  padding: var(--bezel-inset) calc(var(--bezel-inset) + var(--margin)) 0;
+  padding: var(--bezel-inset) calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-right, 0px)) 0 calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-left, 0px));
   background: var(--ink-0);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
@@ -138,7 +138,8 @@
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   column-gap: var(--gutter);
-  padding: 0 calc(var(--bezel-inset) + var(--margin));
+  /* PH-10: clear of a landscape notch and the rounded corners too */
+  padding: 0 calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-right, 0px)) 0 calc(var(--bezel-inset) + var(--margin) + env(safe-area-inset-left, 0px));
 }
 .nav {
   grid-column: 1 / span 3;
@@ -442,6 +443,15 @@
 .creditWhat a:active {
   color: var(--signal);
   transition-duration: 0ms;
+}
+/* Touch (PH-08): the inline links take a 44 px tall tap without moving the text around them. */
+@media (pointer: coarse) {
+  .footer a,
+  .creditWhat a {
+    display: inline-block;
+    padding-block: 12px;
+    margin-block: -12px;
+  }
 }
 
 /* Touch-only devices have no keyboard to speak of (key caps are hidden there too): no "Keyboard" section. */

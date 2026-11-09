@@ -29,6 +29,7 @@ import { selectSelectedPass, useApp } from '@/state/store'
 // The pure time module only, never the '@/ui/results' index (that is the lazy results chunk).
 import { fmtLocalTime, zoneAbbr } from '@/ui/results/lib/time'
 import { fmtLat, fmtLon, fmtNorad, fmtUtcTime } from '@/ui/system/format'
+import { safeAreaSides } from '@/ui/system/viewport'
 import { captureOf, fmtCountdown } from './acquisition'
 import { getSatInfo, useCatalogBuffers } from './data'
 import { passAnchorId } from './PassOverlay'
@@ -41,6 +42,8 @@ const BOX_OFFSET = 44
 const BOX_RISE = 24
 /** Gap to the bezel: bezel inset + 12 (12 + 10 on stacked layouts, 16 + 12 on desktop). */
 const edgeFor = (stacked: boolean) => (stacked ? 22 : 28)
+/** The callout keeps its side until the line it crossed is this far behind it (LAP-10). */
+const FLIP_HYSTERESIS_PX = 12
 /** Departing labels stay mounted this long (the .anchor opacity transition). */
 const DEPART_MS = 240
 /**
@@ -246,7 +249,7 @@ function PlaceLabel({
   const acqEl = useRef<HTMLDivElement>(null)
   const acqShown = useRef(false)
   const labelSize = useSizeRef(label)
-  const last = useRef({ x: NaN, y: NaN, op: '', want: '', wantAt: 0, side: '' as '' | 'right' | 'left' | 'below' })
+  const last = useRef({ x: NaN, y: NaN, op: '', want: '', wantAt: 0, side: '' as '' | 'right' | 'left' | 'below', dx: 0 })
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 400)
   useAnchorListener(runtime, () => {
     const a = runtime.anchors.get(id)
@@ -277,8 +280,10 @@ function PlaceLabel({
     // selected satellite's callout box is skipped.
     const ins = useApp.getState().uiInsets
     const edge = edgeFor(isStacked(W, H))
-    const lo = ins.left + edge
-    const hi = W - ins.right - edge
+    // Clear of a landscape notch and the rounded corners too (PH-04).
+    const safe = safeAreaSides()
+    const lo = ins.left + edge + safe.left
+    const hi = W - ins.right - edge - safe.right
     const { w, h } = labelSize.current
     const cb = runtime.calloutBox
     const clear = (x0: number, y0: number, x1: number, y1: number) =>
@@ -294,6 +299,12 @@ function PlaceLabel({
       st.side = side
       d.classList.toggle(s.coordFlip, side === 'left')
       d.classList.toggle(s.coordBelow, side === 'below')
+    }
+    // Centred below the reticle, but never past the free columns (INT-06: in a narrow band it crossed the bezel).
+    const dx = side === 'below' && w > 0 ? Math.round(Math.min(Math.max(x, lo + w / 2), Math.max(lo + w / 2, hi - w / 2)) - x) : 0
+    if (dx !== st.dx && label.current) {
+      st.dx = dx
+      label.current.style.setProperty('--below-dx', `${dx}px`)
     }
   })
   const digits = narrow ? 2 : 4
@@ -367,7 +378,9 @@ function SatLabel({
       const { w, h } = boxSize.current
       // Above the point unless that reaches into the HUD band (or the acquisition countdown under it); then below, if
       // that clears the sheet / timeline.
-      below = y - BOX_RISE - h < Math.max(ins.top, runtime.readoutBottom)
+      // With a little hysteresis, so a camera settling near the line never flips it back and forth (LAP-10).
+      const band = Math.max(ins.top, runtime.readoutBottom)
+      below = y - BOX_RISE - h < band + (st.below ? FLIP_HYSTERESIS_PX : 0)
       if (below && y + BOX_RISE + h > H - ins.bottom - 8) show = false
       // Right of the point unless the left has more room; then nudge it inside the free columns and let the
       // leader's level run follow the box's near corner.
@@ -387,6 +400,12 @@ function SatLabel({
       if (below !== st.below) {
         st.below = below
         d.classList.toggle(s.calloutBelow, below)
+        // The box glides to its new side (240 ms, transform only) instead of jumping 2 × BOX_RISE + its height (LAP-10).
+        if (st.op === '1' && !runtime.reducedMotion && typeof b.animate === 'function') {
+          const from = (2 * BOX_RISE + h) * (below ? -1 : 1)
+          b.animate([{ transform: `translateY(${from}px)` }, { transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,0,0,1)' })
+          leader.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'linear' })
+        }
       }
       if (shift !== st.shift || flipChanged) {
         st.shift = shift
