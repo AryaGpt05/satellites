@@ -2,25 +2,51 @@ import { describe, expect, it } from 'vitest'
 import { useApp } from '@/state/store'
 import { provisionalTier } from './quality'
 import { createRuntime } from './runtime'
-import { canUpload, criticalSteps, deepLinkPlace, firstDayStep, inDarkAt, stripCount, upgradePlan } from './textures'
+import { declineLevel } from './quality'
+import {
+  canUpload,
+  createScheduler,
+  criticalSteps,
+  deepLinkPlace,
+  firstDayStep,
+  inDarkAt,
+  INPUT_QUIET_MS,
+  pageInput,
+  planBatches,
+  stripCount,
+  stripRowsFor,
+  STRIP_ROWS_MOBILE,
+  uploadBudgetMs,
+  upgradePlan,
+} from './textures'
 
 describe('upgradePlan (decision 9)', () => {
-  it('phones go 1k → 2k at landing idle, day 4k only after a place, never clouds-4k or data-4k', () => {
-    const plan = upgradePlan({ ...provisionalTier(true), allow4k: true, allow8k: false })
-    expect(plan.filter((s) => s.when === 'idle').map((s) => `${s.map}-${s.res}`)).toEqual(['day-2k', 'night-2k', 'clouds-2k'])
-    expect(plan.find((s) => s.res === '4k')).toEqual({ map: 'day', res: '4k', when: 'place' })
-    expect(plan.some((s) => s.map === 'clouds' && s.res === '4k')).toBe(false)
-    expect(plan.some((s) => s.map === 'data')).toBe(false)
+  it('phones: the 2k day + night pair is the final set, swapped in together; clouds 2k only when zoomed in; never 4k (G-M1)', () => {
+    for (const allow4k of [true, false]) {
+      const plan = upgradePlan({ ...provisionalTier(true), allow4k, allow8k: false })
+      expect(plan.map((s) => `${s.map}-${s.res}-${s.when}`)).toEqual(['day-2k-idle', 'night-2k-idle', 'clouds-2k-zoom'])
+      expect(plan.some((s) => s.res === '4k' || s.res === '8k')).toBe(false)
+      expect(plan.some((s) => s.map === 'data')).toBe(false)
+      // One swap for the pair, then the clouds on their own.
+      expect(planBatches(plan).map((b) => b.map((s) => s.map))).toEqual([['day', 'night'], ['clouds']])
+    }
   })
   it('desktops get the 4k set at landing idle and 8k only after results', () => {
     const plan = upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true })
     expect(plan.filter((s) => s.when === 'idle').map((s) => `${s.map}-${s.res}`)).toEqual(['day-4k', 'night-4k', 'clouds-4k', 'data-4k'])
     expect(plan.at(-1)).toEqual({ map: 'day', res: '8k', when: 'results' })
   })
-  it('slices uploads into 256-row strips', () => {
+  it('desktop steps swap one at a time', () => {
+    const plan = upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true })
+    expect(planBatches(plan).every((b) => b.length === 1)).toBe(true)
+  })
+  it('slices uploads into 256-row strips (128 on phones: half the work per frame)', () => {
     expect(stripCount('2k')).toBe(4)
     expect(stripCount('4k')).toBe(8)
     expect(stripCount('8k')).toBe(16)
+    expect(stripRowsFor({ mobile: true })).toBe(STRIP_ROWS_MOBILE)
+    expect(stripCount('2k', stripRowsFor({ mobile: true }))).toBe(8)
+    expect(stripRowsFor({ mobile: false })).toBe(256)
   })
 })
 
@@ -58,6 +84,17 @@ describe('canUpload (decision 9, R2G1, R2G4)', () => {
     rt.camera.arrivedAt = 9_650
     expect(canUpload(rt, 10_000)).toBe(true)
   })
+  it('computing on phones: never mid-flight, even at its very start (G-M1)', () => {
+    setStore({ phase: 'computing' })
+    const rt = createRuntime(provisionalTier(true), false, Date.now())
+    rt.camera.arrivedAt = 0
+    rt.camera.flying = true
+    rt.camera.progress = 0.01
+    expect(canUpload(rt, 10_000)).toBe(false)
+    rt.camera.flying = false
+    rt.camera.arrivedAt = 9_650
+    expect(canUpload(rt, 10_000)).toBe(true)
+  })
   it('computing: a hold inherited from the landing does not block; a new one does', () => {
     setStore({ phase: 'computing', motionBusyUntil: 11_000 })
     const rt = base()
@@ -79,6 +116,36 @@ describe('canUpload (decision 9, R2G1, R2G4)', () => {
     useApp.setState({ motionBusyUntil: 10_100 })
     expect(canUpload(rt, 10_000)).toBe(false)
   })
+  it('acquisition: nothing while a sequence is armed, nor for 2.5 s after its capture', () => {
+    setStore({ phase: 'results' })
+    const rt = base()
+    rt.acq.armed = true
+    expect(canUpload(rt, 10_000)).toBe(false)
+    rt.acq.armed = false
+    rt.acq.capturedAt = 8_000
+    expect(canUpload(rt, 10_000)).toBe(false)
+    expect(canUpload(rt, 10_501)).toBe(true)
+  })
+  it('input: nothing while a finger is down anywhere (a sheet drag, a swipe) or a scroll just moved', () => {
+    setStore({ phase: 'results' })
+    const rt = base()
+    pageInput.down.add(1)
+    pageInput.lastAt = 9_900
+    expect(canUpload(rt, 10_000)).toBe(false)
+    pageInput.down.clear()
+    expect(canUpload(rt, 9_900 + INPUT_QUIET_MS - 1)).toBe(false)
+    expect(canUpload(rt, 9_900 + INPUT_QUIET_MS + 1)).toBe(true)
+    // A pointer-up that never came expires.
+    pageInput.down.add(2)
+    expect(canUpload(rt, 9_900 + 8_001)).toBe(true)
+    // Boot: the curtain covers the globe, input does not matter.
+    pageInput.down.add(3)
+    pageInput.lastAt = 9_999
+    useApp.setState({ phase: 'boot' })
+    expect(canUpload(rt, 10_000)).toBe(true)
+    pageInput.down.clear()
+    pageInput.lastAt = -Infinity
+  })
   it('replay: nothing during the first 10 s of the sweep', () => {
     setStore({ phase: 'results', timeMode: 'replay' })
     const rt = base()
@@ -90,7 +157,7 @@ describe('canUpload (decision 9, R2G1, R2G4)', () => {
 
 describe('first day step (the regional zoom floor)', () => {
   it('is day 2k on phones and day 4k on desktops', () => {
-    expect(firstDayStep(upgradePlan({ ...provisionalTier(true), allow4k: true }))).toEqual({ map: 'day', res: '2k', when: 'idle' })
+    expect(firstDayStep(upgradePlan({ ...provisionalTier(true), allow4k: true }))).toMatchObject({ map: 'day', res: '2k', when: 'idle' })
     expect(firstDayStep(upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true }))).toEqual({ map: 'day', res: '4k', when: 'idle' })
   })
 })
@@ -110,14 +177,57 @@ describe('critical steps (a deep link to a place in darkness waits on the night 
     expect(inDarkAt({ lat: 35.68, lon: 139.69 }, t)).toBe(false)
   })
 
-  it('adds the first night step only for a dark target', () => {
-    const plan = upgradePlan({ ...provisionalTier(true), allow4k: true })
-    expect(criticalSteps(plan, false)).toEqual([{ map: 'day', res: '2k', when: 'idle' }])
-    expect(criticalSteps(plan, true)).toEqual([
-      { map: 'day', res: '2k', when: 'idle' },
-      { map: 'night', res: '2k', when: 'idle' },
-    ])
+  it('adds the first night step only for a dark target (desktops); phones always take the whole pair', () => {
     const desk = upgradePlan({ ...provisionalTier(false), allow4k: true, allow8k: true })
+    expect(criticalSteps(desk, false).map((st) => `${st.map}-${st.res}`)).toEqual(['day-4k'])
     expect(criticalSteps(desk, true).map((st) => `${st.map}-${st.res}`)).toEqual(['day-4k', 'night-4k'])
+    const phone = upgradePlan({ ...provisionalTier(true), allow4k: true })
+    for (const dark of [false, true]) expect(criticalSteps(phone, dark).map((st) => `${st.map}-${st.res}`)).toEqual(['day-2k', 'night-2k'])
+  })
+})
+
+describe('upload scheduler (G-M1: ≤ 8 ms of upload work per frame on phones)', () => {
+  it('phones: one strip per frame outside boot / computing; at most 8 ms in them', () => {
+    expect(uploadBudgetMs('results', true)).toBe(0)
+    expect(uploadBudgetMs('idle', true)).toBe(0)
+    expect(uploadBudgetMs('boot', true)).toBe(8)
+    expect(uploadBudgetMs('computing', true)).toBe(8)
+    expect(uploadBudgetMs('boot', false)).toBe(24)
+  })
+  it('never starts a job the last one says would overrun the budget', () => {
+    const sched = createScheduler()
+    let clock = 0
+    const real = performance.now
+    performance.now = () => clock
+    try {
+      const ran: number[] = []
+      for (let i = 0; i < 6; i++) void sched.upload(() => ((clock += 3), ran.push(i)))
+      sched.tick(true, 8) // 3 + 3 = 6, a third would make 9 > 8
+      expect(ran).toEqual([0, 1])
+      sched.tick(true, 0) // one job only
+      expect(ran).toEqual([0, 1, 2])
+      sched.tick(false, 8) // gate closed
+      expect(ran).toEqual([0, 1, 2])
+      expect(sched.queued).toBe(3)
+    } finally {
+      performance.now = real
+    }
+  })
+})
+
+describe('DPR decline (one reallocation for a slow device)', () => {
+  const levels = [1, 1.25, 1.5, 2]
+  it('steps once for a device just short of the target', () => {
+    expect(declineLevel(levels, 2, 36, 40)).toBe(1)
+    expect(declineLevel(levels, 3, 35, 40)).toBe(2)
+  })
+  it('jumps straight to the floor for a device far from it', () => {
+    expect(declineLevel(levels, 2, 8, 40)).toBe(0)
+    expect(declineLevel(levels, 3, 12, 40)).toBe(0)
+    expect(declineLevel(levels, 3, 24, 40)).toBe(2) // 2 × √0.6 = 1.55 → 1.5
+    expect(declineLevel(levels, 3, 18, 40)).toBe(1) // 2 × √0.45 = 1.34 → 1.25
+  })
+  it('stays at the floor', () => {
+    expect(declineLevel(levels, 0, 5, 40)).toBe(0)
   })
 })

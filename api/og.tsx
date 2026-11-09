@@ -5,7 +5,7 @@
  *   /api/og?id=<shareId>          a stored share (read via get_share, without counting a view)
  *   /api/og?place=…&lat=…&…       explicit parameters (see shareFromParams), no database needed
  *   /api/og?kind=place&place=…&lat=…&lon=…   an address-bar link (no pass): the default card
- *   /api/og?kind=summary&q=…&n=…&sv=…&sc=…   a week's summary (SH6): counts + the best look
+ *   /api/og?kind=summary&q=…&n=…&sv=…&sc=…   a week's summary (SH6, R3-13): N watched, K photos, the closest look
  *   /api/og                       the default card, also baked into public/og-default.png
  *
  * Every card is built from the shared spec (api/_lib/cardSpec.ts), the same one the app's preview and
@@ -87,11 +87,16 @@ export function pngToJpeg(png: ArrayBuffer | Uint8Array): Uint8Array {
   return new Uint8Array(jpeg.buffer, jpeg.byteOffset, jpeg.byteLength)
 }
 
-async function render(element: ReturnType<typeof defaultCard>, cacheControl: string, status = 200): Promise<Response> {
+/** Satori's lossless PNG of a card (the JPEG's source; also what scripts/backend-render-og.ts bakes og-default.png from). */
+async function renderPng(element: ReturnType<typeof defaultCard>, status = 200): Promise<ArrayBuffer> {
   const [{ ImageResponse }, fonts] = await Promise.all([loadOg(), loadFonts()])
   const img = new ImageResponse(element, { width: CARD_W, height: CARD_H, fonts, status })
   // ImageResponse streams; buffer it so errors surface here (and the response has a length).
-  const jpeg = pngToJpeg(await img.arrayBuffer())
+  return img.arrayBuffer()
+}
+
+async function render(element: ReturnType<typeof defaultCard>, cacheControl: string, status = 200): Promise<Response> {
+  const jpeg = pngToJpeg(await renderPng(element, status))
   return new Response(jpeg, {
     status,
     headers: {
@@ -100,6 +105,14 @@ async function render(element: ReturnType<typeof defaultCard>, cacheControl: str
       'x-content-type-options': 'nosniff',
     },
   })
+}
+
+/**
+ * The default (root link) card as a lossless PNG, for baking public/og-default.png (R3-15): the bake starts
+ * from satori's own pixels, not from the JPEG /api/og serves.
+ */
+export async function defaultCardPng(host: string): Promise<Uint8Array> {
+  return new Uint8Array(await renderPng(defaultCard({ host, plateDataUri: await defaultPlateDataUri() })))
 }
 
 type CardImage =
@@ -116,7 +129,7 @@ async function cardImage(share: ShareRecord): Promise<CardImage> {
   return dataUri ? { kind: 'image', dataUri } : { kind: 'transient' }
 }
 
-/** A week's summary: the best look's crop (when it has one) beside the count of satellites. */
+/** A week's summary: the closest look's crop (when it has one) beside "N satellites watched … K photos were made public." */
 async function renderSummary(q: URLSearchParams, host: string): Promise<Response | null> {
   const sum = summaryFromParams(q)
   if (!sum) return null

@@ -205,8 +205,8 @@ export function photosLine(k: number, opts: { partial?: boolean; week?: 'this we
   return k === 1 ? `${lead}1 photo was made public.` : `${lead}${int(k)} photos were made public.`
 }
 
-/** "256 satellites flew over" / "1 satellite flew over" */
-export const flewOverPhrase = (n: number) => `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} flew over`
+/** "256 satellites watched" / "1 satellite watched" (owner F, latest: the headline verb is "watched") */
+export const watchedPhrase = (n: number) => `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} watched`
 
 /** The archive outage, as the second line says it. */
 export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public photos right now.'

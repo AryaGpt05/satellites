@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Capture, Pass } from '@/types'
 import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
-import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, flewOverPhrase, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline } from './copy'
+import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline, watchedPhrase } from './copy'
 import { cardUrl, filterCounts, filterPhotos, hiResUrl, orderPhotos, thumbUrl } from './photos'
 import { groupPasses, visibleCount } from './groups'
 import { glyphForPass, markColorVar, VERDICT_META, VERDICT_TAG, VERDICT_TITLE, verdictUnit, type SatMeta } from './meta'
@@ -133,7 +133,7 @@ describe('copy', () => {
     expect(h.zeroReason).toBeUndefined()
   })
 
-  it('owner F: "N satellites flew over" counts every distinct satellite with a pass, never a geostationary one', () => {
+  it('owner F: "N satellites watched" counts every distinct satellite with a pass, never a geostationary one', () => {
     const geoMeta = (n: number): SatMeta => (n === 99999 ? { norad: n, name: 'GOES-19', category: 'weather-geo' } : meta(n))
     const report = {
       captures: [s2],
@@ -146,8 +146,8 @@ describe('copy', () => {
       ],
     }
     expect(headline(report, geoMeta).flewOver).toBe(2)
-    expect(flewOverPhrase(1)).toBe('1 satellite flew over')
-    expect(flewOverPhrase(256)).toBe('256 satellites flew over')
+    expect(watchedPhrase(1)).toBe('1 satellite watched')
+    expect(watchedPhrase(256)).toBe('256 satellites watched')
   })
 
   it('owner F: the photos line, exact strings', () => {

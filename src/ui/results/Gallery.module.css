@@ -673,6 +673,13 @@ b.warn,
 }
 
 
+/* R3-6, laptops up to 860 px tall: the pass plate drops its coordinates row (the globe's place label says them), so
+   the photo reaches the column's width. */
+@media (min-width: 761px) and (orientation: landscape) and (max-height: 860px), (min-width: 1101px) and (max-height: 860px) {
+  .detail:not(.mobile) .capCoords {
+    display: none;
+  }
+}
 /* ── pass view: the square never runs under the footer (--detail-chrome is measured by the view) ── */
 .detail .figure {
   width: min(100%, max(240px, calc(100dvh - var(--detail-chrome, 0px))));

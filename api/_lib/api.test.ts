@@ -7,10 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleSharePage } from '../s.js'
 import { niceLength } from './card.js'
-import { buildCardSpec } from './cardSpec.js'
+import { buildCardSpec, buildSummarySpec } from './cardSpec.js'
 import { esc, jsonForScript, sharePageHtml } from './html.js'
 import { bboxAround, cropPlan } from './imagery.js'
-import { cardInputFromShare, description, headline, shareFromDeepLink, shareFromParams, shareFromRpc, summaryTitle, text } from './share.js'
+import { cardInputFromShare, description, headline, shareFromDeepLink, shareFromParams, shareFromRpc, summaryDescription, summaryFromParams, summaryTitle, text } from './share.js'
 
 /** The app's fallback link for the Sentinel-2C pass (src/ui/share/links.ts deepLink with the pass). */
 const DEEP =
@@ -122,15 +122,55 @@ describe('share parsing', () => {
 describe('copy', () => {
   it('writes the headline and description in the product voice', () => {
     const s = shareFromRpc(ROW)!
-    expect(headline(s)).toBe('Sentinel-2C photographed Waterloo.')
+    expect(headline(s)).toBe('Sentinel-2C watched Waterloo.')
     expect(description(s)).toBe(
       'Sentinel-2C crossed 795 km above Waterloo at 11:21 EST on Sun 1 Nov 2026. It was looking 5.3° off nadir. Cloud cover: 26%. What watched you this week?',
     )
     expect(headline({ ...s, verdict: 'could', satName: 'SkySat-C3' })).toBe('SkySat-C3 passed within view of Waterloo.')
-    expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 photographed Waterloo.')
+    expect(headline({ ...s, satName: undefined })).toBe('NORAD 60989 watched Waterloo.')
     expect(description({ ...s, verdict: 'could', satName: 'SkySat-C3', pass: { ...s.pass, headingDeg: 192 } })).toContain(
       "SkySat-C3 passed within view of Waterloo at 11:21 EST on Sun 1 Nov 2026, moving south. It could have pointed here. Its operator doesn't say whether it did. What watched you this week?",
     )
+  })
+})
+
+describe('summary links (R3-13)', () => {
+  const Q = 'q=43.47,-80.54&n=Waterloo&sv=256&sc=31,220,1544,66&sw=1793678400000&bc=sentinel-2-l2a&bi=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&bs=Sentinel-2C&bt=1793549661025&bg=10'
+  it('says the results headline: N satellites watched, K photos made public', () => {
+    const sum = summaryFromParams(new URLSearchParams(Q))!
+    expect(summaryTitle(sum)).toBe('256 satellites watched Waterloo this week.')
+    expect(summaryDescription(sum)).toBe('31 photos were made public. The closest look is from Sentinel-2C. What watched you this week?')
+    const spec = buildSummarySpec({ ...sum, host: 'www.watched.earth' })
+    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('256 satellites watched Waterloo this week.')
+    expect(spec.sub).toBe('31 photos were made public.')
+    expect(spec.verdictLabel).toMatch(/^Closest look · /)
+    expect(spec.plate.kind === 'image' && spec.plate.chip.segs[0].text).toBe('Closest look · Sentinel-2C · 10 m')
+    expect(summaryTitle({ satellites: 1, placeLabel: 'Waterloo' })).toBe('1 satellite watched Waterloo this week.')
+    expect(summaryTitle({ satellites: 0, placeLabel: 'Waterloo' })).toBe('No satellite we track watched Waterloo this week.')
+    expect(summaryDescription({ ...sum, counts: { ...sum.counts, imaged: 1 }, best: undefined })).toBe('1 photo was made public. What watched you this week?')
+    expect(summaryDescription({ ...sum, counts: { ...sum.counts, imaged: 0 } })).toMatch(/^No photos were made public\. /)
+  })
+  it('reads the outage and partial flags', () => {
+    const down = summaryFromParams(new URLSearchParams(`${Q}&sa=1`))!
+    expect(down.archiveDown).toBe(true)
+    expect(summaryDescription(down)).toBe('The image archives didn’t answer, so we can’t count the public photos right now. The closest look is from Sentinel-2C. What watched you this week?')
+    expect(buildSummarySpec({ ...down, host: '' }).sub).toBe('The image archives didn’t answer.')
+    const partial = summaryFromParams(new URLSearchParams(`${Q}&sp=1`))!
+    expect(partial.partial).toBe(true)
+    expect(summaryDescription(partial)).toMatch(/^At least 31 photos were made public\. /)
+    expect(summaryFromParams(new URLSearchParams(Q))).not.toHaveProperty('archiveDown')
+    expect(summaryFromParams(new URLSearchParams(`${Q}&sa=yes`))).not.toHaveProperty('archiveDown')
+  })
+  it('names the card and the alt text in the same words', async () => {
+    const body = await (await handleSharePage(new Request(`https://www.watched.earth/api/s?${Q}`))).text()
+    expect(body).toContain('<meta property="og:title" content="256 satellites watched Waterloo this week.">')
+    expect(body).toContain('<meta property="og:description" content="31 photos were made public. The closest look is from Sentinel-2C. What watched you this week?">')
+    expect(body).toContain('<meta property="og:image:alt" content="256 satellites watched Waterloo this week. The share card, with the week’s closest photo, from Sentinel-2C.">')
+    const card = new URL(/<meta property="og:image" content="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&'))
+    expect(card.searchParams.get('kind')).toBe('summary')
+    expect(card.searchParams.get('sv')).toBe('256')
+    expect(card.searchParams.get('v')).toBe('4')
+    expect(body).not.toMatch(/photographed|in detail/i)
   })
 })
 
@@ -139,7 +179,7 @@ describe('card spec', () => {
     const s = shareFromRpc(ROW)!
     const spec = buildCardSpec(cardInputFromShare(s, 'overflight.app'))
     expect(spec.stamp).toBe('Sun 1 Nov 2026 · 11:21 EST')
-    expect(spec.verdictLabel).toBe('Photographed')
+    expect(spec.verdictLabel).toBe('Watched')
     expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind === 'image' && spec.plate.credit.segs[0].text).toBe('Contains modified Copernicus Sentinel data 2026')
     expect(spec.readouts.map((r) => `${r.label} ${r.value}${r.unit ? ` ${r.unit}` : ''}`)).toEqual(['Altitude 795 km', 'Off-nadir 5.3°', 'Pixel 10 m'])
@@ -203,8 +243,8 @@ describe('share page', () => {
     const body = await res.text()
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/html')
-    expect(body).toContain('<meta property="og:title" content="Sentinel-2C photographed Waterloo.">')
-    expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=3">')
+    expect(body).toContain('<meta property="og:title" content="Sentinel-2C watched Waterloo.">')
+    expect(body).toContain('<meta property="og:image" content="https://overflight.app/api/og?id=ab3d5f7h&#38;v=4">')
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
     expect(body).toContain('<meta name="twitter:card" content="summary_large_image">')
     expect(body).toContain('<link rel="canonical" href="https://overflight.app/s/ab3d5f7h">')
@@ -268,7 +308,7 @@ describe('share page', () => {
     const res = await handleSharePage(new Request(`https://overflight.app/api/s?${DEEP}`))
     const body = await res.text()
     expect(res.status).toBe(200)
-    expect(body).toContain('<meta property="og:title" content="Sentinel-2C photographed Waterloo.">')
+    expect(body).toContain('<meta property="og:title" content="Sentinel-2C watched Waterloo.">')
     expect(body).toContain('<meta property="og:description" content="Sentinel-2C crossed 795 km above Waterloo at 11:14 EST on Sun 1 Nov 2026, moving south.')
     const image = /<meta property="og:image" content="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&')
     const card = new URL(image)
@@ -289,10 +329,10 @@ describe('share page', () => {
       cloud: '25',
       gsd: '10',
       spot: 'clear',
-      v: '3',
+      v: '4',
     })
     expect(body).toContain('<meta property="og:image:type" content="image/jpeg">')
-    expect(body).toContain('<meta property="og:image:alt" content="Sentinel-2C photographed Waterloo.">')
+    expect(body).toContain('<meta property="og:image:alt" content="Sentinel-2C watched Waterloo.">')
     // People land on the same pass in the app; the canonical keeps q, n, p and the pass keys.
     const canonical = new URL(/<link rel="canonical" href="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&'))
     expect(canonical.searchParams.get('q')).toBe('43.47,-80.54')
@@ -305,8 +345,8 @@ describe('share page', () => {
     const bare = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.47,-80.54&n=Waterloo&p=60989-29892501'))).text()
     expect(bare).toContain('<meta property="og:title" content="What watched Waterloo this week">')
     expect(bare).toContain('kind=place&#38;place=Waterloo')
-    const sum = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.47,-80.54&n=Waterloo&sv=4&sc=31,220,1544,66&sw=1793678400000'))).text()
-    expect(sum).toContain('<meta property="og:title" content="4 satellites photographed Waterloo in detail this week">')
+    const sum = await (await handleSharePage(new Request('https://overflight.app/api/s?q=43.47,-80.54&n=Waterloo&sv=256&sc=31,220,1544,66&sw=1793678400000'))).text()
+    expect(sum).toContain('<meta property="og:title" content="256 satellites watched Waterloo this week.">')
     expect(sum).toContain('kind=summary')
   })
 
@@ -340,7 +380,7 @@ describe('og card', () => {
     const image = /<meta property="og:image" content="([^"]+)">/.exec(await page.text())![1].replace(/&#38;/g, '&')
     const q = new URL(image).searchParams
     const spec = buildCardSpec(cardInputFromShare(shareFromParams(q)!, 'overflight.app'))
-    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('Sentinel-2C photographed Waterloo.')
+    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('Sentinel-2C watched Waterloo.')
     expect(spec.coords).toBe('43.47°N 80.54°W')
     const { handleOg } = (await import('../og.tsx' as string)) as { handleOg: (r: Request) => Promise<Response> }
     const res = await handleOg(new Request(image))
@@ -348,6 +388,30 @@ describe('og card', () => {
     expect(res.headers.get('content-type')).toBe('image/jpeg')
     expect(jpegSize(new Uint8Array(await res.arrayBuffer()))).toEqual([1200, 630])
     vi.unstubAllGlobals()
+  })
+
+  it('renders a summary link’s card offline: the N / K headline over the instrument face (R3-13)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('offline'))))
+    const { handleOg } = (await import('../og.tsx' as string)) as { handleOg: (r: Request) => Promise<Response> }
+    const q = 'kind=summary&q=43.47,-80.54&n=Waterloo&sv=256&sc=31,220,1544,66&sw=1793678400000&bc=sentinel-2-l2a&bi=S2C_MSIL2A_20261101T161421_R140_T17TNJ_20261102T164803&bs=Sentinel-2C&bt=1793549661025&bg=10&v=4'
+    const res = await handleOg(new Request(`https://www.watched.earth/api/og?${q}`))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/jpeg')
+    // The archive didn't answer: cached briefly so a later request picks the photo up.
+    expect(res.headers.get('cache-control')).toContain('s-maxage=300')
+    const buf = new Uint8Array(await res.arrayBuffer())
+    expect(jpegSize(buf)).toEqual([1200, 630])
+    expect(buf.byteLength).toBeLessThan(250_000)
+    vi.unstubAllGlobals()
+  })
+
+  it('bakes the default card from a lossless PNG (R3-15)', async () => {
+    const { defaultCardPng } = (await import('../og.tsx' as string)) as { defaultCardPng: (host: string) => Promise<Uint8Array> }
+    const png = await defaultCardPng('')
+    expect([...png.slice(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    // IHDR: 1200 × 630
+    const dv = new DataView(png.buffer, png.byteOffset)
+    expect([dv.getUint32(16), dv.getUint32(20)]).toEqual([1200, 630])
   })
 
   it('caches an uncroppable capture as final without asking any archive', async () => {

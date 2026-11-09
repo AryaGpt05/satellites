@@ -311,6 +311,20 @@
   display: inline-flex;
   margin-left: 2px;
 }
+/* The header action's labels share one cell: the button keeps the longest one's width (R3-8). */
+.crumbLabels {
+  display: inline-grid;
+  justify-items: end;
+}
+.crumbLabel {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.crumbLabelOff {
+  visibility: hidden;
+}
 @media (hover: none) {
   .kbdHover {
     display: none;
@@ -342,6 +356,29 @@
 }
 .tzText {
   color: var(--bone-3);
+}
+/* One line, always (R3-8): a long place keeps its row's height; the zone (the least of the three) truncates
+   instead of wrapping onto a second line when the place changes. */
+.placeRow {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.placeRow .coordsText,
+.placeRow .sep {
+  flex: none;
+}
+.placeRow b,
+.placeRow .tzText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.placeRow b {
+  flex: 0 1 auto;
+}
+.placeRow .tzText {
+  flex: 0 1000 auto;
 }
 .mHead {
   margin-top: 6px;
@@ -503,6 +540,24 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 10px;
+}
+/* R3-6, laptops up to 860 px tall: the back crumb (an arrow) and the title share one row. */
+.headInline {
+  justify-content: flex-start;
+  gap: 6px;
+}
+.crumbIcon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  margin-left: -6px;
+}
+.passTitleInline {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
 }
 .passTitleCompact svg {
   align-self: center;

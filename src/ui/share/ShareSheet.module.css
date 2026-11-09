@@ -169,21 +169,16 @@
   padding-inline: 6px;
 }
 
+/* Present from the first frame (it enters with the dialog): nothing moves when the link is made. The label
+   column matches the post's (48px + 12px), so the link and the post text start on one line. */
 .linkRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--line-strong);
-  animation: row-in var(--d-sm) var(--ease-out) both;
-}
-@keyframes row-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
 }
 .linkLabel {
-  flex: none;
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-size: var(--fs-label, 10.5px);
@@ -205,6 +200,8 @@
   color: var(--bone);
   outline: none;
   text-overflow: ellipsis;
+  /* The value changes in place (made → creating → the URL): only its colour eases. */
+  transition: color var(--d-sm) var(--ease-out);
 }
 .linkPending {
   color: var(--bone-3);
@@ -288,9 +285,6 @@
   .dialog {
     animation: fade var(--d-md) linear both;
   }
-  .linkRow {
-    animation-name: fade;
-  }
 }
 
 /* Stacked-layout spacing (the dialog itself is the Sheet there; these rules only tune the content). */
@@ -325,5 +319,43 @@
 @media (prefers-reduced-motion: reduce) and (max-width: 760px) {
   .dialog {
     animation-name: fade;
+  }
+}
+
+/*
+ * Short landscape screens (phones turned sideways, 844 × 390): the card beside the actions, so the share button is
+ * on screen without scrolling inside the dialog (before: the card filled the dialog and every action sat below it).
+ * Applies to the centred dialog and to the bottom Sheet alike (a 667 × 375 phone is stacked).
+ */
+@media (orientation: landscape) and (max-height: 560px) {
+  .root {
+    padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+  }
+  .dialog {
+    width: min(920px, 100%);
+    padding: 12px 18px 14px;
+    gap: 10px;
+  }
+  .content {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    column-gap: 20px;
+    row-gap: 12px;
+    align-items: start;
+  }
+  .content > :first-child {
+    grid-row: 1 / span 4;
+  }
+  .text {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .foot {
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+  }
+  .native {
+    height: 44px;
   }
 }

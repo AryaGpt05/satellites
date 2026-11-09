@@ -119,27 +119,52 @@ export function captureOf(report: Pick<Report, 'captures'> | undefined, pass: Pi
   return report.captures.find((c) => c.id === pass.captureId)
 }
 
+/** Spot clarity order (owner request B1): clear > cirrus > unknown > shadow > cloud. */
+const SPOT_RANK: Record<string, number> = { clear: 0, cirrus: 1, unknown: 2, shadow: 3, cloud: 4 }
+/** Scene cloud cover at or above this (or cloud at the spot) is "clouded over" (results lib/bestLook.ts CLOUDED_PCT). */
+const CLOUDED_PCT = 70
+/** Sun high enough that a daily true-colour mosaic shows the ground (results lib/photos.ts MOSAIC_MIN_SUN_DEG). */
+const MOSAIC_MIN_SUN_DEG = 10
+
+type CoverCandidate = { p: Pass; c: Capture }
+const spotRank = (c: Capture) => SPOT_RANK[c.spot ?? 'unknown'] ?? 2
+/** Most zoomed in, then clearest spot, then newest. */
+const byCloseness = (a: CoverCandidate, b: CoverCandidate) => a.c.gsdM - b.c.gsdM || spotRank(a.c) - spotRank(b.c) || b.p.tClosest - a.p.tClosest
+/** Least cloudy: the spot, then scene cloud (unknown counts as 50 %), then sharper, then newer. */
+const byCloud = (a: CoverCandidate, b: CoverCandidate) =>
+  spotRank(a.c) - spotRank(b.c) || (a.c.cloudCoverPct ?? 50) - (b.c.cloudCoverPct ?? 50) || a.c.gsdM - b.c.gsdM || b.p.tClosest - a.p.tClosest
+/** Weather mosaics: sharpest, then a well-lit day, then newest. */
+const byMosaic = (a: CoverCandidate, b: CoverCandidate) => {
+  const lit = (x: CoverCandidate) => Number((x.p.sunElevationDeg ?? 0) >= MOSAIC_MIN_SUN_DEG)
+  return a.c.gsdM - b.c.gsdM || lit(b) - lit(a) || b.p.tClosest - a.p.tClosest
+}
+
 /**
- * The capture the hero shows first (owner request B: the most zoomed-in image; ties → most recent), so its decal can
- * be fetched before anyone opens it.
+ * The pass whose image the results panel leads with (R3-17), so its decal is fetched before anyone opens it. The
+ * same pick as results lib/photos.ts windowCover (lib/bestLook.ts pickBestLook; acquisition.test.ts checks the two
+ * agree): among the window's imaged passes, the most zoomed-in CLEAR detailed capture (not clouded: spot ≠ cloud and
+ * scene cloud < 70 %; smallest gsd, then the clearest spot, then the newest); with every detailed capture clouded,
+ * the least cloudy one; with none, the sharpest weather mosaic. Only images the globe can paint count; partial
+ * reports wait for the final one (the cover can still change).
  */
-export function closestLookPass(report: Report | undefined): Pass | undefined {
+export function coverPass(report: Report | undefined): Pass | undefined {
   if (!report || report.partial) return undefined
-  let best: { p: Pass; gsd: number; clear: number } | undefined
+  const detailed: CoverCandidate[] = []
+  const mosaics: CoverCandidate[] = []
+  const seen = new Set<string>()
   for (const p of report.passes) {
     if (p.verdict !== 'imaged') continue
     const c = captureOf(report, p)
-    if (!c || !decalSpecFor(c.collection, false)) continue
-    const clear = SPOT_RANK[c.spot ?? 'unknown']
-    const better =
-      !best || c.gsdM < best.gsd || (c.gsdM === best.gsd && (clear < best.clear || (clear === best.clear && p.tClosest > best.p.tClosest)))
-    if (better) best = { p, gsd: c.gsdM, clear }
+    if (!c || seen.has(c.id)) continue
+    seen.add(c.id)
+    if (c.provider !== 'gibs') detailed.push({ p, c })
+    else if (isDaily(c.collection)) mosaics.push({ p, c })
   }
-  return best?.p
+  const clouded = (c: Capture) => c.spot === 'cloud' || (c.cloudCoverPct ?? 0) >= CLOUDED_PCT
+  const clear = detailed.filter((x) => !clouded(x.c))
+  const pick = clear.length ? clear.sort(byCloseness)[0] : detailed.length ? detailed.sort(byCloud)[0] : mosaics.sort(byMosaic)[0]
+  return pick && decalSpecFor(pick.c.collection, false) ? pick.p : undefined
 }
-
-/** Spot clarity order (owner request B1): clear > cirrus > unknown > shadow > cloud. */
-const SPOT_RANK: Record<string, number> = { clear: 0, cirrus: 1, unknown: 2, shadow: 3, cloud: 4 }
 
 /** How far the acquired view leans from the place toward the image's data, and how far the place may sit off centre. */
 const FOCUS_LEAN = 0.75

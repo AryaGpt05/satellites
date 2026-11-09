@@ -12,7 +12,8 @@
  * can be watched and controlled at the low snap (MOB-16).
  */
 import { useId, useRef } from 'react'
-import { sceneClock, useSceneFrame } from '@/state/sceneClock'
+import { sceneClock } from '@/state/sceneClock'
+import { useAfterSceneFrame } from './capture'
 import { useApp } from '@/state/store'
 import type { Pass } from '@/types'
 import { Glyph, Kbd, cx, fmtUtcTime, useIsMobile } from '@/ui/system'
@@ -38,7 +39,7 @@ interface FrameRefs {
 /** Writes the replay position into the DOM once per frame (only what changed). */
 function useReplayFrame(pass: Pass, refs: FrameRefs, dragging: React.RefObject<boolean>) {
   const last = useRef({ f: -1, tm: '', utc: '' })
-  useSceneFrame(() => {
+  useAfterSceneFrame(() => {
     const st = useApp.getState()
     const w = replayWindow(pass)
     const now = sceneTime()

@@ -11,13 +11,16 @@
  *
  * Place mode (share SH7): an address-bar link, /?q=43.47,-80.54&n=Waterloo, fetched by a link
  * unfurler (vercel.json sends only bot user agents here; people get the SPA). Title "What
- * photographed Waterloo this week", the card at /api/og?kind=place…, coordinates coarsened to 0.01°,
+ * watched Waterloo this week", the card at /api/og?kind=place…, coordinates coarsened to 0.01°,
  * and people who land here anyway are handed to the same address in the app.
  *
  * Pass links (share R2SH2): the app's fallback link for a pass (made when no short link exists yet)
  * carries the pass itself (sat, norad, verdict, t, alt, off, hdg, collection, item, cloud, gsd, spot).
  * It unfurls as that pass: its headline, description and card (/api/og with the explicit parameters),
  * with no database row.
+ *
+ * Summary links (SH6, R3-13): a week at a place, its numbers carried in the link. Title "31 satellites watched
+ * Waterloo this week.", description "12 photos were made public. …", as the results headline says it.
  *
  * Cards from /api/og are JPEG (og:image:type image/jpeg, R2SH4); the static default card is a PNG.
  */
@@ -40,8 +43,11 @@ import {
   summaryTitle,
 } from './_lib/share.js'
 
-/** Bump when the card design changes so unfurler caches (which key on the URL) refetch. */
-export const CARD_VERSION = '3'
+/**
+ * Bump when the card design changes so unfurler caches (which key on the URL) refetch.
+ * 4 (round 3): "watched" vocabulary on pass cards, the summary card's N / K headline (R3-13).
+ */
+export const CARD_VERSION = '4'
 
 const GENERIC = {
   title: 'Something watched you this week.',
@@ -109,7 +115,7 @@ function placePage(q: URLSearchParams, origin: string): Response {
       canonical: `${origin}/?${app.toString()}`,
       image: `${origin}/api/og?${card.toString()}`,
       imageType: 'image/jpeg',
-      imageAlt: summary ? `${summaryTitle(summary)}: the share card, with the clearest satellite picture of the week.` : DEFAULT_CARD_ALT,
+      imageAlt: summary ? `${summaryTitle(summary)} ${summary.best ? `The share card, with the week’s closest photo, from ${summary.best.satName}.` : 'The share card.'}` : DEFAULT_CARD_ALT,
       redirect: `/?${app.toString()}`,
     }),
     200,

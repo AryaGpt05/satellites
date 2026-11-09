@@ -5,7 +5,8 @@
  * Doubles as the left half of the share card for passes without a picture.
  */
 import { useId, useMemo, useRef } from 'react'
-import { sceneClock, useSceneFrame } from '@/state/sceneClock'
+import { sceneClock } from '@/state/sceneClock'
+import { useAfterSceneFrame } from './capture'
 import { useApp } from '@/state/store'
 import type { Pass } from '@/types'
 import { cx } from '@/ui/system'
@@ -35,7 +36,7 @@ export function PassPlan({ pass: p, meta, lat, lon, live = true, className, labe
   // re-renders this for time.
   const satRef = useRef<SVGRectElement>(null)
   const lastT = useRef(Number.NaN)
-  useSceneFrame(() => {
+  useAfterSceneFrame(() => {
     const st = useApp.getState()
     const t = st.timeMode === 'live' ? undefined : sceneClock.mode === st.timeMode ? sceneClock.simTime : st.simTime
     if (t === lastT.current || (t === undefined && Number.isNaN(lastT.current))) return

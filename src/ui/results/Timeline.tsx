@@ -15,7 +15,8 @@
  * the strip.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { sceneClock, useSceneFrame } from '@/state/sceneClock'
+import { sceneClock } from '@/state/sceneClock'
+import { useAfterSceneFrame } from './capture'
 import { useApp } from '@/state/store'
 import type { Pass } from '@/types'
 import { Glyph, cx, palette, useReducedMotion } from '@/ui/system'
@@ -299,7 +300,7 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
 
   // ── playhead: every frame, as a transform (R20) ─────────────────────────────────
   const lastX = useRef(-1)
-  useSceneFrame(() => {
+  useAfterSceneFrame(() => {
     const el = headRef.current
     if (!el || !size.w) return
     const st = useApp.getState()

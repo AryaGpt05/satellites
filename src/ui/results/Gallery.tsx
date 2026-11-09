@@ -585,7 +585,15 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
             </span>
           </button>
         ) : (
-          <button type="button" className={s.mReplay} onClick={onView} tabIndex={current ? 0 : -1} aria-label="View the photo large">
+          // R3-7: a photo with no pass (the last clear look from before the window) opens large, with its own
+          // metadata; it never selects a pass.
+          <button
+            type="button"
+            className={s.mReplay}
+            onClick={onView}
+            tabIndex={current ? 0 : -1}
+            aria-label={`View ${cover === 'lastClear' ? 'the last clear look' : 'the photo'} large: ${meta.name}, ${t.day} ${t.time}`}
+          >
             <Mark name="expand" size={11} />
             <span className={s.mReplayText}>View</span>
           </button>

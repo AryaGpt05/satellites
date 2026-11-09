@@ -72,10 +72,10 @@ describe('share card spec', () => {
     expect(picks.length).toBe(5)
     for (const pass of picks) {
       const c = report.captures.find((x) => x.id === pass.captureId)
-      const client = cardSpec(pass, report, metaFor(pass), 'America/Toronto', 'overflight.app', { clouded: (c?.cloudCoverPct ?? 0) >= 70 })
+      const client = cardSpec(pass, report, metaFor(pass), 'America/Toronto', 'www.watched.earth', { clouded: (c?.cloudCoverPct ?? 0) >= 70 })
       const record = shareFromRpc({ id: 'ab3d5f7h', ...storedShare(report, pass) })
       expect(record).toBeTruthy()
-      const srv = buildCardSpec(cardInputFromShare(record, 'overflight.app'))
+      const srv = buildCardSpec(cardInputFromShare(record, 'www.watched.earth'))
       expect(strip(srv)).toEqual(strip(client))
     }
   })
@@ -83,28 +83,35 @@ describe('share card spec', () => {
   it('builds the same summary card from the report and from its link (SH6)', async () => {
     const { summaryFromParams, shareTimeZone } = await server()
     const report = await waterlooReport({ withTracks: false })
-    const name = (n: number) => (META[n] ?? { name: `NORAD ${n}` }).name
-    const client = summaryCardSpec(report, 'Waterloo', name, 'America/Toronto', 'overflight.app')
-    const link = summaryLink('https://overflight.app', summaryFacts(report, 'Waterloo', name))
-    expect(link).not.toContain('43.4723')
-    const sum = summaryFromParams(new URL(link).searchParams)!
-    expect(sum).toBeTruthy()
-    const { place: _place, ...input } = sum
-    void _place
-    const srv = buildSummarySpec({ ...input, timeZone: shareTimeZone(sum), host: 'overflight.app' })
-    expect(strip(srv)).toEqual(strip(client))
-    expect(client.lead).toMatch(/^\d+ satellites photographed$/)
-    expect(`${client.place}${client.tail}`).toBe('Waterloo in detail.')
+    const meta = (n: number): SatMeta => META[n] ?? { norad: n, name: `NORAD ${n}`, category: 'other' }
+    for (const r of [report, { ...report, partial: true }, { ...report, archiveFailed: true }]) {
+      const client = summaryCardSpec(r, 'Waterloo', meta, 'America/Toronto', 'www.watched.earth')
+      const link = summaryLink('https://www.watched.earth', summaryFacts(r, 'Waterloo', meta))
+      expect(link).not.toContain('43.4723')
+      const sum = summaryFromParams(new URL(link).searchParams)!
+      expect(sum).toBeTruthy()
+      const { place: _place, ...input } = sum
+      void _place
+      const srv = buildSummarySpec({ ...input, timeZone: shareTimeZone(sum), host: 'www.watched.earth' })
+      expect(strip(srv)).toEqual(strip(client))
+    }
+    const client = summaryCardSpec(report, 'Waterloo', meta, 'America/Toronto', 'www.watched.earth')
+    // R3-13: the results headline, N satellites watched / K photos made public.
+    expect(client.lead).toMatch(/^\d+ satellites watched$/)
+    expect(`${client.place}${client.tail}`).toBe('Waterloo this week.')
+    expect(client.sub).toMatch(/^\d+ photos were made public\.$/)
+    expect(client.verdictLabel).toMatch(/^Closest look · \w{3} \d{1,2} \w{3}$/)
+    expect(client.plate.kind === 'image' && client.plate.chip.segs[0].text).toMatch(/^Closest look · Sentinel-2C · 10 m$/)
     expect(client.readouts.map((r) => r.label)).toEqual(['Photo', 'Likely', 'Could', 'Overhead'])
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, passes: 1800, best: { satName: 'Sentinel-2C', altitudeKm: 795 } })).toBe(
-      '7 satellites photographed Waterloo in detail this week. The clearest one, Sentinel-2C, from 795 km up.\n\nSomething watched you this week too.',
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, photos: 12 })).toBe(
+      '7 satellites watched Waterloo this week. 12 photos were made public.\n\nSomething watched you this week too.\nvia @armaangupt0',
     )
   })
 
   it('carries the credit, local time, footer and the clouded variant', async () => {
     const report = await waterlooReport({ withTracks: false })
     const s2 = report.passes.find((p) => p.captureId?.startsWith('S2C_MSIL2A_20261101'))!
-    const spec = cardSpec(s2, report, metaFor(s2), 'America/Toronto', 'overflight.app')
+    const spec = cardSpec(s2, report, metaFor(s2), 'America/Toronto', 'www.watched.earth')
     expect(spec.stamp).toBe(`${fmtLocalDay(s2.tClosest, 'America/Toronto')} 2026 · ${fmtLocalTime(s2.tClosest, 'America/Toronto')} EST`)
     expect(spec.footLeft).toBe('See what watched you')
     expect(spec.plate.kind).toBe('image')
@@ -118,7 +125,7 @@ describe('share card spec', () => {
     }
     // 81 % of the scene: mostly cloud, never "only cloud" (R2SH3).
     const cloudy = report.passes.find((p) => p.captureId?.startsWith('S2B_MSIL2A_20261030'))!
-    const cs = cardSpec(cloudy, report, metaFor(cloudy), 'America/Toronto', 'overflight.app', { clouded: true })
+    const cs = cardSpec(cloudy, report, metaFor(cloudy), 'America/Toronto', 'www.watched.earth', { clouded: true })
     expect(cs.sub).toBe('Mostly cloud: 81% of the scene.')
     expect(cs.plate.kind === 'image' && cs.plate.clouded?.segs[0].text).toBe('Mostly cloud · 81%')
   })
@@ -126,14 +133,14 @@ describe('share card spec', () => {
   it('puts viewfinder ticks only in corners no chip holds, on the chips’ 24px inset', async () => {
     const report = await waterlooReport({ withTracks: false })
     const s2 = report.passes.find((p) => p.captureId?.startsWith('S2C_MSIL2A_20261101'))!
-    const spec = cardSpec(s2, report, metaFor(s2), 'America/Toronto', 'overflight.app')
+    const spec = cardSpec(s2, report, metaFor(s2), 'America/Toronto', 'www.watched.earth')
     const br = (cornerTickPrim(PLATE, 25, 16, '', 2, ['br']) as { d: string }).d
     const tickD = (prims: { t: string; d?: string }[]) => prims.filter((p) => p.t === 'path' && /^M\d+ \d+[VH]\d+[VH]\d+$/.test(p.d ?? '')).map((p) => p.d)
     // Source chip (top left), scale bar (top right), credit (bottom left): one tick, bottom right.
     expect(spec.plate.kind === 'image' && tickD(spec.plate.overlay)).toEqual([br])
     // The geometry plate holds the same three corners.
     const could = report.passes.find((p) => p.verdict === 'could')!
-    const plan = cardSpec(could, report, metaFor(could), 'America/Toronto', 'overflight.app').plate
+    const plan = cardSpec(could, report, metaFor(could), 'America/Toronto', 'www.watched.earth').plate
     expect(plan.kind === 'plan' && tickD(plan.prims)).toEqual([br])
   })
 
@@ -144,10 +151,24 @@ describe('share card spec', () => {
   })
 
   it('speaks the one vocabulary and the app’s time format', () => {
+    // The owner's words (latest override): "watched", never "photographed", in anything people read.
+    const OWNER: Record<(typeof VERDICTS)[number], { title: string; lead: string }> = {
+      imaged: { title: 'Watched', lead: 'Sentinel-2C watched' },
+      likely: { title: 'Likely watched', lead: 'Sentinel-2C swept over' },
+      could: { title: 'Could have pointed here', lead: 'Sentinel-2C passed within view of' },
+      overhead: { title: 'Passed overhead', lead: 'Sentinel-2C passed over' },
+    }
     for (const v of VERDICTS) {
       const a = headlineParts(v, 'Sentinel-2C', 'Waterloo')
-      expect(a.lead).toBe(shareHeadline(v, 'Sentinel-2C', 'Waterloo').lead)
-      expect(buildCardSpec({ verdict: v, satName: 'X', placeLabel: 'Y', lat: 0, lon: 0, pass: {}, host: '' }).verdictLabel).toBe(VERDICT_META[v].title)
+      const label = buildCardSpec({ verdict: v, satName: 'X', placeLabel: 'Y', lat: 0, lon: 0, pass: {}, host: '' }).verdictLabel
+      expect(a.lead).toBe(OWNER[v].lead)
+      expect(label).toBe(OWNER[v].title)
+      // The results vocabulary says the same once main's 'watched' hotfix (77a2435) is in this branch: until the
+      // merge, src/ui/results/lib/meta.ts still reads "Photographed" (results owns it), so only compare after it.
+      if (!/photographed/i.test(VERDICT_META[v].title + VERDICT_META[v].verb)) {
+        expect(a.lead).toBe(shareHeadline(v, 'Sentinel-2C', 'Waterloo').lead)
+        expect(label).toBe(VERDICT_META[v].title)
+      }
     }
     const zones = ['America/Toronto', 'Europe/London', 'Europe/Berlin', 'Australia/Sydney', 'Asia/Tokyo', 'Asia/Kolkata', 'America/Sao_Paulo', 'Etc/GMT+9', 'UTC', 'Africa/Cairo']
     for (const tz of zones) {

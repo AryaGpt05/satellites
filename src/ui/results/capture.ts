@@ -43,20 +43,28 @@ function rearm() {
   else window.setTimeout(() => requestAnimationFrame(frame), 0)
 }
 
+/** Subscribe `cb(simTime, mode)` to every frame, after the globe has written that frame's sim time. Returns the unsubscribe. */
+export function onSceneFrame(cb: FrameSub): () => void {
+  const sub: FrameSub = (t, m) => cb(t, m)
+  subs.add(sub)
+  rearm()
+  return () => {
+    subs.delete(sub)
+  }
+}
+
 /** Call `cb(simTime, mode)` once per frame, after the globe has written that frame's sim time. */
 export function useAfterSceneFrame(cb: FrameSub, enabled = true): void {
   const ref = useRef(cb)
   ref.current = cb
   useEffect(() => {
     if (!enabled) return
-    const sub: FrameSub = (t, m) => ref.current(t, m)
-    subs.add(sub)
-    rearm()
-    return () => {
-      subs.delete(sub)
-    }
+    return onSceneFrame((t, m) => ref.current(t, m))
   }, [enabled])
 }
+
+/** Whether one frame's step from `prev` to `t` carried sim time across `tc` (a playback crossing, never a jump). */
+export const crossed = (prev: number | null, t: number, tc: number) => prev !== null && prev < tc && t >= tc && t - prev < JUMP_MS
 
 export interface CaptureCallbacks {
   /** Sim time crossed `tc` during replay playback */
@@ -75,7 +83,7 @@ export function useCaptureMoment(tc: number | undefined, cb: CaptureCallbacks, e
       const p = prev.current
       prev.current = mode === 'replay' ? t : null
       ref.current.onFrame?.(t, mode)
-      if (mode === 'replay' && p !== null && p < tc && t >= tc && t - p < JUMP_MS) ref.current.onCapture()
+      if (mode === 'replay' && crossed(p, t, tc)) ref.current.onCapture()
     },
     enabled && tc !== undefined,
   )

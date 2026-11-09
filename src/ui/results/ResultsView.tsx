@@ -24,7 +24,6 @@ import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
 import { Button, Glyph, Rule, Sheet, cx, useIsMobile, useMediaQuery, useReducedMotion } from '@/ui/system'
-import { SETTLE_MAX_MS, settleMs } from '@/ui/system/sheetMath'
 import { GeoLook } from './BestLook'
 import { ComputingBody } from './ComputingBody'
 import { Gallery, galleryCtl } from './Gallery'
@@ -36,13 +35,13 @@ import { PassList } from './PassList'
 import { Headline, MoreLine, Notes, Verdicts, enterStyle } from './Summary'
 import { Timeline } from './Timeline'
 import { clearPass, focusPass, quiet, startReplay, togglePlay } from './actions'
+import { crossed, onSceneFrame } from './capture'
 import { useGallery } from './gallery'
 import { isClouded } from './lib/bestLook'
 import { captureFor } from './lib/captures'
 import { replayWindow } from './lib/replay'
 import { stepPass } from './lib/timeline'
 import { useResultsModel, type ResultsModel } from './model'
-import type { CameraFlight } from '@/state/store'
 import { useOnce } from './once'
 import { SHORT_DESK_QUERY, exitTimeline, lastShellUnmount, publishSheetInset, rememberComputingSnap, lastComputingSnapPx, useAnimatedHeight, useInsets, useSheetGeometry, useShellExit, useStagedKey } from './shell'
 import s from './results.module.css'
@@ -56,8 +55,12 @@ export interface ResultsViewProps {
   onSearch?: (place: Place) => void
 }
 
-/** R2R3: the phone sheet's settle into the image step ends this long after the camera lands. */
-const RAISE_AFTER_ARRIVAL_MS = 100
+/** R3-5, phones: the clock not replaying this long (paused, scrubbed) once the camera is there raises the sheet. */
+const SHEET_QUIET_MS = 600
+/** Sim time frozen this long with no camera flight: no globe is drawing, raise. */
+const SHEET_STALL_MS = 1500
+/** Never hold the sheet low longer than this (a real approach + dive takes 6–8 s). */
+const SHEET_CAP_MS = 14_000
 /** Phone snaps that are fractions of the viewport (the measured ones are px). */
 const MID = 0.62
 const TOP = 0.92
@@ -244,8 +247,6 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
 
   const sheetSnap = heldIndex ?? snap
   lastShown.current = { snaps, index: Math.min(sheetSnap, snaps.length - 1) }
-  const snapsPx = useRef<number[]>([])
-  snapsPx.current = snaps.map((v) => (v <= 1 ? v * vh : v))
 
   // Phase / view changes pick the snap. A new search drops to the computing snap at once (R2R8: one glide down);
   // the overview's snap applies when the overview is the content shown, so Back never first drops the sheet to the
@@ -261,10 +262,15 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     overviewSnap.current = 0
   }, [placeKey])
 
-  // A pass on phones: flight first (sheet low, the camera and swath visible), then the image. The sheet's
-  // settle is timed to END as the camera lands (R2R3: 0 to +250 ms after arrival): it starts one settle duration
-  // (the Sheet's own, from the flight → image distance) before the flight's eta, plus 100 ms. A quiet selection
-  // (a gallery swipe) never moves the sheet.
+  // A pass on phones (R3-5): the sheet stays at its low flight snap through the approach and the dive (the globe's
+  // sequence is the show), and rises at the capture moment: the replay clock carrying sim time across the pass's
+  // closest approach, the frame the globe's scan line crosses the place (read after the globe's frame, as the HUD
+  // readout). It also rises when the clock is not replaying (paused or scrubbed) once the camera is there, when a
+  // replay resumed past the capture, when no globe is drawing, and at a cap. Reduced motion: at once. A quiet
+  // selection (a gallery swipe) never moves the sheet; a finger on the sheet keeps it where the user put it.
+  const [replayNonce, setReplayNonce] = useState(0)
+  const passOf = useRef<(id: string) => Pass | undefined>(() => undefined)
+  passOf.current = (id) => lastModel.current?.passById.get(id)
   useEffect(() => {
     if (!mobile || !selectedId) return
     if (quiet.id === selectedId) return
@@ -273,54 +279,56 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       return
     }
     setSnap(0)
+    const tc = passOf.current(selectedId)?.tClosest
     let done = false
     let touched = false
-    let lead = 0
-    let lastId = -1
     const sec = sectionRef.current
     const onDown = () => (touched = true)
     sec?.addEventListener('pointerdown', onDown)
-    const start = useApp.getState().cameraFlight
-    let sawFlight = start.flying
     const raise = () => {
       if (done) return
       done = true
-      window.clearTimeout(lead)
       if (!touched) setSnap(1)
     }
-    const schedule = (f: CameraFlight) => {
-      if (f.id === lastId) return
-      lastId = f.id
-      window.clearTimeout(lead)
-      // Wake a little before the longest settle could need to start, then start exactly one settle before the eta
-      // (the snaps are measured by then: the pass content mounted while the camera flew).
-      lead = window.setTimeout(() => {
-        const [lo, hi] = snapsPx.current
-        const d = lo !== undefined && hi !== undefined ? settleMs(hi - lo) : SETTLE_MAX_MS
-        lead = window.setTimeout(raise, Math.max(0, f.eta + RAISE_AFTER_ARRIVAL_MS - d - performance.now()))
-      }, Math.max(0, f.eta - SETTLE_MAX_MS - 150 - performance.now()))
-    }
-    if (start.flying) schedule(start)
-    const unsub = useApp.subscribe((st) => {
-      if (st.cameraFlight.flying) {
-        sawFlight = true
-        schedule(st.cameraFlight)
-      } else if (sawFlight) raise()
+    const startedAt = performance.now()
+    let prev: number | null = null
+    let late = false
+    let quietSince = 0
+    let lastT = NaN
+    let lastTAt = startedAt
+    const off = onSceneFrame((t, mode) => {
+      if (done) return
+      const now = performance.now()
+      const st = useApp.getState()
+      const flying = st.cameraFlight.flying
+      // Sim time held still while the camera flies (the replay waits for it) is not a stall.
+      if (t !== lastT || flying) {
+        lastT = t
+        lastTAt = now
+      }
+      if (mode === 'replay' && tc !== undefined) {
+        quietSince = 0
+        if (crossed(prev, t, tc)) return raise()
+        // The first replay frame already past the capture (a replay resumed late): rise once the camera is there.
+        if (prev === null && t >= tc) late = true
+        prev = t
+        if (late && !flying) return raise()
+      } else {
+        prev = null
+        // The store asks for a replay the globe has not taken up yet: not quiet.
+        if (st.timeMode === 'replay') quietSince = 0
+        else if (!quietSince) quietSince = now
+        if (quietSince && !flying && now - quietSince >= SHEET_QUIET_MS && now - startedAt >= SHEET_QUIET_MS) return raise()
+      }
+      // No globe drawing (sim time frozen with nothing flying), or a sequence that never gets there.
+      if ((!flying && now - lastTAt >= SHEET_STALL_MS) || now - startedAt >= SHEET_CAP_MS) raise()
     })
-    // The globe reports flights: if none starts, the camera is already there. Without any report at
-    // all (no flight status from the globe), fall back to the 2.8 s cap.
-    const known = start.id !== 0 || start.arrivedAt !== 0
-    const quietT = window.setTimeout(() => !sawFlight && known && raise(), 400)
-    const cap = window.setTimeout(raise, 2800)
     return () => {
       done = true
-      unsub()
-      window.clearTimeout(quietT)
-      window.clearTimeout(cap)
-      window.clearTimeout(lead)
+      off()
       sec?.removeEventListener('pointerdown', onDown)
     }
-  }, [selectedId, mobile, reduced])
+  }, [selectedId, replayNonce, mobile, reduced])
 
   const onSnapChange = useCallback(
     (i: number) => {
@@ -481,7 +489,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
 
   const replayShown = useCallback(
     (p: Pass) => {
-      if (mobile) setSnap(0)
+      if (mobile) {
+        setSnap(0)
+        // The same pass replayed again: the sheet waits for its capture moment again (R3-5).
+        setReplayNonce((n) => n + 1)
+      }
       focusPass(p)
     },
     [mobile],
@@ -507,7 +519,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       <Sheet
         label={place ? `Satellites over ${place.label}` : 'Computing passes'}
         header={
-          <GlideHeight enabled={mobile} swapKey={headerKeyOf(staged.shown)}>
+          <GlideHeight swapKey={headerKeyOf(staged.shown)}>
             <div key={headerKeyOf(staged.shown)} className={headSwapClass} style={dirStyle}>
               {header}
             </div>
@@ -588,14 +600,23 @@ function TimelineDock({ dockRef, className, children }: { dockRef: React.RefObje
   )
 }
 
-/** Phones: the sheet header glides to its new height when its content changes in place (R14); a swap takes it at once. */
-function GlideHeight({ enabled, swapKey, children }: { enabled: boolean; swapKey: string; children: React.ReactNode }) {
+const FLOW_ROOT: CSSProperties = { display: 'flow-root' }
+
+/**
+ * The sheet header's box. R3-8: its height changes in ONE step, swaps and in-place changes alike (results arrival,
+ * Back, New search): the Sheet draws the body below the header with a transform set in the same frame (R3-9), so
+ * nothing is pushed in layout and no height is animated (a 240 ms height glide re-laid the header out every frame).
+ * The outer/inner pair stays as the geometry's markers (useSheetGeometry reads the header at its natural height).
+ */
+function GlideHeight({ swapKey, children }: { swapKey: string; children: React.ReactNode }) {
   const outer = useRef<HTMLDivElement>(null)
   const inner = useRef<HTMLDivElement>(null)
-  useAnimatedHeight(outer, inner, enabled, swapKey)
+  useAnimatedHeight(outer, inner, false, swapKey)
   return (
     <div ref={outer} data-anim-outer>
-      <div ref={inner} data-anim-inner>
+      {/* flow-root: the swapped content's own margins stay inside (a header whose first row has a negative margin
+          must not pull this box's top with it: that moved the whole header 6 px on every swap, R3-8). */}
+      <div ref={inner} data-anim-inner style={FLOW_ROOT}>
         {children}
       </div>
     </div>

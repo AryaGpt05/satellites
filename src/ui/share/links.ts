@@ -5,7 +5,7 @@
  * (≈ 1.1 km of latitude, less of longitude), and the card's crop is centred on that rounded point.
  */
 import type { Pass } from '@/types'
-import { cloudWords } from '../../../api/_lib/cardSpec'
+import { cloudWords, photosSentence, summaryHeadline } from '../../../api/_lib/cardSpec'
 
 /** 2 decimals of a degree ≈ 1.1 km north–south. */
 export const SHARE_DECIMALS = 2
@@ -95,19 +95,61 @@ export interface PostTextInput {
   cloud?: { pct?: number; spot?: string }
 }
 
-/** Post text stays within this many characters, leaving room for the link on X (280, links count 23). */
-export const POST_MAX = 230
+/** The credit every post ends with, on its own line just before the link (R3-14). */
+export const POST_CREDIT = 'via @armaangupt0'
+
+/** X's limit, and what any link costs in it (t.co wraps every URL to 23 characters). */
+export const X_MAX = 280
+export const X_LINK = 23
+
+/**
+ * Length as X counts it (twitter-text v3 weights): code points in the Latin, General Punctuation and similar
+ * ranges count 1, everything else (CJK, emoji, …) 2. URLs are not in post text (the link is added after it).
+ */
+export function xLength(text: string): number {
+  let n = 0
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!
+    n += c <= 0x10ff || (c >= 0x2000 && c <= 0x200d) || (c >= 0x2010 && c <= 0x201f) || (c >= 0x2032 && c <= 0x2037) ? 1 : 2
+  }
+  return n
+}
+
+/**
+ * Post text stays within this, as X counts it: with a newline and the 23-character link after it, a post is
+ * never over 280 (R3-14).
+ */
+export const POST_MAX = X_MAX - 1 - X_LINK
 
 /** The line that turns a reader into the next person to look (share SH4). */
 const HOOK = {
-  photographed: 'Something watched you this week too.',
+  watched: 'Something watched you this week too.',
   passed: 'What passed over you this week?',
 } as const
 
 /**
- * Prefilled post: precise, no hype, no hashtags, and a last line that invites the reader to look up
- * their own place. Two paragraphs; the invitation is dropped only if a very long place name would push
- * the post past POST_MAX.
+ * Body paragraphs + the credit line, kept within POST_MAX: the invitation is dropped first, then the lead is
+ * cut with an ellipsis. The credit always stays, as the last line.
+ */
+function withCredit(lead: string, hook: string): string {
+  const credit = `\n${POST_CREDIT}`
+  const full = `${lead}\n\n${hook}${credit}`
+  if (xLength(full) <= POST_MAX) return full
+  if (xLength(lead + credit) <= POST_MAX) return lead + credit
+  // X counts the ellipsis (U+2026) as 2.
+  const room = POST_MAX - xLength(credit) - xLength('…')
+  let cut = ''
+  for (const ch of lead) {
+    if (xLength(cut + ch) > room) break
+    cut += ch
+  }
+  return `${cut.trimEnd()}…${credit}`
+}
+
+/**
+ * Prefilled post: precise, no hype, no hashtags, a paragraph that invites the reader to look up their own
+ * place, and the credit on the last line ("via @armaangupt0", R3-14). The invitation is dropped only if a
+ * very long place name would push the post past POST_MAX.
  */
 export function postText(i: PostTextInput): string {
   const alt = `${Math.round(i.altitudeKm)} km`
@@ -118,9 +160,9 @@ export function postText(i: PostTextInput): string {
     case 'imaged': {
       const words = i.cloud ? cloudWords(i.cloud.pct, i.cloud.spot) : undefined
       lead = words
-        ? `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. ${words.post}`
-        : `${i.satName} photographed ${i.placeLabel} from ${alt} up on ${when}. ${i.resolution ? `${i.resolution} per pixel; this` : 'This'} is the actual image.`
-      hook = HOOK.photographed
+        ? `${i.satName} watched ${i.placeLabel} from ${alt} up on ${when}. ${words.post}`
+        : `${i.satName} watched ${i.placeLabel} from ${alt} up on ${when}. ${i.resolution ? `${i.resolution} per pixel; this` : 'This'} is the actual image.`
+      hook = HOOK.watched
       break
     }
     case 'likely':
@@ -136,18 +178,21 @@ export function postText(i: PostTextInput): string {
       hook = HOOK.passed
       break
   }
-  const full = `${lead}\n\n${hook}`
-  if (full.length <= POST_MAX) return full
-  return lead.length <= POST_MAX ? lead : `${Array.from(lead).slice(0, POST_MAX - 1).join('')}…`
+  return withCredit(lead, hook)
 }
 
 export interface SummaryLinkInput {
   label: string
   lat: number
   lon: number
-  /** Distinct satellites that photographed the place in detail (Sentinel-2 / Landsat; R2SH5) */
+  /** N: distinct satellites that watched the place (any pass; geostationary excluded), as the results headline (R3-13) */
   satellites: number
+  /** The four verdict counts; `imaged` is K, the photos made public this week */
   counts: { imaged: number; likely: number; could: number; overhead: number }
+  /** The archives didn't answer (K unknown) */
+  archiveDown?: boolean
+  /** The archives were still answering (K is a floor) */
+  partial?: boolean
   windowEnd: number
   best?: { collection: string; itemId: string; satName: string; tClosest: number; gsdM?: number }
 }
@@ -165,6 +210,8 @@ export function summaryLink(origin: string, i: SummaryLinkInput): string {
   p.set('sv', String(Math.round(i.satellites)))
   p.set('sc', [i.counts.imaged, i.counts.likely, i.counts.could, i.counts.overhead].map((n) => Math.round(n)).join(','))
   p.set('sw', String(Math.round(i.windowEnd)))
+  if (i.archiveDown) p.set('sa', '1')
+  else if (i.partial) p.set('sp', '1')
   if (i.best) {
     p.set('bc', i.best.collection)
     p.set('bi', i.best.itemId)
@@ -176,21 +223,18 @@ export function summaryLink(origin: string, i: SummaryLinkInput): string {
 }
 
 /**
- * "2 satellites photographed Waterloo in detail this week. The clearest one, Sentinel-2C, from 795 km up."
- * + the invitation. `satellites` counts detailed pictures only (as the results headline, R2SH5).
+ * "31 satellites watched Waterloo this week. 12 photos were made public." (R3-13: the results headline, N and K),
+ * then the invitation and the credit (R3-14).
  */
-export function summaryPostText(i: { placeLabel: string; satellites: number; passes: number; best?: { satName: string; altitudeKm?: number } }): string {
-  const n = i.satellites
-  let lead: string
-  if (n > 0) {
-    lead = `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${i.placeLabel} in detail this week.`
-    if (i.best) lead += ` The clearest one, ${i.best.satName}${i.best.altitudeKm !== undefined ? `, from ${Math.round(i.best.altitudeKm)} km up` : ''}.`
-  } else lead = `${i.passes.toLocaleString('en-US')} satellite passes crossed ${i.placeLabel} this week. None caught a clear picture.`
-  const full = `${lead}\n\n${n > 0 ? HOOK.photographed : HOOK.passed}`
-  return full.length <= POST_MAX ? full : lead
+export function summaryPostText(i: { placeLabel: string; satellites: number; photos: number; archiveDown?: boolean; partial?: boolean }): string {
+  const lead = `${summaryHeadline(i)} ${photosSentence(i.photos, i)}`
+  return withCredit(lead, i.satellites > 0 ? HOOK.watched : HOOK.passed)
 }
 
-/** X (Twitter) web intent. */
+/**
+ * X (Twitter) web intent. The link goes inside the text, on its own line after the credit (R3-14): with a
+ * separate `url` parameter X would append it after a space, on the credit's line.
+ */
 export function xIntentUrl(text: string, url: string): string {
-  return `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`
+  return `https://x.com/intent/tweet?text=${encodeURIComponent(`${text}\n${url}`)}`
 }

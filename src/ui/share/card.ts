@@ -12,9 +12,10 @@
  * the PNG cut it out: no second render from the archive, no "Acquiring" plate, a PNG ready in well under
  * a second. Only that rect is ever drawn (the DOM preview clips to it too), so the card shows exactly the
  * ground a fresh crop centred on the rounded point would show. When the pass view's picture isn't in
- * the cache (a summary's best look, a recipient's first look), the same rect is loaded and faded in.
+ * the cache (a summary's closest look, a recipient's first look), the same rect is loaded and faded in.
+ * Pictures go through the results' session photo cache (loadPhoto): one request per URL for the page.
  */
-import { gibsWmsUrl, pcCropUrl, preloadImage } from '@/imagery'
+import { gibsWmsUrl, pcCropUrl } from '@/imagery'
 import { bboxAround } from '@/lib/geo'
 import type { Capture, Pass, Report } from '@/types'
 import {
@@ -41,9 +42,11 @@ import {
   type Prim,
   type ScaleBar,
 } from '../../../api/_lib/cardSpec'
+import { loadPhoto } from '../results/images'
 import { pickBestLook } from '../results/lib/bestLook'
-import { captureFor, cropSpec, displayUrl, isDetailed } from '../results/lib/captures'
-import type { SatMeta } from '../results/lib/meta'
+import { captureFor, cropSpec, displayUrl } from '../results/lib/captures'
+import { archiveDown, headline } from '../results/lib/copy'
+import type { MetaFn, SatMeta } from '../results/lib/meta'
 import { roundedPlace, type SummaryLinkInput } from './links'
 import { WORDMARK_BOX, WORDMARK_DOT, WORDMARK_PATH } from '../../../api/_lib/wordmark'
 
@@ -150,38 +153,45 @@ export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: st
 }
 
 /**
- * The week at a place (share SH6): the four counts, the best look, and the satellites that photographed
- * it in detail (R2SH5): distinct satellites with a detailed picture (Sentinel-2 / Landsat), as the
- * results headline counts them. Weather mosaics (250–375 m) don't count.
+ * The week at a place (share SH6, R3-13), in the results headline's numbers: N, the distinct satellites that
+ * watched it (any pass; geostationary watchers excluded), and K, the photos made public (the imaged passes'
+ * captures, weather mosaics included). Plus the four verdict counts and the closest look.
  */
-export function summaryFacts(report: Report, placeLabel: string, satName: (norad: number) => string): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { altitudeKm: number; capture: Capture } } {
+export function summaryFacts(report: Report, placeLabel: string, meta: MetaFn): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { altitudeKm: number; capture: Capture } } {
   const counts = { imaged: 0, likely: 0, could: 0, overhead: 0 }
-  const photographed = new Set<number>()
-  for (const p of report.passes) {
-    counts[p.verdict]++
-    if (p.verdict !== 'imaged') continue
-    const c = captureFor(report, p)
-    if (c && isDetailed(c)) photographed.add(p.norad)
-  }
+  for (const p of report.passes) counts[p.verdict]++
+  const head = headline(report, meta)
   const look = pickBestLook(report)
   const best =
     look && look.kind !== 'geo'
       ? {
           collection: look.capture.collection,
           itemId: look.capture.itemId,
-          satName: satName(look.pass.norad),
+          satName: meta(look.pass.norad).name,
           tClosest: look.pass.tClosest,
           gsdM: look.capture.gsdM,
           altitudeKm: look.pass.altitudeKm,
           capture: look.capture,
         }
       : undefined
-  return { label: placeLabel, lat: report.place.lat, lon: report.place.lon, satellites: photographed.size, counts, windowEnd: report.windowEnd, best }
+  const down = archiveDown(report)
+  return {
+    label: placeLabel,
+    lat: report.place.lat,
+    lon: report.place.lon,
+    satellites: head.flewOver,
+    // K is the headline's own count (it equals the imaged passes, the card's PHOTO readout).
+    counts: { ...counts, imaged: head.images },
+    archiveDown: down || undefined,
+    partial: !down && report.partial ? true : undefined,
+    windowEnd: report.windowEnd,
+    best,
+  }
 }
 
 /** The summary card, as the sharer sees it (the server builds the same from the link's parameters). */
-export function summaryCardSpec(report: Report, placeLabel: string, satName: (norad: number) => string, timeZone: string, host: string): CardSpec {
-  const f = summaryFacts(report, placeLabel, satName)
+export function summaryCardSpec(report: Report, placeLabel: string, meta: MetaFn, timeZone: string, host: string): CardSpec {
+  const f = summaryFacts(report, placeLabel, meta)
   const r = roundedPlace(report.place.lat, report.place.lon)
   const c = f.best?.capture
   const spec = buildSummarySpec({
@@ -190,6 +200,8 @@ export function summaryCardSpec(report: Report, placeLabel: string, satName: (no
     lon: r.lon,
     satellites: f.satellites,
     counts: f.counts,
+    archiveDown: f.archiveDown,
+    partial: f.partial,
     windowEnd: f.windowEnd,
     timeZone,
     best: f.best && c ? { satName: f.best.satName, tClosest: f.best.tClosest, capture: { collection: c.collection, itemId: c.itemId, gsdM: c.gsdM } } : undefined,
@@ -414,21 +426,24 @@ function rowText(ctx: Ctx, text: string, x: number, box: readonly [number, numbe
   return w
 }
 
-/** The picture for the plate: the pass view's decoded crop when there is one (a cache hit), else the card's own crop. */
+/**
+ * The picture for the plate: the pass view's decoded crop when there is one (a hit in the results' session
+ * photo cache, so no request and no decode), else the card's own crop.
+ */
 async function plateImage(spec: CardSpec): Promise<{ img: HTMLImageElement; rect?: PlateSource } | null> {
   if (spec.plate.kind !== 'image') return null
   const { source, imageUrl } = spec.plate
   if (source) {
-    const img = await preloadImage(source.url).catch(() => null)
+    const img = await loadPhoto(source.url).catch(() => null)
     if (img) return { img, rect: source }
   }
-  const img = imageUrl ? await preloadImage(imageUrl).catch(() => null) : null
+  const img = imageUrl ? await loadPhoto(imageUrl).catch(() => null) : null
   return img ? { img } : null
 }
 
 /**
  * Render the card to a PNG blob on a canvas (fonts are the page's own web fonts; the crop is CORS-clean
- * because every archive sends `Access-Control-Allow-Origin: *` and preloadImage asks anonymously).
+ * because every archive sends `Access-Control-Allow-Origin: *` and loadPhoto asks anonymously).
  *
  * The canvas is CPU-backed (`willReadFrequently`), so toBlob encodes from memory, off the main thread's
  * critical path, instead of first reading the whole card back from the GPU (a long task on phones).

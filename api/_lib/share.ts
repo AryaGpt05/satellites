@@ -6,7 +6,7 @@
  * are anyone's). Each field is re-validated and clamped before it reaches a renderer.
  */
 import tzlookup from '@photostructure/tz-lookup'
-import { VERDICT_WORDS, cloudWords, localStamp, type CardInput, type SummaryInput } from './cardSpec.js'
+import { VERDICT_WORDS, cloudWords, localStamp, photosSentence, summaryHeadline, type CardInput, type SummaryInput } from './cardSpec.js'
 import { supabaseConfig } from './env.js'
 
 export type Verdict = 'imaged' | 'likely' | 'could' | 'overhead'
@@ -271,12 +271,14 @@ export function placeFromParams(q: URLSearchParams): SharedPlace | null {
 // ── Summary links (share SH6): the week at a place, carried in the link itself ─────────────
 
 /** Summary params a summary link carries next to q / n (nothing is stored server-side). */
-export const SUMMARY_KEYS = ['sv', 'sc', 'sw', 'bc', 'bi', 'bs', 'bt', 'bg'] as const
+export const SUMMARY_KEYS = ['sv', 'sc', 'sw', 'sa', 'sp', 'bc', 'bi', 'bs', 'bt', 'bg'] as const
 
 /**
- * A summary from a link: `sv` satellites that photographed, `sc` the four verdict counts
- * ("31,220,1544,66"), `sw` the window end (ms), and the best look: `bc` collection, `bi` item id,
- * `bs` satellite name, `bt` time (ms), `bg` pixel size (m). Null unless place, sv and sc are valid.
+ * A summary from a link: `sv` the satellites that watched the place (N: any pass, geostationary excluded),
+ * `sc` the four verdict counts ("31,220,1544,66"; the first is K, the photos made public), `sw` the window
+ * end (ms), `sa=1` the archives didn't answer, `sp=1` the archives were still answering (K is a floor), and
+ * the closest look: `bc` collection, `bi` item id, `bs` satellite name, `bt` time (ms), `bg` pixel size (m).
+ * Null unless place, sv and sc are valid.
  */
 export type LinkSummary = Omit<SummaryInput, 'host' | 'timeZone' | 'best'> & {
   place: SharedPlace
@@ -292,7 +294,7 @@ export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
   const capture = captureOf({ collection: q.get('bc'), itemId: q.get('bi'), gsdM: q.get('bg') })
   const satName = text(q.get('bs'), 40)
   const tClosest = num(q.get('bt'), 0, 8.64e15)
-  return {
+  const out: LinkSummary = {
     place,
     placeLabel: place.label,
     lat: place.lat,
@@ -302,18 +304,21 @@ export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
     windowEnd: num(q.get('sw'), 0, 8.64e15),
     best: capture && satName ? { satName, tClosest, capture } : undefined,
   }
+  // Flags are present only when set, so a summary rebuilt from its link equals the one the app built.
+  if (q.get('sa') === '1') out.archiveDown = true
+  else if (q.get('sp') === '1') out.partial = true
+  return out
 }
 
-/** "2 satellites photographed Waterloo in detail this week" (detailed pictures only, as the results headline) */
+/** "31 satellites watched Waterloo this week." (R3-13: the results headline's N, as the card and the post say it) */
 export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>): string {
-  const n = s.satellites
-  return n > 0 ? `${n} ${n === 1 ? 'satellite' : 'satellites'} photographed ${s.placeLabel} in detail this week` : `What passed over ${s.placeLabel} this week`
+  return summaryHeadline(s)
 }
 
-export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel'>): string {
-  const passes = s.counts.likely + s.counts.could + s.counts.overhead
-  const best = s.best ? ` The clearest picture is from ${s.best.satName}.` : ''
-  return `${s.counts.imaged} real images and ${passes.toLocaleString('en-US')} more passes over ${s.placeLabel} in the last 7 days.${best} What watched you this week?`
+/** "12 photos were made public. The closest look is from Sentinel-2C. What watched you this week?" */
+export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel' | 'archiveDown' | 'partial'>): string {
+  const best = s.best ? ` The closest look is from ${s.best.satName}.` : ''
+  return `${photosSentence(s.counts.imaged, s)}${best} What watched you this week?`
 }
 
 /** "What watched Waterloo this week" */
@@ -361,7 +366,7 @@ export function satLabel(s: ShareRecord): string {
 
 /**
  * The headline, split so the renderer can set the place in the accent face:
- *   imaged   → "Sentinel-2C photographed | Waterloo | ."
+ *   imaged   → "Sentinel-2C watched | Waterloo | ."
  *   likely   → "Sentinel-2C swept over | Waterloo | ."
  *   could    → "WorldView Legion 4 passed within view of | Waterloo | ."
  *   overhead → "ISS (ZARYA) passed over | Waterloo | ."

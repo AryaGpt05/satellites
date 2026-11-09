@@ -570,9 +570,18 @@ function CloseButton({ label, onClose }: { label: string; onClose: () => void })
  * The body below an overlaid header (R3-9). The body is laid out from the sheet's top, so the header's
  * height never moves it in layout; it is drawn below the header with `translateY(header)` and shortened by
  * the same `margin-bottom`, so it ends where it did (above the footer). Both are measured once when the
- * header mounts (the first frame is placed); after that the header's ResizeObserver writes the transform
- * in the frame the height changed (paint only, before that frame is painted) and the margin in the next
- * frame, before its layout, so no observer of the body sees it resized inside its own delivery.
+ * header mounts (the first frame is placed).
+ *
+ * After that, two paths keep them in step with the header:
+ *  - DOM changes in the header (React swapping its content, the inline search opening or closing, the
+ *    common case): a MutationObserver measures it in the microtask right after the commit, before that
+ *    frame's layout, and writes the transform and the margin together. The frame that shows the new header
+ *    shows the body in the right place at the right height: no one-frame strip at the body's end.
+ *  - Size changes with no DOM change (a width change, a font swap): the header's ResizeObserver writes the
+ *    transform in the frame the height changed (paint only, before that frame is painted) and the margin in
+ *    the next frame, before its layout, so no observer of the body sees it resized inside its own
+ *    delivery (that would end the frame on a ResizeObserver loop error, R3-12).
+ *
  * `body.offsetTop` reports the header's height, where the body starts, as it did with the header in flow.
  */
 function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefObject<HTMLDivElement | null>, mobile: boolean, present: boolean) {
@@ -589,6 +598,24 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
     size(h)
     Object.defineProperty(body, 'offsetTop', { configurable: true, get: () => head.offsetHeight })
     let raf = 0
+    // Element and class changes only: text-only updates (a ticking readout's textContent, a caret mirror)
+    // rarely change the height and are left to the ResizeObserver below, so they never force a layout here.
+    const textOnly = (r: MutationRecord) =>
+      r.type === 'childList' && [...r.addedNodes, ...r.removedNodes].every((n) => n.nodeType === Node.TEXT_NODE)
+    const mo =
+      typeof MutationObserver === 'undefined'
+        ? null
+        : new MutationObserver((records) => {
+            if (records.every(textOnly)) return
+            const next = measure()
+            if (Math.abs(next - h) < 0.01) return
+            h = next
+            cancelAnimationFrame(raf)
+            raf = 0
+            place(h)
+            size(h)
+          })
+    mo?.observe(head, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] })
     const ro =
       typeof ResizeObserver === 'undefined'
         ? null
@@ -606,6 +633,7 @@ function useHeadOffset(headRef: RefObject<HTMLDivElement | null>, bodyRef: RefOb
           })
     ro?.observe(head)
     return () => {
+      mo?.disconnect()
       ro?.disconnect()
       cancelAnimationFrame(raf)
       delete (body as { offsetTop?: number }).offsetTop

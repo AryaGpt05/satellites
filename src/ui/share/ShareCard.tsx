@@ -6,12 +6,13 @@
  * The plate (share R2SH1): when the spec carries a `source` (the pass view's crop, already decoded),
  * the preview shows that very picture, positioned so the plate's overflow clips it to the card's square
  * around the rounded share point: opaque from the first frame, no "Acquiring" wait. Otherwise (the
- * picture isn't in memory yet: a summary's best look, a recipient's first look) the pass geometry shows
+ * picture isn't in memory yet: a summary's closest look, a recipient's first look) the pass geometry shows
  * while the picture loads, then the picture fades in over it.
  */
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { isImageCached } from '@/imagery'
 import { cx, Wordmark } from '@/ui/system'
+import { decodedPhoto } from '../results/images'
 import {
   CARD_COLOR,
   CARD_FS,
@@ -149,7 +150,8 @@ function ImagePlateView({ plate }: { plate: ImagePlate }) {
   const urls = [plate.source?.url, plate.imageUrl].filter((u, i, a): u is string => !!u && a.indexOf(u) === i)
   const key = urls.join('|')
   const initial = (): { key: string; at: number; state: ImgState; instant: boolean; settled: boolean } => {
-    const cached = !!urls[0] && isImageCached(urls[0])
+    // Decoded this session (the results' photo cache, or the imagery loader's): shown in the first frame.
+    const cached = !!urls[0] && (!!decodedPhoto(urls[0]) || isImageCached(urls[0]))
     return { key, at: 0, state: urls.length ? (cached ? 'ok' : 'loading') : 'err', instant: cached, settled: cached }
   }
   const [img, setImg] = useState(initial)

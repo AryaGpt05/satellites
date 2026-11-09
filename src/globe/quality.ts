@@ -56,3 +56,17 @@ export function detectTier(gl: WebGLRenderer): QualityTier {
     maxAnisotropy: Math.min(mobile ? 4 : 8, gl.capabilities.getMaxAnisotropy()),
   }
 }
+
+/**
+ * Where a DPR decline lands: one step for a device that is just short of the target, more for one that is far
+ * from it, so a slow device pays for ONE drawing-buffer reallocation instead of a staircase of them (each one is a
+ * GPU sync; G-M1). Fill cost goes with dpr², so the level that would bring `fps` up to `targetFps` is
+ * dpr × √(fps / target), floored to a level, and always at least one step below `index`.
+ */
+export function declineLevel(levels: number[], index: number, fps: number, targetFps: number): number {
+  if (index <= 0) return 0
+  const want = levels[index] * Math.sqrt(Math.max(0, fps) / Math.max(1, targetFps))
+  let i = index - 1
+  while (i > 0 && levels[i] > want + 1e-6) i--
+  return i
+}

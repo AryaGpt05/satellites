@@ -6,27 +6,30 @@
  *    close pass views (the chase and the acquired view, both below the global map's texture floor) crisp.
  *  - DECAL: the selected pass's REAL captured image (a Planetary Computer crop of the Sentinel-2 / Landsat item, or the
  *    GIBS daily mosaic), ±40–300 km around the place, developed exactly at the scan line during a live acquisition
- *    sequence and simply there otherwise (rt.acq.full). The hero's capture ("closest look") is fetched ahead.
+ *    sequence and simply there otherwise (rt.acq.full). The cover's capture (the photo the results panel leads with:
+ *    acquisition.ts coverPass, the same pick as results' windowCover) is fetched ahead (R3-17).
  *
- * Every image is fetched and decoded off the critical path (preloadImage: one request per URL for the session, then
- * createImageBitmap), and uploaded at a chosen frame: prefetches and the context patch only through the texture
- * upload gate (textures.ts canUpload: nothing choreographed moving); the selected pass's image as soon as no camera
- * flight is past its first few percent and no UI entrance runs (store.motionBusyUntil), or at once while the replay
- * stands still waiting for it on arrival (it must be on the GPU before its scan line arrives). Patches fade in and out
- * (never pop); a pass switch fades the old image out before the new one comes in. Uploaded images stay cached (a few),
- * so swiping back and forth never re-fetches or re-uploads.
+ * Every image is fetched once per session (CORS; these crops are the globe's own, the panel never asks for them),
+ * decoded and cut into 128-row strips in the texture worker (textures.ts decodeImageUrl: none of it on the main
+ * thread), and uploaded strip by strip (phones: one strip a frame, ≤ 8 ms of upload work; desktops in one go) at
+ * chosen frames: prefetches and the context patch only through the texture upload gate (textures.ts canUpload:
+ * nothing choreographed moving); the selected pass's image as soon as no camera flight is past its first few
+ * percent and no UI entrance runs (store.motionBusyUntil), or at once while the replay stands still waiting for it
+ * on arrival (it must be on the GPU before its scan line arrives). Patches fade in and out (never pop); a pass switch
+ * fades the old image out before the new one comes in. Uploaded images stay cached (a few), so swiping back and
+ * forth never re-fetches or re-uploads.
  */
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
-import { LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace, Texture, Vector4, type WebGLRenderer } from 'three'
-import { gibsWmsUrl, preloadImage } from '@/imagery'
+import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector4, type Texture, type WebGLRenderer } from 'three'
+import { gibsWmsUrl } from '@/imagery'
 import { bboxAround, EARTH_RADIUS_KM } from '@/lib/geo'
 import { selectSelectedPass, useApp } from '@/state/store'
 import type { CaptureCollection } from '@/types'
-import { captureOf, closestLookPass, decalSpecFor, decalUrl } from './acquisition'
+import { captureOf, coverPass, decalSpecFor, decalUrl } from './acquisition'
 import { kmPerTexel } from './framing'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
-import { canUpload } from './textures'
+import { canUpload, decodeImageUrl, uploadStrip } from './textures'
 
 /** The context basemap: half size (km) and the GIBS layer (static; any TIME answers the same composite). */
 const CTX_HALF_KM = 360
@@ -65,66 +68,107 @@ function patchUv(lat: number, lon: number, halfKm: number, out: Vector4): Vector
 
 interface Entry {
   url: string
-  state: 'loading' | 'decoded' | 'ready' | 'error'
-  bitmap?: ImageBitmap
+  /** loading → decoded (strips cut, off the main thread) → uploading (strip by strip) → ready */
+  state: 'loading' | 'decoded' | 'uploading' | 'ready' | 'error'
+  /** Rows of the image, north first, in upload order (row 0 = north: the shader samples accordingly) */
+  strips?: ImageBitmap[]
+  rows?: number
+  next: number
   tex?: Texture
   uv: Vector4
   panelHalf: number
   usedAt: number
 }
 
+/** Rows per upload strip of a regional image: phones upload one strip a frame (≤ 8 ms of upload work, G-M1). */
+const PATCH_STRIP_ROWS = 128
+
 function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
   const entries = new Map<string, Entry>()
   let alive = true
+  const log = (what: string, url: string, extra?: unknown) => {
+    if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
+    const w = window as unknown as { __imageryLog?: unknown[] }
+    ;(w.__imageryLog ??= []).push({ t: Math.round(performance.now()), what, url: url.slice(0, 140), extra })
+  }
+  const closeStrips = (e: Entry) => {
+    e.strips?.forEach((b) => b.close())
+    e.strips = undefined
+  }
   /** The entry for an image, starting its fetch + decode the first time (`uv` is built only then). */
   const load = (url: string, uv: () => Vector4, panelHalf: number): Entry => {
     let e = entries.get(url)
     if (e) return e
-    e = { url, state: 'loading', uv: uv(), panelHalf, usedAt: performance.now() }
+    e = { url, state: 'loading', next: 0, uv: uv(), panelHalf, usedAt: performance.now() }
     entries.set(url, e)
     const entry = e
-    const log = (what: string, extra?: unknown) => {
-      if (!import.meta.env.DEV && import.meta.env.MODE !== 'inspect') return
-      const w = window as unknown as { __imageryLog?: unknown[] }
-      ;(w.__imageryLog ??= []).push({ t: Math.round(performance.now()), what, url: url.slice(0, 140), extra })
-    }
-    log('load')
-    preloadImage(url)
-      .then((img) => createImageBitmap(img, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))
+    log('load', url)
+    // One CORS request per URL for the session (globe-only crops: the panel never asks for these sizes); decoded and
+    // cut into strips in the texture worker, so the main thread only ever uploads.
+    decodeImageUrl(url)
+      .then(async (img) => {
+        try {
+          const n = Math.ceil(img.height / PATCH_STRIP_ROWS)
+          const strips = await Promise.all(
+            Array.from({ length: n }, (_, i) => img.strip(i * PATCH_STRIP_ROWS, Math.min(PATCH_STRIP_ROWS, img.height - i * PATCH_STRIP_ROWS), false)),
+          )
+          return { strips, w: img.width, h: img.height }
+        } finally {
+          img.close()
+        }
+      })
       .then(
-        (bmp) => {
-          if (!alive) return bmp.close()
-          entry.bitmap = bmp
+        ({ strips, w, h }) => {
+          if (!alive || entries.get(url) !== entry) return strips.forEach((b) => b.close())
+          entry.strips = strips
+          entry.rows = PATCH_STRIP_ROWS
           entry.state = 'decoded'
-          log('decoded', [bmp.width, bmp.height])
+          log('decoded', url, [w, h])
         },
         (err: unknown) => {
           entry.state = 'error'
-          log('error', String(err))
+          log('error', url, String(err))
         },
       )
     return e
   }
-  /** Upload a decoded entry now (allocates the GPU texture with its mip chain). */
-  const upload = (e: Entry) => {
-    if (e.state !== 'decoded' || !e.bitmap) return
-    const tex = new Texture(e.bitmap)
-    tex.flipY = false // row 0 = north (the shader samples accordingly)
-    tex.colorSpace = SRGBColorSpace
-    tex.generateMipmaps = true
-    tex.minFilter = LinearMipmapLinearFilter
-    tex.magFilter = LinearFilter
-    tex.anisotropy = rt.tier.maxAnisotropy
-    tex.needsUpdate = true
-    gl.initTexture(tex)
-    e.bitmap.close()
-    e.bitmap = undefined
-    e.tex = tex
-    e.state = 'ready'
-    if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
-      const w = window as unknown as { __imageryLog?: unknown[] }
-      ;(w.__imageryLog ??= []).push({ t: Math.round(performance.now()), what: 'upload', url: e.url.slice(0, 140), flying: rt.camera.flying, acq: rt.acq.armed })
+  /**
+   * Upload a decoded entry: allocate the texture (all mip levels), then its strips straight into it, then the mips.
+   * Phones take one strip per call (one call per frame), desktops all of them at once. Returns true once ready.
+   */
+  const upload = (e: Entry): boolean => {
+    if (e.state === 'ready') return true
+    if ((e.state !== 'decoded' && e.state !== 'uploading') || !e.strips?.length) return false
+    const first = e.strips[0]
+    if (e.state === 'decoded') {
+      const H = e.strips.reduce((a, b) => a + b.height, 0)
+      const tex = new DataTexture(null, first.width, H, RGBAFormat, UnsignedByteType)
+      tex.flipY = false // row 0 = north (the shader samples accordingly)
+      tex.colorSpace = SRGBColorSpace
+      tex.generateMipmaps = true
+      tex.minFilter = LinearMipmapLinearFilter
+      tex.magFilter = LinearFilter
+      tex.anisotropy = rt.tier.maxAnisotropy
+      tex.unpackAlignment = 4
+      tex.mipmapsAutoUpdate = false
+      tex.source.dataReady = false
+      tex.needsUpdate = true
+      e.tex = tex
+      e.next = 0
+      e.state = 'uploading'
     }
+    const tex = e.tex!
+    const n = e.strips.length
+    const perCall = rt.tier.mobile ? 1 : n
+    for (let k = 0; k < perCall && e.next < n; k++, e.next++) {
+      uploadStrip(gl, tex, e.strips[e.next], e.next * (e.rows ?? PATCH_STRIP_ROWS), e.next === n - 1)
+    }
+    if (e.next < n) return false
+    tex.source.dataReady = true
+    closeStrips(e)
+    e.state = 'ready'
+    log('upload', e.url, { flying: rt.camera.flying, acq: rt.acq.armed })
+    return true
   }
   /** Keep at most `max` decals that are not in use; dispose the least recently used. */
   const prune = (keep: Set<string>, max: number) => {
@@ -132,7 +176,7 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     while (old.length > max) {
       const e = old.shift()!
       e.tex?.dispose()
-      e.bitmap?.close()
+      closeStrips(e)
       entries.delete(e.url)
     }
   }
@@ -144,12 +188,14 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     alive = false
     for (const e of entries.values()) {
       e.tex?.dispose()
-      e.bitmap?.close()
+      closeStrips(e)
     }
     entries.clear()
   }
   return { entries, load, upload, prune, revive, dispose }
 }
+
+const uploadable = (e: Entry) => e.state === 'decoded' || e.state === 'uploading'
 
 export function Imagery() {
   const rt = useRuntime()
@@ -169,6 +215,9 @@ export function Imagery() {
       wantDecal: null as Entry | null,
       prefetch: null as Entry | null,
       prefetchKey: '',
+      // The cover pass of the last final report seen (computed once per report, not per frame).
+      coverReport: undefined as unknown,
+      cover: undefined as ReturnType<typeof coverPass>,
       resultsAt: -1,
       reportSeen: undefined as unknown,
       last: performance.now(),
@@ -194,6 +243,8 @@ export function Imagery() {
     const mobile = rt.tier.mobile
     const quiet = canUpload(rt, now)
     const midFlight = rt.camera.flying && rt.camera.progress >= 0.06
+    // Phones advance one image's upload per frame (one strip: ≤ 8 ms of upload work), desktops any number.
+    let slot = mobile ? 1 : Infinity
     if (st.phase === 'results' && report !== state.reportSeen) {
       state.reportSeen = report
       state.resultsAt = now
@@ -215,7 +266,10 @@ export function Imagery() {
           state.ctxEntry = store.load(url, () => patchUv(place.lat, place.lon, CTX_HALF_KM, new Vector4()), 0)
         }
         const e = state.ctxEntry
-        if (e.state === 'decoded' && quiet) store.upload(e)
+        if (uploadable(e) && quiet && slot > 0) {
+          slot--
+          store.upload(e)
+        }
         // Bind once the old patch has faded out (below).
         if (e.state === 'ready' && p.uCtxOn.value <= 0) {
           state.ctx = e
@@ -251,11 +305,18 @@ export function Imagery() {
       // The selected image uploads as soon as no flight is mid-way and no UI entrance is running (its scan line may
       // be seconds away), or at once when the replay stands still waiting for it (Clock: the decal hold on arrival).
       const waiting = acq.armed && !rt.camera.flying
-      if (want.state === 'decoded' && !midFlight && (waiting || now > st.motionBusyUntil)) store.upload(want)
+      if (uploadable(want) && !midFlight && (waiting || now > st.motionBusyUntil) && slot > 0) {
+        slot--
+        store.upload(want)
+      }
     }
-    // Prefetch the hero's capture once results have settled (network + decode now, upload when quiet).
+    // Prefetch the cover's capture once results have settled (network + decode now, upload when quiet).
     if (settledResults && report) {
-      const hero = closestLookPass(report)
+      if (report !== state.coverReport) {
+        state.coverReport = report
+        state.cover = coverPass(report)
+      }
+      const hero = state.cover
       const key = hero ? `${report.generatedAt}:${hero.id}` : ''
       if (hero && key !== state.prefetchKey && place) {
         state.prefetchKey = key
@@ -269,7 +330,10 @@ export function Imagery() {
           )
       }
     }
-    if (state.prefetch && state.prefetch.state === 'decoded' && quiet) store.upload(state.prefetch)
+    if (state.prefetch && uploadable(state.prefetch) && quiet && slot > 0) {
+      slot--
+      store.upload(state.prefetch)
+    }
     acq.decalReady = !!want && want.state === 'ready'
 
     // Crossfade between passes: the bound image moves to slot B (fully developed, underneath) and the new one fades

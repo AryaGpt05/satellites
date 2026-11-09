@@ -4,7 +4,7 @@ import { EARTH_RADIUS_KM, latLonToWorld } from '@/lib/geo'
 import type { Pass, Report } from '@/types'
 import {
   approachStart,
-  closestLookPass,
+  coverPass,
   decalSpecFor,
   DIVE_KM,
   diveAt,
@@ -18,6 +18,7 @@ import {
   slowWindowS,
 } from './acquisition'
 import { acquiredPose, chasePose, DIVE_TILT, freeRect, rangeForGroundKm } from './framing'
+import { pickBestLook } from '@/ui/results/lib/bestLook'
 
 const TC = 1_800_000_000_000
 
@@ -127,15 +128,63 @@ describe('decal and scan geometry', () => {
     expect(scanAt(TC + 10_000, TC, 6.8) * EARTH_RADIUS_KM).toBeCloseTo(68, 6)
   })
 
-  it('picks the most zoomed-in capture first, then the clearest, then the newest', () => {
+  it('prefetches the cover the panel leads with: the most zoomed-in CLEAR capture, not the sharpest clouded one (R3-17)', () => {
     const pass = (id: string, t: number, captureId: string): Pass => ({ id, tClosest: t, verdict: 'imaged', captureId }) as unknown as Pass
-    const cap = (id: string, collection: string, gsdM: number, spot?: string) => ({ id, collection, gsdM, spot })
-    const report = {
-      partial: false,
-      passes: [pass('a', 1, 'ca'), pass('b', 2, 'cb'), pass('c', 3, 'cc'), pass('d', 4, 'cd')],
-      captures: [cap('ca', 'landsat-c2-l2', 30, 'clear'), cap('cb', 'sentinel-2-l2a', 10, 'cloud'), cap('cc', 'sentinel-2-l2a', 10, 'clear'), cap('cd', 'gibs-viirs-noaa20', 375, 'clear')],
-    } as unknown as Report
-    expect(closestLookPass(report)?.id).toBe('c')
+    const cap = (id: string, collection: string, gsdM: number, spot?: string, cloudCoverPct?: number) => ({
+      id,
+      provider: collection.startsWith('gibs') ? 'gibs' : 'planetary-computer',
+      collection,
+      gsdM,
+      spot,
+      cloudCoverPct,
+    })
+    const report = (captures: ReturnType<typeof cap>[], partial = false) =>
+      ({ partial, passes: captures.map((c, i) => pass(`p${c.id}`, i + 1, c.id)), captures, geo: [] }) as unknown as Report
+    // A clouded Sentinel-2 frame (10 m) loses to a clear Landsat one (30 m): the cover is clear first.
+    expect(coverPass(report([cap('s2cloud', 'sentinel-2-l2a', 10, 'cloud', 95), cap('ls', 'landsat-c2-l2', 30, 'clear', 5)]))?.id).toBe('pls')
+    // Scene cloud ≥ 70 % is clouded even with an unknown spot.
+    expect(coverPass(report([cap('s2', 'sentinel-2-l2a', 10, 'unknown', 80), cap('ls', 'landsat-c2-l2', 30, 'unknown', 20)]))?.id).toBe('pls')
+    // Among clear ones: smallest gsd, then clearest spot, then newest.
+    expect(coverPass(report([cap('a', 'sentinel-2-l2a', 10, 'cirrus'), cap('b', 'sentinel-2-l2a', 10, 'clear'), cap('c', 'landsat-c2-l2', 30, 'clear')]))?.id).toBe('pb')
+    // Everything clouded: the least cloudy detailed capture; no detailed one: the sharpest mosaic.
+    expect(coverPass(report([cap('a', 'sentinel-2-l2a', 10, 'cloud', 99), cap('b', 'landsat-c2-l2', 30, 'cloud', 75)]))?.id).toBe('pb')
+    expect(coverPass(report([cap('m1', 'gibs-modis-terra', 250, undefined), cap('m2', 'gibs-viirs-noaa20', 375, undefined)]))?.id).toBe('pm1')
+    // A partial report waits for the final one.
+    expect(coverPass(report([cap('ls', 'landsat-c2-l2', 30, 'clear')], true))).toBeUndefined()
+  })
+
+  it('agrees with the results panel (lib/bestLook pickBestLook) on random reports', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+    const collections = ['sentinel-2-l2a', 'landsat-c2-l2', 'gibs-viirs-noaa20', 'gibs-modis-terra'] as const
+    const gsd: Record<string, number> = { 'sentinel-2-l2a': 10, 'landsat-c2-l2': 30, 'gibs-viirs-noaa20': 375, 'gibs-modis-terra': 250 }
+    const spots = ['clear', 'cirrus', 'unknown', 'shadow', 'cloud', undefined]
+    for (let k = 0; k < 400; k++) {
+      const n = 1 + Math.floor(rnd() * 8)
+      const captures = Array.from({ length: n }, (_, i) => {
+        const collection = collections[Math.floor(rnd() * collections.length)]
+        return {
+          id: `c${i}`,
+          provider: collection.startsWith('gibs') ? 'gibs' : 'planetary-computer',
+          collection,
+          gsdM: gsd[collection],
+          spot: collection.startsWith('gibs') ? undefined : spots[Math.floor(rnd() * spots.length)],
+          cloudCoverPct: rnd() < 0.2 ? undefined : Math.round(rnd() * 100),
+          datetime: 0,
+        }
+      })
+      const passes = captures.map((c, i) => ({
+        id: `p${i}`,
+        tClosest: Math.floor(rnd() * 1e6),
+        verdict: rnd() < 0.85 ? 'imaged' : 'likely',
+        captureId: c.id,
+        sunElevationDeg: Math.round(rnd() * 60) - 5,
+      }))
+      const r = { partial: false, passes, captures, geo: [] } as unknown as Report
+      const look = pickBestLook(r)
+      const want = look && look.kind !== 'geo' ? look.pass.id : undefined
+      expect(coverPass(r)?.id).toBe(want)
+    }
   })
 })
 

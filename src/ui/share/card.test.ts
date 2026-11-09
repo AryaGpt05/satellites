@@ -1,24 +1,26 @@
 /**
- * Round 2 share card behaviour:
+ * Share card behaviour:
  *  - R2SH1 the plate is cut from the pass view's decoded crop (cardSource maps the card's square into it)
  *  - R2SH3 one rule for clouded words, in the card, the server description and the post
- *  - R2SH5 the summary counts satellites with detailed pictures, as the results headline does
+ *  - R3-13 the summary says what the results headline says: N satellites watched, K photos made public
  */
 import { describe, expect, it } from 'vitest'
 import type { Capture, Pass, Report } from '@/types'
-import { buildCardSpec, cardCrop, cloudWords, type CardInput } from '../../../api/_lib/cardSpec'
+import { buildCardSpec, buildSummarySpec, cardCrop, cloudWords, type CardInput } from '../../../api/_lib/cardSpec'
 import { waterlooReport } from '../results/__fixtures__/waterloo'
 import { isDetailed } from '../results/lib/captures'
-import { headline, type Headline } from '../results/lib/copy'
+import { ARCHIVE_DOWN_LINE, headline, photosLine, watchedPhrase } from '../results/lib/copy'
 import type { SatMeta } from '../results/lib/meta'
-import { cardSource, summaryFacts } from './card'
-import { postText, roundedPlace, summaryPostText } from './links'
+import { cardSource, summaryCardSpec, summaryFacts } from './card'
+import { postText, roundedPlace, summaryLink, summaryPostText } from './links'
 
 // The server module reads process.env and tz-lookup: imported by a runtime specifier (as spec.test.ts).
 interface ServerShare {
   shareFromRpc: (v: unknown) => { capture?: unknown } | null
   description: (s: unknown) => string
   summaryTitle: (s: { satellites: number; placeLabel: string }) => string
+  summaryDescription: (s: unknown) => string
+  summaryFromParams: (q: URLSearchParams) => unknown
 }
 const server = () => import('../../../api/_lib/share.ts' as string) as Promise<ServerShare>
 
@@ -162,54 +164,81 @@ describe('clouded words match the picture (R2SH3)', () => {
   })
 })
 
-describe('summary counts detailed photographs (R2SH5)', () => {
-  const META: Record<number, SatMeta> = {}
+describe('summary copy matches the results headline: N watched, K made public (R3-13)', () => {
+  const META: Record<number, SatMeta> = {
+    60989: { norad: 60989, name: 'Sentinel-2C', category: 'open-optical' },
+    42063: { norad: 42063, name: 'Sentinel-2B', category: 'open-optical' },
+  }
   const meta = (n: number): SatMeta => META[n] ?? { norad: n, name: `NORAD ${n}`, category: 'other' }
 
-  /** Distinct satellites with a detailed (Sentinel-2 / Landsat) picture, counted from scratch. */
-  function detailedSats(report: Report): number {
-    const byId = new Map(report.captures.map((c) => [c.id, c]))
-    const set = new Set<number>()
-    for (const p of report.passes) {
-      const c = p.verdict === 'imaged' && p.captureId ? byId.get(p.captureId) : undefined
-      if (c && isDetailed(c)) set.add(p.norad)
-    }
-    return set.size
-  }
-
-  it('counts what the results headline counts, and words it the same way', async () => {
-    const { summaryTitle } = await server()
+  it('counts N and K exactly as the results headline does, and words them the same way', async () => {
+    const { summaryTitle, summaryDescription, summaryFromParams } = await server()
     const report = await waterlooReport({ withTracks: false })
-    const f = summaryFacts(report, 'Waterloo', (n) => meta(n).name)
-    // The results headline's own count once it carries one (R2R11), else the same rule counted here.
-    const h = headline(report, meta) as Headline & { detailedSats?: number }
-    expect(f.satellites).toBe(h.detailedSats ?? detailedSats(report))
-    expect(f.satellites).toBeGreaterThan(0)
-    // Weather mosaics photographed it too, but don't count.
-    const imagedSats = new Set(report.passes.filter((p) => p.verdict === 'imaged').map((p) => p.norad)).size
-    expect(f.satellites).toBeLessThan(imagedSats)
-    const n = f.satellites
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: n, passes: 1800, best: { satName: 'Landsat 9', altitudeKm: 708 } })).toMatch(
-      new RegExp(`^${n} satellites photographed Waterloo in detail this week\\. The clearest one, Landsat 9, from 708 km up\\.`),
+    const f = summaryFacts(report, 'Waterloo', meta)
+    const h = headline(report, meta)
+    // N: distinct satellites with any pass (not only the ones with a detailed picture, as in round 2).
+    expect(f.satellites).toBe(h.flewOver)
+    expect(f.satellites).toBeGreaterThan(h.detailedSats)
+    expect(f.satellites).toBe(new Set(report.passes.map((p) => p.norad)).size)
+    // K: every real image of the week, weather mosaics included; it is the card's PHOTO readout too.
+    expect(f.counts.imaged).toBe(h.images)
+    expect(f.counts.imaged).toBe(report.passes.filter((p) => p.verdict === 'imaged').length)
+    expect(h.mosaics).toBeGreaterThan(0)
+
+    const lead = `${watchedPhrase(f.satellites)} Waterloo this week.`
+    const photos = photosLine(f.counts.imaged)
+    // The post, the card, the og:title and the og:description all say it.
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: f.satellites, photos: f.counts.imaged })).toBe(
+      `${lead} ${photos}\n\nSomething watched you this week too.\nvia @armaangupt0`,
     )
-    expect(summaryTitle({ satellites: n, placeLabel: 'Waterloo' })).toBe(`${n} satellites photographed Waterloo in detail this week`)
+    const spec = summaryCardSpec(report, 'Waterloo', meta, 'America/Toronto', 'www.watched.earth')
+    expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe(lead)
+    expect(spec.sub).toBe(photos)
+    expect(spec.readouts[0]).toEqual({ label: 'Photo', value: String(f.counts.imaged) })
+    const link = summaryFromParams(new URL(summaryLink('https://www.watched.earth', f)).searchParams)
+    expect(summaryTitle(link as { satellites: number; placeLabel: string })).toBe(lead)
+    expect(summaryDescription(link)).toMatch(new RegExp(`^${photos.replace(/\./g, '\\.')} The closest look is from \\S.+\\. What watched you this week\\?$`))
+    // Never the old words.
+    expect(JSON.stringify([spec, summaryTitle(link as { satellites: number; placeLabel: string }), summaryDescription(link)])).not.toMatch(/photographed|in detail|best look/i)
   })
 
-  it('gives a mosaics-only week n = 0 and the plain fallback', async () => {
-    const { summaryTitle } = await server()
+  it('uses the results’ singular, zero, partial and outage wording', async () => {
+    const { summaryTitle, summaryDescription } = await server()
+    const base = { placeLabel: 'Waterloo', lat: 43.47, lon: -80.54, host: '' }
+    const counts = (imaged: number) => ({ imaged, likely: 3, could: 40, overhead: 9 })
+    const one = buildSummarySpec({ ...base, satellites: 1, counts: counts(1) })
+    expect(`${one.lead} ${one.place}${one.tail}`).toBe('1 satellite watched Waterloo this week.')
+    expect(one.sub).toBe(photosLine(1))
+    expect(one.sub).toBe('1 photo was made public.')
+    expect(buildSummarySpec({ ...base, satellites: 31, counts: counts(4), partial: true }).sub).toBe(photosLine(4, { partial: true }))
+    // A zero reads "No photos were made public." (the first sentence already says "this week").
+    expect(buildSummarySpec({ ...base, satellites: 31, counts: counts(0) }).sub).toBe('No photos were made public.')
+    expect(photosLine(0)).toBe('No photos were made public this week.')
+    // Nothing flew over: the results' zero headline.
+    const none = buildSummarySpec({ ...base, satellites: 0, counts: { imaged: 0, likely: 0, could: 0, overhead: 0 } })
+    expect(`${none.lead} ${none.place}${none.tail}`).toBe('No satellite we track watched Waterloo this week.')
+    expect(summaryTitle({ satellites: 0, placeLabel: 'Waterloo' })).toBe('No satellite we track watched Waterloo this week.')
+    // The archives didn't answer: no count, the results' outage line (short on the card).
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 31, photos: 0, archiveDown: true })).toContain(` ${ARCHIVE_DOWN_LINE}\n`)
+    expect(summaryDescription({ placeLabel: 'Waterloo', counts: counts(0), archiveDown: true })).toBe(`${ARCHIVE_DOWN_LINE} What watched you this week?`)
+    expect(buildSummarySpec({ ...base, satellites: 31, counts: counts(0), archiveDown: true }).sub).toBe('The image archives didn’t answer.')
+  })
+
+  it('flags an archive outage and a still-partial report in the facts', async () => {
     const report = await waterlooReport({ withTracks: false })
+    expect(summaryFacts(report, 'Waterloo', meta)).toMatchObject({ archiveDown: undefined, partial: undefined })
+    expect(summaryFacts({ ...report, partial: true }, 'Waterloo', meta)).toMatchObject({ partial: true })
+    expect(summaryFacts({ ...report, archiveFailed: true, partial: true }, 'Waterloo', meta)).toMatchObject({ archiveDown: true, partial: undefined })
+    // Weather mosaics alone still count as photos made public.
     const mosaics = new Set(report.captures.filter((c) => !isDetailed(c)).map((c) => c.id))
     const only: Report = {
       ...report,
       captures: report.captures.filter((c) => mosaics.has(c.id)),
       passes: report.passes.filter((p: Pass) => p.verdict !== 'imaged' || (p.captureId && mosaics.has(p.captureId))),
     }
-    expect(only.passes.some((p) => p.verdict === 'imaged')).toBe(true)
-    const f = summaryFacts(only, 'Waterloo', (n) => meta(n).name)
-    expect(f.satellites).toBe(0)
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 0, passes: 1800 })).toBe(
-      '1,800 satellite passes crossed Waterloo this week. None caught a clear picture.\n\nWhat passed over you this week?',
-    )
-    expect(summaryTitle({ satellites: 0, placeLabel: 'Waterloo' })).toBe('What passed over Waterloo this week')
+    const f = summaryFacts(only, 'Waterloo', meta)
+    expect(f.counts.imaged).toBe(headline(only, meta).images)
+    expect(f.counts.imaged).toBeGreaterThan(0)
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: f.satellites, photos: f.counts.imaged })).toMatch(/ photos? (was|were) made public\.\n/)
   })
 })

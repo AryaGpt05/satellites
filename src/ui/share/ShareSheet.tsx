@@ -24,13 +24,21 @@
  * Privacy: the link carries coordinates rounded to ~1 km, and the card's crop is centred on that
  * rounded point, not the searched one. The fallback link holds only the pass facts a stored share
  * holds. Esc closes this sheet only (it does not also deselect the pass).
+ *
+ * Every post ends with the credit line "via @armaangupt0", just before the link (R3-14; see links.ts).
+ *
+ * The overlay contract (R3-16): on stacked layouts the sheet and its scrim cover the globe, so
+ * `document.documentElement.dataset.overlay = 'share'` is set while it is open and removed as it starts
+ * closing (the globe rests meanwhile and draws a fresh frame for the exit). The globe owns the reader.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ensureTz, timeZoneAt, tzReady } from '@/imagery'
 import { cityLevelLabel } from '@/lib/backend'
 import { DUR, EASE } from '@/lib/ease'
+import { useApp } from '@/state/store'
 import type { Pass, Report } from '@/types'
 import { Button, Glyph, Rule, Sheet, cx, useExitClone, useIsMobile, useMediaQuery } from '@/ui/system'
+import { isClouded } from '../results/lib/bestLook'
 import { captureFor, slug } from '../results/lib/captures'
 import { satMeta } from '../results/sats'
 import { fmtLocalDay, fmtLocalTime } from '../results/lib/time'
@@ -47,7 +55,7 @@ export interface ShareSheetProps {
   onClose: () => void
   /**
    * 'pass' (default): one pass, its card and a short /s/<id> link made on the first share.
-   * 'summary' (SH6): the week at the place: its best look and counts; the link carries the numbers
+   * 'summary' (SH6): the week at the place: its closest look and counts; the link carries the numbers
    * itself, so nothing is stored.
    */
   kind?: 'pass' | 'summary'
@@ -143,7 +151,7 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
       // The same words as the card (cloudWords): the card is clouded exactly when these are defined.
       cloud: capture && spec.sub !== undefined ? { pct: capture.cloudCoverPct, spot: capture.spot } : undefined,
     }),
-    fileName: `overflight-${slug(meta.name)}-${slug(label)}-${new Date(pass.tClosest).toISOString().slice(0, 10)}.png`,
+    fileName: `watched-${slug(meta.name)}-${slug(label)}-${new Date(pass.tClosest).toISOString().slice(0, 10)}.png`,
     input: { placeLabel: label, lat: rounded.lat, lon: rounded.lon, pass, capture, satName: meta.name },
     fallbackUrl: deepLink(origin(), label, place.lat, place.lon, pass.id, {
       norad: pass.norad,
@@ -160,18 +168,79 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
   }
 }
 
+/**
+ * Pass models by content (pass, report, zone, host, clouded variant), so a reopen is free and the one for the selected
+ * pass can be built in idle time before the tap: building it (card spec, local-time formatters, links, post text)
+ * was ~30 ms of the sheet's mount task on a phone at 4× CPU.
+ */
+const passModels = new Map<string, ShareModel>()
+const PASS_MODELS_MAX = 16
+
+function cachedPassModel(pass: Pass, report: Report, tz: string, host: string, clouded?: boolean): ShareModel {
+  const p = report.place
+  const key = [pass.id, pass.captureId ?? '', report.generatedAt, report.passes.length, report.captures.length, p.lat, p.lon, p.label, tz, host, clouded ? 1 : 0].join('|')
+  let m = passModels.get(key)
+  if (!m) {
+    m = passModel(pass, report, tz, host, clouded)
+    passModels.set(key, m)
+    if (passModels.size > PASS_MODELS_MAX) passModels.delete(passModels.keys().next().value as string)
+  }
+  return m
+}
+
+/** Build the selected pass's share model while the main thread is idle (never on the tap). */
+function warmSelectedPass(): () => void {
+  let cancel: (() => void) | null = null
+  return useApp.subscribe((st, prev) => {
+    if (st.selectedPassId === prev.selectedPassId && st.report === prev.report) return
+    cancel?.()
+    cancel = null
+    const report = st.report
+    const id = st.selectedPassId
+    if (!report || !id || !tzReady()) return
+    cancel = whenIdle(() => {
+      cancel = null
+      const pass = report.passes.find((x) => x.id === id)
+      if (!pass) return
+      const c = captureFor(report, pass)
+      try {
+        cachedPassModel(pass, report, timeZoneAt(report.place.lat, report.place.lon), location.host, !!c && isClouded(c))
+      } catch {
+        /* a warm-up only: the sheet builds it on open */
+      }
+    }, 3000)
+  })
+}
+if (typeof window !== 'undefined') warmSelectedPass()
+
 function summaryModel(report: Report, tz: string, host: string): ShareModel {
   const label = publicLabelOf(report.place)
-  const name = (norad: number) => satMeta(norad).name
-  const facts = summaryFacts(report, label, name)
-  const passes = facts.counts.likely + facts.counts.could + facts.counts.overhead + facts.counts.imaged
+  const facts = summaryFacts(report, label, satMeta)
   return {
     title: 'Share this week',
-    spec: summaryCardSpec(report, label, name, tz, host),
-    text: summaryPostText({ placeLabel: label, satellites: facts.satellites, passes, best: facts.best }),
-    fileName: `overflight-${slug(label)}-week-${new Date(report.windowEnd).toISOString().slice(0, 10)}.png`,
+    spec: summaryCardSpec(report, label, satMeta, tz, host),
+    text: summaryPostText({ placeLabel: label, satellites: facts.satellites, photos: facts.counts.imaged, archiveDown: facts.archiveDown, partial: facts.partial }),
+    fileName: `watched-${slug(label)}-week-${new Date(report.windowEnd).toISOString().slice(0, 10)}.png`,
     fallbackUrl: summaryLink(origin(), facts),
   }
+}
+
+/**
+ * The overlay contract (R3-16): `document.documentElement.dataset.overlay = 'share'` while `on`; an overlay that was
+ * already up (the lightbox) gets its value back when this one goes.
+ */
+function useOverlayAttr(on: boolean) {
+  useLayoutEffect(() => {
+    if (!on) return
+    const root = document.documentElement
+    const prev = root.dataset.overlay
+    root.dataset.overlay = 'share'
+    return () => {
+      if (root.dataset.overlay !== 'share') return
+      if (prev && prev !== 'share') root.dataset.overlay = prev
+      else delete root.dataset.overlay
+    }
+  }, [on])
 }
 
 export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: ShareSheetProps) {
@@ -189,14 +258,16 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   }, [tzLoaded])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- tzLoaded: re-resolve once the table is in
   const tz = useMemo(() => timeZoneAt(place.lat, place.lon), [place.lat, place.lon, tzLoaded])
-  const host = typeof location !== 'undefined' ? location.host : 'overflight'
+  const host = typeof location !== 'undefined' ? location.host : 'www.watched.earth'
   const summary = kind === 'summary' || !pass
   const model = useMemo(
-    () => (summary || !pass ? summaryModel(report, tz, host) : passModel(pass, report, tz, host, clouded)),
+    () => (summary || !pass ? summaryModel(report, tz, host) : cachedPassModel(pass, report, tz, host, clouded)),
     [summary, pass, report, tz, host, clouded],
   )
   const { spec, text, fileName, input, fallbackUrl } = model
   const stacked = useIsMobile()
+  // Phones and portrait tablets: the sheet and its scrim cover the globe, which can rest meanwhile.
+  useOverlayAttr(stacked)
   const coarse = useMediaQuery(COARSE_QUERY)
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   const nativeFirst = coarse && canNativeShare
@@ -452,6 +523,8 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   // Pressing any share action starts the link a beat before the click lands.
   const warm = () => void ensureLink()
   const url = link.kind === 'ready' ? link.url : ''
+  // The link is the long fallback (the short /s/ link could not be made): the field says so on hover.
+  const direct = link.kind === 'ready' && !link.short && !!input
   const pngLabel = png === 'err' ? 'Try again' : 'Save PNG'
 
   const actions = nativeFirst ? (
@@ -505,21 +578,24 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
     <div className={s.content}>
       <ShareCard spec={spec} />
       {actions}
-      {link.kind !== 'idle' ? (
-        <div className={s.linkRow}>
-          <label htmlFor="share-link" className={s.linkLabel}>
-            {link.kind === 'ready' && !link.short && input ? 'Link · direct' : 'Link'}
-          </label>
-          <input
-            id="share-link"
-            ref={inputRef}
-            className={cx(s.link, link.kind !== 'ready' && s.linkPending)}
-            readOnly
-            value={link.kind === 'ready' ? url : 'Creating link…'}
-            onFocus={(e) => link.kind === 'ready' && e.currentTarget.select()}
-          />
-        </div>
-      ) : null}
+      {/* Always laid out (R3 share): the row appearing on the first press re-centred the dialog (and grew the
+          phone sheet) under the pointer, by 20–27 px, so the click landed beside the button and was lost. */}
+      <div className={s.linkRow} data-link={link.kind}>
+        <label htmlFor="share-link" className={s.linkLabel}>
+          Link
+        </label>
+        <input
+          id="share-link"
+          ref={inputRef}
+          className={cx(s.link, link.kind !== 'ready' && s.linkPending)}
+          // The long fallback link (the short /s/ link couldn't be made) says so on hover, not in a label that
+          // would change width and slide the field sideways.
+          title={direct ? 'Direct link: the short link could not be made right now' : undefined}
+          readOnly
+          value={link.kind === 'ready' ? url : link.kind === 'pending' ? 'Creating link…' : 'Made when you share'}
+          onFocus={(e) => link.kind === 'ready' && e.currentTarget.select()}
+        />
+      </div>
       <p className={s.text}>
         <span className={s.textLabel}>Post</span>
         {/* Paragraphs as the post will have them (a blank line on X), set a little tighter here. */}

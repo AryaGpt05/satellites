@@ -4,8 +4,9 @@
  *   composer.
  *
  * Also owns the frame-rate policy: adaptive DPR that only changes while nothing choreographed is moving
- * (PERF-08), no rendering at all behind the About page or in a hidden tab (PERF-10), and the boot-time shader
- * warm-up so no overlay program links on frame 1 of a flight (PERF-02).
+ * (PERF-08), no rendering at all under a full-screen overlay (the lightbox, About, the phone share sheet: R3-16) or
+ * in a hidden tab (PERF-10), and the boot-time shader warm-up so no overlay program links on frame 1 of a flight
+ * (PERF-02).
  */
 import { useFrame, useThree } from '@react-three/fiber'
 import type { EffectComposer } from 'postprocessing'
@@ -32,7 +33,7 @@ import { Imagery } from './Imagery'
 import { PassOverlay } from './PassOverlay'
 import { PlaceMarker } from './PlaceMarker'
 import { usePost } from './Post'
-import { detectTier } from './quality'
+import { declineLevel, detectTier } from './quality'
 import { FRAME, RuntimeContext, useRuntime, type GlobeRuntime } from './runtime'
 import { SatelliteField } from './SatelliteField'
 import { Stars } from './Stars'
@@ -214,9 +215,25 @@ function ShaderWarmup({ composer }: { composer: EffectComposer }) {
 // ───────────────────────────── frame-rate policy ─────────────────────────────
 
 /**
- * Frame-loop policy (PERF-10):
- *  - behind the opaque About page or in a hidden tab: no rendering at all ('never'); resume with a fresh frame
- *    (Clock and CameraDirector clamp the gap, so nothing jumps);
+ * Full-screen overlays that cover the globe (R3-16). Contract: while one is open it sets
+ * `document.documentElement.dataset.overlay` to its name, and deletes it as it starts closing (results: the
+ * lightbox; shell: About; share: the share sheet on stacked layouts). The globe owns the reader.
+ */
+const COVERING_OVERLAYS = new Set(['lightbox', 'about', 'share'])
+export const overlayCovers = (doc: Document | undefined = typeof document === 'undefined' ? undefined : document) =>
+  !!doc && COVERING_OVERLAYS.has(doc.documentElement.dataset.overlay ?? '')
+/**
+ * With something moving on the globe when an overlay opens (a flight, a replay, the acquisition settle), it keeps
+ * rendering this long, until the overlay's backdrop is up (the scrims fade in over 240 ms), so motion never visibly
+ * freezes under a half-transparent scrim. A still globe pauses at once.
+ */
+export const OVERLAY_GRACE_MS = 280
+
+/**
+ * Frame-loop policy (PERF-10, R3-16):
+ *  - under a covering overlay (the lightbox, About, the phone share sheet) or in a hidden tab: no rendering at all
+ *    ('never'); when it goes, the loop resumes at once with a fresh frame (Clock and CameraDirector clamp the gap,
+ *    so nothing jumps), drawn before the overlay's exit has uncovered anything;
  *  - phones idling on the landing (no flight, no touch for 1.5 s, no replay): every 2nd animation frame, since
  *    the only motion is the 0.6°/s drift. A touch on the canvas restores full rate at once.
  */
@@ -238,6 +255,7 @@ function FrameloopControl() {
     }
     const apply = (next: 'always' | 'never' | 'half') => {
       if (next === mode.current) return
+      if (mode.current === 'never') rt.resumedAt = performance.now()
       mode.current = next
       cancelAnimationFrame(raf)
       raf = 0
@@ -250,15 +268,40 @@ function FrameloopControl() {
         setFrameloop('demand')
         raf = requestAnimationFrame(tick)
       }
+      if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
+        const w = window as unknown as { __loopLog?: unknown[] }
+        ;(w.__loopLog ??= []).push({ t: Math.round(performance.now()), mode: next, overlay: document.documentElement.dataset.overlay ?? '' })
+      }
     }
-    const paused = () => useApp.getState().aboutOpen || (typeof document !== 'undefined' && document.hidden)
-    const sync = () => apply(paused() ? 'never' : mode.current === 'never' ? 'always' : mode.current)
+    // When the current cover appeared (NaN: none up).
+    let coveredAt = NaN
+    let grace = 0
+    const moving = () => {
+      const now = performance.now()
+      return rt.camera.flying || rt.acq.armed || now - rt.acq.capturedAt < 2500 || useApp.getState().timeMode === 'replay'
+    }
+    const sync = () => {
+      window.clearTimeout(grace)
+      const covered = useApp.getState().aboutOpen || overlayCovers()
+      if (!covered) coveredAt = NaN
+      else if (Number.isNaN(coveredAt)) coveredAt = performance.now()
+      let pause = typeof document !== 'undefined' && document.hidden
+      if (covered && !pause) {
+        const wait = mode.current === 'never' || !moving() ? 0 : OVERLAY_GRACE_MS - (performance.now() - coveredAt)
+        if (wait > 0) grace = window.setTimeout(sync, wait)
+        else pause = true
+      }
+      apply(pause ? 'never' : mode.current === 'never' ? 'always' : mode.current)
+    }
     sync()
     const unsub = useApp.subscribe((s, prev) => {
       if (s.aboutOpen !== prev.aboutOpen) sync()
       // Anything that starts motion wakes the loop before the next frame.
       if (mode.current === 'half' && (s.phase !== prev.phase || s.camera !== prev.camera || s.timeMode !== prev.timeMode)) apply('always')
     })
+    // The overlay contract: <html data-overlay>, written by the overlays themselves.
+    const overlays = new MutationObserver(sync)
+    overlays.observe(document.documentElement, { attributes: true, attributeFilter: ['data-overlay'] })
     const wake = () => {
       if (mode.current === 'half') apply('always')
     }
@@ -268,6 +311,8 @@ function FrameloopControl() {
     applyRef.current = apply
     return () => {
       unsub()
+      overlays.disconnect()
+      window.clearTimeout(grace)
       cancelAnimationFrame(raf)
       document.removeEventListener('visibilitychange', sync)
       gl.domElement.removeEventListener('pointerdown', wake)
@@ -304,15 +349,25 @@ const INCLINE_FPS = 58
 const FLIPFLOPS = 2
 /** No DPR change this long after an acquisition's capture (its settle and the image's last strokes). */
 const ACQ_QUIET_MS = 2500
+/**
+ * Before a DPR change the composer holds its frames (the canvas keeps the last image) until the GPU has finished
+ * everything queued: a drawing-buffer resize waits for that queue synchronously (on a slow GPU it blocked the main
+ * thread for ~0.5 s; G-M1). A fence says when; the hold is capped (frames and ms), and without fences it is 2 frames.
+ */
+const DPR_DRAIN_FRAMES = 2
+const DPR_DRAIN_MAX_FRAMES = 15
+const DPR_DRAIN_MAX_MS = 400
 
 /**
- * DPR policy (PERF-08). Phones start at 1.5 (floor 1.0) and only reach 2.0 after ≥ 58 fps for 3 s; desktops
- * start at min(2, device). A change reallocates the composer's targets, so changes are QUEUED and applied only
+ * DPR policy (PERF-08, G-M2: never above 2). Phones start at 1.5 (floor 1.0) and only reach 2.0 after ≥ 58 fps for
+ * 3 s; desktops start at min(2, device). A decline goes straight to the level the measured rate calls for
+ * (declineLevel), so a slow device reallocates once. A change reallocates the composer's targets, so changes are QUEUED and applied only
  * when no camera flight is running (and ≥ 1 s after one lands, past the reticle lock-in), more than 2 s after a
  * phase change and after store.motionBusyUntil.
  */
 function AdaptiveDpr() {
   const rt = useRuntime()
+  const gl = useThree((s) => s.gl)
   const setDpr = useThree((s) => s.setDpr)
   const ctl = useMemo(() => {
     const device = Math.min(2, Math.max(1, typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1))
@@ -332,6 +387,13 @@ function AdaptiveDpr() {
       refresh: 0,
       flips: 0,
       lastDir: 0,
+      /** Sum of the fps of the current run of low windows (the decline target uses their mean) */
+      lowSum: 0,
+      resumeSeen: rt.resumedAt,
+      /** Frames held so far in the drain before the queued change applies (-1: not draining) */
+      drain: -1,
+      drainAt: 0,
+      fence: null as WebGLSync | null,
     }
   }, [rt])
 
@@ -352,12 +414,13 @@ function AdaptiveDpr() {
   useFrame(() => {
     const now = performance.now()
     const c = ctl
-    // Half-rate idle frames say nothing about the device: restart the window.
-    if (rt.throttled) {
+    // Half-rate idle frames say nothing about the device, nor does the gap of a pause: restart the window.
+    if (rt.throttled || rt.resumedAt !== c.resumeSeen) {
+      c.resumeSeen = rt.resumedAt
       c.windowStart = -1
       c.frames = 0
       c.highSince = -1
-      return
+      if (rt.throttled) return
     }
     if (c.windowStart < 0) c.windowStart = now
     c.frames++
@@ -368,14 +431,24 @@ function AdaptiveDpr() {
       c.windowStart = now
       c.refresh = Math.max(c.refresh, fps)
       const lower = c.refresh > 90 ? 50 : 40
-      c.low = fps < lower ? c.low + 1 : 0
+      if (fps < lower) {
+        c.low++
+        c.lowSum += fps
+      } else {
+        c.low = 0
+        c.lowSum = 0
+      }
       if (fps >= INCLINE_FPS) {
         if (c.highSince < 0) c.highSince = now
       } else c.highSince = -1
       if (c.flips <= FLIPFLOPS) {
         if (c.low >= DECLINE_WINDOWS && c.index > 0) {
-          c.want = c.index - 1
+          // Straight to the level the measured rate calls for: one reallocation, not a staircase (G-M1). A change
+          // still queued from earlier only ever goes further down.
+          const to = declineLevel(c.levels, c.index, c.lowSum / c.low, lower)
+          c.want = c.want >= 0 ? Math.min(c.want, to) : to
           c.low = 0
+          c.lowSum = 0
         } else if (c.highSince >= 0 && now - c.highSince >= INCLINE_MS && c.index < c.levels.length - 1) {
           c.want = c.index + 1
           c.highSince = -1
@@ -390,16 +463,50 @@ function AdaptiveDpr() {
         rt.acq.armed || now - rt.acq.capturedAt < ACQ_QUIET_MS || (st.timeMode === 'replay' && now - rt.replayStartedAt < REPLAY_QUIET_MS)
       const quiet =
         !sequence && !rt.camera.flying && now - rt.camera.arrivedAt > 1000 && now - rt.phaseEnteredAt > 2000 && now > st.motionBusyUntil
-      if (quiet) {
+      const g = gl.getContext() as WebGL2RenderingContext
+      const fences = typeof g.fenceSync === 'function'
+      const endDrain = () => {
+        if (c.fence) g.deleteSync(c.fence)
+        c.fence = null
+        c.drain = -1
+        rt.skipRender = 0
+      }
+      let go = false
+      if (!quiet) {
+        if (c.drain >= 0) endDrain()
+      } else if (c.drain < 0) {
+        // Hold the next frames so the GPU drains, then resize on a frame with nothing queued.
+        c.drain = 0
+        c.drainAt = now
+        if (fences) {
+          c.fence = g.fenceSync(g.SYNC_GPU_COMMANDS_COMPLETE, 0)
+          g.flush()
+        }
+        rt.skipRender = 1
+      } else {
+        c.drain++
+        // Non-blocking: the status is refreshed between frames.
+        const done = c.fence ? g.getSyncParameter(c.fence, g.SYNC_STATUS) === g.SIGNALED : c.drain >= DPR_DRAIN_FRAMES
+        go = done || c.drain >= DPR_DRAIN_MAX_FRAMES || now - c.drainAt > DPR_DRAIN_MAX_MS
+        if (go) {
+          c.drain = Math.max(0, c.drain)
+          if (c.fence) g.deleteSync(c.fence)
+          c.fence = null
+          rt.skipRender = 0
+        } else rt.skipRender = 1
+      }
+      if (go) {
+        const held = { frames: c.drain, ms: Math.round(now - c.drainAt) }
         const dir = Math.sign(c.want - c.index)
         if (c.lastDir !== 0 && dir !== c.lastDir) c.flips++
         c.lastDir = dir
         c.index = c.want
         c.want = -1
+        c.drain = -1
         setDpr(c.levels[c.index])
-        if (import.meta.env.DEV) {
+        if (import.meta.env.DEV || import.meta.env.MODE === 'inspect') {
           const w = window as unknown as { __dprLog?: unknown[] }
-          ;(w.__dprLog ??= []).push({ t: Math.round(now), dpr: c.levels[c.index], flying: rt.camera.flying, sincePhase: Math.round(now - rt.phaseEnteredAt), phase: rt.phase })
+          ;(w.__dprLog ??= []).push({ t: Math.round(now), dpr: c.levels[c.index], held, flying: rt.camera.flying, sincePhase: Math.round(now - rt.phaseEnteredAt), phase: rt.phase })
         }
       }
     }

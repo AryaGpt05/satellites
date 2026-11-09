@@ -10,16 +10,16 @@
  * imports it by relative path, the serverless functions import it directly.
  *
  *   ┌──────────── 630 ────────────┬──────────────── 570 ───────────────┐
- *   │ SENTINEL-2C · MSI · 10 M  ├1 KM┤│ OVERFLIGHT    SUN 1 NOV 2026 · 11:21 EST│
+ *   │ SENTINEL-2C · MSI · 10 M  ├1 KM┤│ Watched.      SUN 1 NOV 2026 · 11:21 EST│
  *   │                             │ ─────────────────────────────────── │
- *   │                             │ ◆ PHOTOGRAPHED        43.47°N 80.54°W│
+ *   │                             │ ◆ WATCHED             43.47°N 80.54°W│
  *   │            ⊕                │ Sentinel-2C                         │
- *   │   real crop (or geometry)   │ photographed                        │
+ *   │   real crop (or geometry)   │ watched                             │
  *   │                             │ Waterloo.                           │
  *   │                             │ ─────────────────────────────────── │
  *   │                             │ ALTITUDE    OFF-NADIR     PIXEL      │
  *   │ CONTAINS MODIFIED COPERNICUS│ 795 KM      5.3°          10 M       │
- *   │                             │ SEE WHAT PHOTOGRAPHED YOU  overflight.app│
+ *   │                             │ SEE WHAT WATCHED YOU  www.watched.earth│
  *   └─────────────────────────────┴─────────────────────────────────────┘
  *
  * Text is stored in sentence case; mono rows are uppercased by the renderers (as CSS does).
@@ -184,14 +184,14 @@ export interface CardSpec {
   verdict: Verdict
   /** Top right: "Sun 1 Nov 2026 · 11:21 EST" ("" when unknown) */
   stamp: string
-  /** Verdict row: "Photographed" (one vocabulary: docs/DESIGN.md §7) */
+  /** Verdict row: "Watched" (one vocabulary: docs/DESIGN.md §7) */
   verdictLabel: string
   verdictTone: Tone
   /** "43.47°N 80.54°W" (the rounded share point) */
   coords: string
   lead: string
   place: string
-  /** "." after the place, or "" when the place was cut short with an ellipsis */
+  /** "." after the place (" this week." on the summary card), or "" when the place was cut short with an ellipsis */
   tail: string
   /** Clouded: cloudWords().sub, e.g. "Mostly cloud: 81% of the scene." */
   sub?: string
@@ -202,7 +202,7 @@ export interface CardSpec {
   readoutSize?: number
   /** Footer left: the invitation back */
   footLeft: string
-  /** Footer right: "overflight.app" ("" hides it) */
+  /** Footer right: "www.watched.earth" ("" hides it) */
   host: string
   plate: Plate
 }
@@ -246,10 +246,13 @@ export interface CardInput {
   host: string
 }
 
-/** The one verdict vocabulary (docs/DESIGN.md §7; mirrors src/ui/results/lib/meta.ts, kept equal by a test). */
+/**
+ * The one verdict vocabulary (docs/DESIGN.md §7; mirrors src/ui/results/lib/meta.ts, kept equal by a test).
+ * Owner override (latest): user-facing copy says "watched", never "photographed".
+ */
 export const VERDICT_WORDS: Record<Verdict, { title: string; verb: string }> = {
-  imaged: { title: 'Photographed', verb: 'photographed' },
-  likely: { title: 'Likely photographed', verb: 'swept over' },
+  imaged: { title: 'Watched', verb: 'watched' },
+  likely: { title: 'Likely watched', verb: 'swept over' },
   could: { title: 'Could have pointed here', verb: 'passed within view of' },
   overhead: { title: 'Passed overhead', verb: 'passed over' },
 }
@@ -768,58 +771,98 @@ export function buildCardSpec(input: CardInput): CardSpec {
   }
 }
 
-// ── Summary card (share SH6): the week at a place, with its best look ───────────────────────
+// ── Summary card (share SH6): the week at a place, with its closest look ────────────────────
 
 export interface SummaryInput {
   placeLabel: string
   /** The rounded share point (2 decimals) */
   lat: number
   lon: number
-  /** Distinct satellites that photographed the place in detail (Sentinel-2 / Landsat; weather mosaics don't count) */
+  /**
+   * N: distinct satellites that watched the place this week, i.e. with any pass (imaged, likely, could, overhead),
+   * geostationary watchers excluded (they don't fly over). The results headline's number (headline().flewOver).
+   */
   satellites: number
+  /** The four verdict counts. `imaged` is K: the real images made public this week (results' headline().images). */
   counts: { imaged: number; likely: number; could: number; overhead: number }
+  /** The image archives didn't answer: K is unknown, so the photos line says that instead of a count. */
+  archiveDown?: boolean
+  /** The archives were still answering when this was shared: K is a floor ("At least 4 photos…"). */
+  partial?: boolean
   /** End of the 7-day window, epoch ms */
   windowEnd?: number
   timeZone?: string
-  /** The clearest real picture of the week (results' pickBestLook), if any */
+  /** The closest look of the week (results' pickBestLook: the most zoomed-in clear photo), if any */
   best?: { satName: string; tClosest?: number; capture: CardCaptureInput }
   host: string
 }
 
 const SHORT: Record<Verdict, string> = { imaged: 'Photo', likely: 'Likely', could: 'Could', overhead: 'Overhead' }
 
-/** "2 satellites photographed Waterloo in detail." over the week's best picture, with the four verdict counts. */
+/** The headline's lead (owner F, latest): "31 satellites watched" / "1 satellite watched" / "No satellite we track watched". */
+export function watchedLead(n: number): string {
+  const v = Math.max(0, Math.round(n))
+  return v > 0 ? `${int(v)} ${v === 1 ? 'satellite' : 'satellites'} watched` : 'No satellite we track watched'
+}
+
+/** The archive outage, as the results' second line says it (src/ui/results/lib/copy.ts ARCHIVE_DOWN_LINE). */
+export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public photos right now.'
+/** The same, where the card's sub-line has room for one line. */
+export const ARCHIVE_DOWN_SHORT = 'The image archives didn’t answer.'
+
+/**
+ * The second line (owner F): "31 photos were made public." / "1 photo was made public." / "At least 4 photos were made
+ * public." The results panel's photosLine words, except a zero: the summary's first sentence already says "this week",
+ * so it reads "No photos were made public." rather than repeating it.
+ */
+export function photosSentence(k: number, opts: { archiveDown?: boolean; partial?: boolean; short?: boolean } = {}): string {
+  if (opts.archiveDown) return opts.short ? ARCHIVE_DOWN_SHORT : ARCHIVE_DOWN_LINE
+  const v = Math.max(0, Math.round(k))
+  if (v <= 0) return 'No photos were made public.'
+  const lead = opts.partial ? 'At least ' : ''
+  return v === 1 ? `${lead}1 photo was made public.` : `${lead}${int(v)} photos were made public.`
+}
+
+/** "31 satellites watched Waterloo this week." (R3-13: the summary share's first sentence, everywhere it is printed) */
+export function summaryHeadline(i: Pick<SummaryInput, 'satellites' | 'placeLabel'>): string {
+  return `${watchedLead(i.satellites)} ${i.placeLabel} this week.`
+}
+
+/** "31 satellites watched Waterloo this week. 12 photos were made public." (R3-13, owner F) */
+export function summarySentences(i: Pick<SummaryInput, 'satellites' | 'placeLabel' | 'counts' | 'archiveDown' | 'partial'>): string {
+  return `${summaryHeadline(i)} ${photosSentence(i.counts.imaged, i)}`
+}
+
+/** "31 satellites watched *Waterloo this week.*" + "12 photos were made public." over the week's closest look, with the four verdict counts. */
 export function buildSummarySpec(i: SummaryInput): CardSpec {
   const n = Math.max(0, Math.round(i.satellites))
   const cps = Array.from(i.placeLabel)
   const place = cps.length > PLACE_MAX ? `${cps.slice(0, PLACE_MAX - 1).join('').trimEnd()}…` : i.placeLabel
-  const passes = i.counts.likely + i.counts.could + i.counts.overhead
-  // A week with no picture says so plainly, in the summary post's words. The count is of detailed
-  // pictures (Sentinel-2 / Landsat), worded as the results headline: "… photographed Waterloo in detail."
-  const lead = n > 0 ? `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} photographed` : `${int(passes)} satellite ${passes === 1 ? 'pass' : 'passes'} crossed`
-  const tail = place.endsWith('…') ? '' : n > 0 ? ' in detail.' : '.'
+  // The results headline, in the card's two type faces (R3-13): the condensed lead, then the serif place.
+  const lead = watchedLead(n)
+  const tail = place.endsWith('…') ? '' : ' this week.'
   let plate: Plate
   const c = i.best?.capture
   if (c && i.best) {
     const crop = cardCrop(c)
     const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection] ?? crop.metresPerPx
-    const chip = plateChip(`Best look · ${i.best.satName} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
+    const chip = plateChip(`Closest look · ${i.best.satName} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
     const credit = plateChip(creditFor(c, i.best.tClosest), { left: INSET, bottom: INSET }, 'bone2', CARD_FS.micro)
     const scale = scaleFor(crop.metresPerPx)
-    plate = { kind: 'image', crop, chip, credit, scale, overlay: imageOverlay([chip, credit], scale), fallback: emptyPlate() }
-  } else plate = emptyPlate()
+    plate = { kind: 'image', crop, chip, credit, scale, overlay: imageOverlay([chip, credit], scale), fallback: emptyPlate(planNote('imaged', 'transient')) }
+  } else plate = emptyPlate('No public photo this week')
   const day = i.windowEnd !== undefined ? localStamp(i.windowEnd, i.timeZone).split(' · ')[0] : ''
   const readouts: Readout[] = (['imaged', 'likely', 'could', 'overhead'] as const).map((v) => ({ label: SHORT[v], value: int(i.counts[v]) }))
   return {
     verdict: n > 0 ? 'imaged' : 'overhead',
     stamp: day ? `7 days to ${day}` : 'Last 7 days',
-    verdictLabel: c && i.best ? `Best look · ${i.best.tClosest !== undefined ? localStamp(i.best.tClosest, i.timeZone).split(' · ')[0].replace(/ \d{4}$/, '') : i.best.satName}` : 'This week',
+    verdictLabel: c && i.best ? `Closest look · ${i.best.tClosest !== undefined ? localStamp(i.best.tClosest, i.timeZone).split(' · ')[0].replace(/ \d{4}$/, '') : i.best.satName}` : 'This week',
     verdictTone: n > 0 ? 'signal' : 'bone2',
     coords: fmtCoords(i.lat, i.lon),
     lead,
     place,
     tail,
-    sub: n > 0 ? undefined : 'None caught a clear picture.',
+    sub: photosSentence(i.counts.imaged, { ...i, short: true }),
     // The tail sets on the place line, so it counts toward what the place line must hold.
     size: headlineSize(lead, `${place}${tail}`),
     readouts,
@@ -831,14 +874,14 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
   }
 }
 
-/** No picture this week: the instrument face alone (grid, reticle, a plain note). */
-function emptyPlate(): PlanPlate {
+/** No picture to show (none this week, or the archive was slow): the instrument face alone (grid, reticle, a plain note). */
+function emptyPlate(note: string): PlanPlate {
   const S = PLATE
   const c = S / 2
   const step = S / 12
   let grid = ''
   for (let k = 1; k < 12; k++) grid += `M${k * step} 0V${S}M0 ${k * step}H${S}`
-  const chips = [plateChip('No clear picture this week', { left: INSET, bottom: INSET }, 'bone2')]
+  const chips = [plateChip(note, { left: INSET, bottom: INSET }, 'bone2')]
   const scale: ScaleBar = { px: 0, label: '' }
   return {
     kind: 'plan',

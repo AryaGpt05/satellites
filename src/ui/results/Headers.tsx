@@ -28,7 +28,7 @@ import { useOnce } from './once'
 import { ReplayStrip } from './ReplayControls'
 import { Headline, MoreLine } from './Summary'
 import { clearPass } from './actions'
-import { ONE_LINE_TITLE_QUERY } from './shell'
+import { ONE_LINE_TITLE_QUERY, SHORT_DESK_QUERY } from './shell'
 import { glyphForPass, markColorVar } from './lib/meta'
 import { stepPass } from './lib/timeline'
 import { fmtDayMonth, zoneLabel } from './lib/time'
@@ -94,27 +94,7 @@ export function OverviewHeader(props: OverviewHeaderProps) {
             </>
           )}
         </span>
-        {computing ? (
-          <button type="button" className={s.crumb} onClick={props.onCancel} aria-keyshortcuts="Escape">
-            Cancel
-            <span className={s.kbdHover} aria-hidden>
-              <Kbd>Esc</Kbd>
-            </span>
-          </button>
-        ) : searching ? (
-          <button type="button" className={s.crumb} onClick={props.onCloseSearch}>
-            <Glyph name="close" size={11} />
-            Close
-          </button>
-        ) : (
-          <button type="button" className={s.crumb} onClick={props.onOpenSearch ?? props.onBack} aria-keyshortcuts="Escape">
-            <Glyph name="search" size={11} />
-            New search
-            <span className={s.kbdHover} aria-hidden>
-              <Kbd>Esc</Kbd>
-            </span>
-          </button>
-        )}
+        <HeadAction mode={computing ? 'cancel' : searching ? 'close' : 'search'} onCancel={props.onCancel} onClose={props.onCloseSearch} onSearch={props.onOpenSearch ?? props.onBack} />
       </div>
 
       {showPlaceRow && place ? (
@@ -140,6 +120,35 @@ export function OverviewHeader(props: OverviewHeaderProps) {
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * The header's one action: Cancel (computing) · New search (results) · Close (the inline search open). One button
+ * whose three labels share a grid cell, so it keeps the width of the longest: switching never moves it, or the row
+ * (R3-8: no layout shift at results arrival, New search, a new place).
+ */
+function HeadAction({ mode, onCancel, onClose, onSearch }: { mode: 'cancel' | 'search' | 'close'; onCancel: () => void; onClose: () => void; onSearch: () => void }) {
+  const label = (m: typeof mode) => cx(s.crumbLabel, mode !== m && s.crumbLabelOff)
+  return (
+    <button type="button" className={s.crumb} onClick={mode === 'cancel' ? onCancel : mode === 'close' ? onClose : onSearch} aria-keyshortcuts="Escape">
+      <span className={s.crumbLabels}>
+        <span className={label('cancel')} aria-hidden={mode !== 'cancel' || undefined}>
+          Cancel
+        </span>
+        <span className={label('search')} aria-hidden={mode !== 'search' || undefined}>
+          <Glyph name="search" size={11} />
+          New search
+        </span>
+        <span className={label('close')} aria-hidden={mode !== 'close' || undefined}>
+          <Glyph name="close" size={11} />
+          Close
+        </span>
+      </span>
+      <span className={s.kbdHover} aria-hidden>
+        <Kbd>Esc</Kbd>
+      </span>
+    </button>
   )
 }
 
@@ -238,6 +247,9 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
   const t = model.times(pass)
   // Phones and short laptops: the name and the time on one line (R2R1: the pass photo gets the height).
   const oneLine = useMediaQuery(ONE_LINE_TITLE_QUERY) || mobile
+  // Laptops up to 860 px tall (1280×800): the back crumb rides on the title's row, so the pass photo reaches the
+  // column's full width (R3-6).
+  const inline = useMediaQuery(SHORT_DESK_QUERY) && !mobile
   // The strip shows once the camera has arrived and the scene is replaying or held (MOB-16).
   // Once shown in this header, it stays while the scene is in replay time: a quiet selection's short camera
   // move never blinks it off and on (A1).
@@ -251,6 +263,45 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
   const firstId = useRef(pass.id)
   const titleKey = photo ? pass.id : 'one'
   const titleCls = photo && pass.id !== firstId.current ? s.titleIn : undefined
+  const stepper = (
+    <span className={cx(s.stepper, photo && s.stepperOff)} aria-hidden={photo || undefined}>
+      <span className={s.position} aria-label={`Pass ${index + 1} of ${lane.length} of this kind`}>
+        {index + 1} / {lane.length}
+      </span>
+      <button type="button" className={s.stepBtn} onClick={() => step(-1)} disabled={index <= 0} aria-label="Previous pass of this kind" aria-keyshortcuts="ArrowLeft" title="Previous (←)">
+        <Mark name="chevron-left" size={12} />
+      </button>
+      <button type="button" className={s.stepBtn} onClick={() => step(1)} disabled={index >= lane.length - 1} aria-label="Next pass of this kind" aria-keyshortcuts="ArrowRight" title="Next (→)">
+        <Mark name="chevron-right" size={12} />
+      </button>
+    </span>
+  )
+  if (inline)
+    return (
+      <div className={s.detailHead}>
+        {shared ? (
+          <p className={s.sharedTag}>
+            <span className={s.sharedDot} aria-hidden />
+            <span className={s.sharedText}>
+              Shared with you · {shared.sat} photographed {shared.place}
+            </span>
+          </p>
+        ) : null}
+        <div className={cx(s.headTop, s.headInline)}>
+          <button type="button" className={cx(s.crumb, s.crumbIcon)} onClick={clearPass} aria-label="All passes" title="All passes (Esc)" aria-keyshortcuts="Escape">
+            <Glyph name="arrow-left" size={12} />
+          </button>
+          <div key={titleKey} className={cx(s.passTitle, s.passTitleCompact, s.passTitleInline, titleCls)}>
+            <Mark name={glyphForPass(pass.verdict, meta.category)} size={14} color={markColorVar(pass.verdict, meta.category)} />
+            <h1 className={s.passName}>{meta.name}</h1>
+            <span className={s.passWhen}>
+              {t.day} · {t.time} {t.zone}
+            </span>
+          </div>
+          {photo ? null : stepper}
+        </div>
+      </div>
+    )
   return (
     <div className={s.detailHead}>
       {shared ? (
@@ -269,25 +320,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
             <Kbd>Esc</Kbd>
           </span>
         </button>
-        <span className={cx(s.stepper, photo && s.stepperOff)} aria-hidden={photo || undefined}>
-          <span className={s.position} aria-label={`Pass ${index + 1} of ${lane.length} of this kind`}>
-            {index + 1} / {lane.length}
-          </span>
-          <button type="button" className={s.stepBtn} onClick={() => step(-1)} disabled={index <= 0} aria-label="Previous pass of this kind" aria-keyshortcuts="ArrowLeft" title="Previous (←)">
-            <Mark name="chevron-left" size={12} />
-          </button>
-          <button
-            type="button"
-            className={s.stepBtn}
-            onClick={() => step(1)}
-            disabled={index >= lane.length - 1}
-            aria-label="Next pass of this kind"
-            aria-keyshortcuts="ArrowRight"
-            title="Next (→)"
-          >
-            <Mark name="chevron-right" size={12} />
-          </button>
-        </span>
+        {stepper}
       </div>
       {oneLine ? (
         // Phones: name and time on one line, so the flight snap stays low (≤ 25 % of the screen).

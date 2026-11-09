@@ -99,6 +99,11 @@ export function usePost(): EffectComposer {
   const size = useMemo(() => new Vector2(), [])
   const applied = useRef({ composer: null as EffectComposer | null, w: -1, h: -1, dpr: -1 })
   useFrame((_, delta) => {
+    // A frame held for AdaptiveDpr's drain (the canvas keeps showing the last image).
+    if (rt.skipRender > 0) {
+      rt.skipRender--
+      return
+    }
     gl.getSize(size)
     const pr = gl.getPixelRatio()
     const a = applied.current

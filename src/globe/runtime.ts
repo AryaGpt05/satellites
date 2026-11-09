@@ -83,6 +83,13 @@ export interface GlobeRuntime {
   inputAt: number
   /** True while the phone idle policy renders every 2nd frame (the DPR monitor ignores those frames) */
   throttled: boolean
+  /** performance.now() when the frame loop last resumed from a pause (an overlay, About, a hidden tab) */
+  resumedAt: number
+  /**
+   * Frames the composer skips (holding the last image on screen): AdaptiveDpr lets the GPU drain its queue before a
+   * drawing-buffer resize, which otherwise blocks the main thread until every queued frame has been drawn.
+   */
+  skipRender: number
   /** Resolution of the day map on the GPU right now (drives the zoom floor, decision 6) */
   textureLevel: TextureLevel
   /** Resolution of the night map (the floor on the night side follows the coarser of the two) */
@@ -183,6 +190,8 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     camera: { flying: false, arrivedAt: -Infinity, arrivedKind: null, flightId: 0, progress: 1, altitudeKm: 0 },
     inputAt: -Infinity,
     throttled: false,
+    resumedAt: -Infinity,
+    skipRender: 0,
     textureLevel: '1k',
     nightLevel: '1k',
     phase: 'boot',
