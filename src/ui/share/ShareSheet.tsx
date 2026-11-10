@@ -377,6 +377,8 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
     rootRef.current?.focus({ preventScroll: true })
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // About over the sheet takes the Esc itself (F3): only the top layer closes.
+        if (useApp.getState().aboutOpen) return
         e.stopPropagation()
         e.preventDefault()
         closeRef.current()
