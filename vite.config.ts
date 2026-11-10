@@ -42,6 +42,7 @@ const CRITICAL_FONTS = /^(?:.*\/)?(instrument-sans-latin-standard-normal|martian
 /**
  * index.html at build time (K3, K9):
  *  - `__SITE_ORIGIN__` → the production origin (dev: the dev server's own origin is irrelevant for unfurls).
+ *  - `__APP_VERSION__` → the build's version (see appVersion below).
  *  - <link rel=preload as=font> for the critical woff2 files (hashed names are only known after bundling).
  *  - <link rel=modulepreload> for the lazily imported globe chunk (three.js + R3F) and its static imports,
  *    so it downloads in parallel with the shell instead of after it evaluates.
@@ -58,7 +59,7 @@ function overflightHtml(): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler(html, ctx) {
-        html = html.replaceAll('__SITE_ORIGIN__', origin)
+        html = html.replaceAll('__SITE_ORIGIN__', origin).replaceAll('__APP_VERSION__', appVersion())
         const bundle = ctx.bundle
         if (!bundle) return html
         const tags: { tag: string; attrs: Record<string, string | boolean>; injectTo: 'head' }[] = []
@@ -84,8 +85,16 @@ function overflightHtml(): Plugin {
   }
 }
 
-// App version for in-app events (src/lib/telemetry.ts): the deployed commit, else the package version.
-process.env.VITE_APP_VERSION ||= (process.env.VERCEL_GIT_COMMIT_SHA ?? '').slice(0, 7) || process.env.npm_package_version || 'dev'
+/**
+ * App version for in-app events (src/lib/telemetry.ts): the deployed commit, else the package version. It is written
+ * into index.html (<meta name="app-version">), never into a script: a value baked into a chunk renames that chunk
+ * and every chunk that imports it, so each deploy (the catalog bot's, every 6 hours) made returning visitors download
+ * the shell and the results panel again with not a line of them changed. index.html is revalidated on every visit anyway.
+ */
+function appVersion(): string {
+  const v = process.env.VITE_APP_VERSION || (process.env.VERCEL_GIT_COMMIT_SHA ?? '').slice(0, 7) || process.env.npm_package_version || 'dev'
+  return /^[A-Za-z0-9._-]{1,24}$/.test(v) ? v : 'dev'
+}
 
 export default defineConfig({
   plugins: [react(), overflightHtml()],

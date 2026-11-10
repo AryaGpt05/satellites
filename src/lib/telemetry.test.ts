@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cityLevelLabel } from './backend'
 import {
+  appVersion,
   _testing,
   buildBatches,
   cellOf,
@@ -192,6 +193,22 @@ describe('record_lookup labels are city-only too (src/lib/backend.ts lookupLabel
     expect(lookupLabel({ label: 'Rijksmuseum', sublabel: 'Amsterdam, Netherlands', streetLevel: true })).toBe('Amsterdam')
     expect(lookupLabel({ label: 'Damrak 12', sublabel: '1012 LG, Netherlands', streetLevel: true })).toBe('Netherlands')
     expect(lookupLabel({ label: 'Waterloo', sublabel: 'Ontario, Canada' })).toBe('Waterloo')
+  })
+})
+
+describe('the build version comes from the page, not from the bundle', () => {
+  const doc = (content: string | null) => ({ querySelector: (sel: string) => (sel === 'meta[name="app-version"]' && content !== null ? { getAttribute: () => content } : null) }) as unknown as Document
+  it('reads index.html\'s <meta name="app-version">', () => {
+    expect(appVersion(doc('77fad94'))).toBe('77fad94')
+    expect(appVersion(doc('0.1.0'))).toBe('0.1.0')
+  })
+  it('is empty without the tag, for junk or the unfilled placeholder, or with no document at all', () => {
+    expect(appVersion(doc(null))).toBe('')
+    expect(appVersion(doc('__APP_VERSION__'))).toBe('')
+    expect(appVersion(doc('<script>'))).toBe('')
+    expect(appVersion(doc(''))).toBe('')
+    expect(appVersion(undefined)).toBe('')
+    expect(appVersion({} as Document)).toBe('')
   })
 })
 

@@ -283,9 +283,24 @@ function context(): Record<string, string> {
   }
   const ref = referrerHost(arrival?.referrer ?? document.referrer, location.hostname)
   if (ref) ctx.ref = ref
-  const v = String(import.meta.env?.VITE_APP_VERSION ?? '').slice(0, 24)
-  if (/^[A-Za-z0-9._-]+$/.test(v)) ctx.v = v
+  const v = appVersion(typeof document === 'undefined' ? undefined : document)
+  if (v) ctx.v = v
   return (ctxCache = ctx)
+}
+
+/**
+ * The build's version: index.html's <meta name="app-version"> (vite.config.ts writes the deployed commit there).
+ * Read from the page, never from `import.meta.env`: a value compiled into this module would rename its chunk, and
+ * with it the shell and the results chunk that import it, on every deploy. '' when absent, not a plain token, or the
+ * placeholder itself (a page no build has filled in).
+ */
+export function appVersion(doc: Pick<Document, 'querySelector'> | undefined): string {
+  try {
+    const v = (doc?.querySelector?.('meta[name="app-version"]')?.getAttribute('content') ?? '').slice(0, 24)
+    return /^[A-Za-z0-9._-]+$/.test(v) && v !== '__APP_VERSION__' ? v : ''
+  } catch {
+    return ''
+  }
 }
 
 /** The request bodies for the queued events (exported for tests): chunks of ≤ 50, `dt` = ms ago. */
