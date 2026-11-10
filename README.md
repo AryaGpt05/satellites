@@ -88,7 +88,8 @@ says *watched*, never *photographed*.
 - Archives publish a few hours to a couple of days after capture, so the newest passes may not have a photo yet.
 - Sentinel-2 and Landsat photos are toned the same way across the whole frame: a black point, a white point and a
   brightness curve, a little extra saturation, smoothed compression blocks and light sharpening. Nothing is added or
-  removed.
+  removed. Opened full size, a Landsat 8 or 9 photo is sharpened with the same capture's 15 m panchromatic band (real
+  detail the satellite recorded, from Landsat Level-1), and its labels then say 15 m.
 
 Everything uncertain is labelled as such in the app.
 
@@ -286,7 +287,7 @@ docs/                 DESIGN.md, ARCHITECTURE.md, SELF-HOSTING.md
 | Sentinel&#8209;2 | Contains modified Copernicus Sentinel data, followed by the year each photo was taken. |
 | Landsat | Landsat imagery courtesy of the U.S. Geological Survey and NASA. |
 | NASA&nbsp;GIBS | Imagery from NASA's GIBS, part of EOSDIS. GOES via NOAA and CIRA, Himawari via JMA. |
-| Archives | [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com) and [Element 84 Earth Search](https://element84.com/earth-search/). |
+| Archives | [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com) and [Element 84 Earth Search](https://element84.com/earth-search/); Landsat's 15 m band from the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu). |
 | Places | [Photon](https://photon.komoot.io) by komoot. Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL). |
 | Textures | [Solar System Scope](https://www.solarsystemscope.com/textures/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), from NASA Blue Marble and Black Marble, partly by way of the three.js examples. Resized, re-encoded and repacked for this project. |
 | Fonts | Instrument Sans and Serif by Instrument, Martian Mono by Evil Martians (SIL OFL 1.1). |
