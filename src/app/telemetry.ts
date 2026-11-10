@@ -2,7 +2,10 @@
  * Derives in-app events from what the app already does, without touching the UI components:
  *  - the zustand store (searches, results, pass opens, the About page, error phases),
  *  - `<html data-overlay>` (the lightbox; DESIGN/ARCHITECTURE "Overlays over the globe"),
- *  - window errors, and a few web vitals sent once when the tab is hidden.
+ *  - window errors, and a few web vitals sent once when the tab is hidden (from a quarter of tabs: VITALS_SAMPLE).
+ *
+ * One `results` event per search (when it first shows): the admin page reads it. There is no `results_final` any more
+ * (nothing read it, and it doubled the rows of every search; the database's free tier is 500 MB).
  * The share sheet reports its own open and actions (one-line `track` calls in src/ui/share/ShareSheet.tsx),
  * because its desktop dialog doesn't set the overlay attribute.
  *
@@ -79,7 +82,7 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
   track('view', { entry: arrival.entry })
 
   // ── store ───────────────────────────────────────────────────────────────────────────────
-  let search: { place: object; t0?: number; catchUp: boolean; first: boolean; final: boolean } | undefined
+  let search: { place: object; t0?: number; catchUp: boolean; first: boolean } | undefined
 
   let lastSearchAt = -Infinity
   /** A retry is marked by the controller's retryReport ('overflight:retry') since the previous search started. */
@@ -88,7 +91,7 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
     const retryMark = lastMark('retry')
     const retry = retryMark !== undefined && retryMark >= lastSearchAt
     lastSearchAt = performance.now()
-    search = { place, t0, catchUp, first: false, final: false }
+    search = { place, t0, catchUp, first: false }
     track('search', {
       source: retry ? 'retry' : searchSource(st),
       label: regionLabel(place, cityLevelLabel, { shared: !!st.shared }),
@@ -106,10 +109,6 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
     if (!search.first) {
       search.first = true
       track('results', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('results') ?? now) : since(now) })
-    }
-    if (!search.final && !r.partial) {
-      search.final = true
-      track('results_final', { ...reportCounts(r), ms: search.catchUp ? since(lastMark('final-report') ?? now) : since(now) })
     }
   }
 
