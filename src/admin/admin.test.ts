@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStats, RANGES } from './api'
+import { isTimeout, parseStats, RANGES } from './api'
 import { mockStats } from './fixture'
 import { fmtBucket, fmtPct, niceMax } from './format'
 
@@ -46,5 +46,13 @@ describe('maintenance note', () => {
     expect(maintBehind({ generatedAt: now, maintLastAt: now - 3 * 3600e3 })).toBe(true)
     expect(maintBehind({ generatedAt: now, maintLastAt: null })).toBe(true)
     expect(parseStats({ range: '7d', maintLastAt: now, rolledThrough: '2026-11-08' })).toMatchObject({ maintLastAt: now, rolledThrough: '2026-11-08' })
+  })
+})
+
+describe('admin_stats retry', () => {
+  it('treats only statement timeouts as retryable', () => {
+    expect(isTimeout({ code: '57014', message: 'canceling statement due to statement timeout' })).toBe(true)
+    expect(isTimeout({ message: 'canceling statement due to statement timeout' })).toBe(true)
+    expect(isTimeout({ code: '42501', message: 'not allowed' })).toBe(false)
   })
 })
