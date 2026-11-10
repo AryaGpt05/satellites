@@ -35,6 +35,8 @@ export interface AdminStats {
   maintLastAt: number | null
   /** The last UTC day rolled into the daily totals, 'YYYY-MM-DD' */
   rolledThrough: string | null
+  /** When these stats were computed (the 5-minute cache, 0009), ms; null from a database before 0009 */
+  cachedAt: number | null
 }
 
 let client: SupabaseClient | null | undefined
@@ -138,6 +140,7 @@ export function parseStats(v: unknown): AdminStats | null {
     recentSearches: Array.isArray(v.recentSearches) ? (v.recentSearches.filter(isObj) as AdminStats['recentSearches']) : [],
     maintLastAt: numOrNull(v.maintLastAt),
     rolledThrough: typeof v.rolledThrough === 'string' ? v.rolledThrough : null,
+    cachedAt: numOrNull(v.cachedAt),
     recentErrors: Array.isArray(v.recentErrors) ? (v.recentErrors.filter(isObj) as AdminStats['recentErrors']) : [],
   }
 }

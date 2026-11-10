@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Wordmark } from '@/ui/system/Wordmark'
 import { RANGES, currentSession, fetchStats, sendMagicLink, signOut, supabase, takeAuthError, verifyCode, type AdminStats, type Range } from './api'
 import { ActivityChart, Funnel, RankList, Split, WorldMap } from './charts'
-import { ACTION_NAMES, DEVICE_NAMES, SOURCE_NAMES, VERDICT_NAMES, countryName, fmtAgo, fmtInt, fmtPct, fmtSec, fmtStamp, maintBehind } from './format'
+import { ACTION_NAMES, DEVICE_NAMES, SOURCE_NAMES, VERDICT_NAMES, countryName, fmtAgo, fmtInt, fmtUpdated, fmtPct, fmtSec, fmtStamp, maintBehind } from './format'
 
 type View =
   | { kind: 'loading' }
@@ -287,6 +287,16 @@ function Kpi({ label, value, sub, signal }: { label: string; value: string; sub?
   )
 }
 
+/** The clock, re-read every `ms` so relative times ('updated 3 min ago') keep up while the page stays open. */
+function useNow(ms: number): number {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ms)
+    return () => clearInterval(id)
+  }, [ms])
+  return now
+}
+
 // ── Dashboard ───────────────────────────────────────────────────────────────────────────────
 
 const RANGE_WORDS: Record<Range, string> = { '24h': 'last 24 hours', '7d': 'last 7 days', '30d': 'last 30 days', all: 'all time' }
@@ -308,6 +318,7 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
   ]
   const r = s.results
   const v = s.vitals
+  const now = useNow(30e3)
 
   return (
     <div className={busy ? 'a-dash a-busy' : 'a-dash'}>
@@ -321,6 +332,7 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
       <p className="a-status">
         <span>{RANGE_WORDS[s.range].toUpperCase()}</span>
         <span className="a-dim">GENERATED {fmtStamp(s.generatedAt)}</span>
+        {s.cachedAt != null && <span className="a-dim">{fmtUpdated(s.cachedAt, now)}</span>}
         <button type="button" className="a-link" onClick={onRefresh} disabled={busy}>
           {busy ? 'Refreshing…' : 'Refresh'}
         </button>
