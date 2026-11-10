@@ -64,7 +64,7 @@ each one.
 
 | Label | What it means |
 |:--|:--|
-| ◆&nbsp;**Watched** | A real photo of this place exists in a public archive.<br>*A Sentinel-2, Landsat or weather photo was matched to the pass. A VIIRS daily mosaic still unchecked after 3.5 s also counts, if the same satellite has a verified mosaic on a later day.* |
+| ◆&nbsp;**Watched** | A real photo of this place exists in a public archive.<br>*A Sentinel-2, Landsat or weather photo was matched to the pass. A VIIRS daily mosaic still unchecked after 2.5 s also counts, if the same satellite has a verified mosaic on a later day.* |
 | ◇&nbsp;**Likely watched** | A fixed camera's swath covered this place. No photo of it is published.<br>*Sentinel-2 or Landsat in daylight, or a polar weather satellite, with no photo found.* |
 | □&nbsp;**Could have pointed here** | A steerable or private camera was in range. Its operator doesn't say whether it looked.<br>*A commercial camera in daylight, or a radar satellite at any hour.* |
 | +&nbsp;**Passed overhead** | Crossed your sky, with no camera known to be recording this place.<br>*The ISS or Tiangong at least 10° above the horizon, or a Sentinel-2 or Landsat pass over open ocean (outside Sentinel-2's acquisition plan).* |

@@ -17,6 +17,7 @@ import { Mark } from './Mark'
 import { prefetchPassImage } from './actions'
 import { isClouded } from './lib/bestLook'
 import { captureFor, isDailyMosaic } from './lib/captures'
+import { EAGER_THUMBS } from './warm'
 import { thumbUrl } from './lib/photos'
 import { useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
@@ -34,8 +35,6 @@ interface Props {
   onSelect: (p: Pass) => void
 }
 
-/** Thumbnails of the first rows load with the report, not when scrolled near (PRD-06). */
-const EAGER_THUMBS = 3
 
 export function PassList({ model, selectedId, onSelect }: Props) {
   // A row's pointerleave never fires when the list unmounts under the pointer (a click opens the

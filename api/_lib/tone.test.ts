@@ -294,6 +294,41 @@ describe('applyTone', () => {
     }
   })
 
+  it('tones each colour the same, alone or among many that share its memo slot (no sharpening)', () => {
+    // 64 k distinct colours over a 256 × 256 crop, each twice in a row, in two orders: the per-colour memo has 64 k
+    // slots, so many colours collide in one; a colour toned in a 1 × 1 crop of its own (no memo reuse) is the truth.
+    const W = 256
+    const H = 256
+    const rgb = (i: number): [number, number, number] => [(i * 37) & 255, (i >> 8) & 255, (i * 101 + 7) & 255]
+    const build = (order: (i: number) => number) => {
+      const px = new Uint8ClampedArray(W * H * 2 * 4)
+      for (let i = 0; i < W * H; i++) {
+        const c = rgb(order(i))
+        for (const o of [i * 8, i * 8 + 4]) {
+          px[o] = c[0]
+          px[o + 1] = c[1]
+          px[o + 2] = c[2]
+          px[o + 3] = 255
+        }
+      }
+      return px
+    }
+    const alone = (c: [number, number, number]) => {
+      const one = new Uint8ClampedArray([c[0], c[1], c[2], 255])
+      applyTone(one, 1, 1, p, 0)
+      return `${one[0]},${one[1]},${one[2]}`
+    }
+    for (const order of [(i: number) => i, (i: number) => W * H - 1 - i]) {
+      const px = build(order)
+      applyTone(px, W * 2, H, p, 0)
+      for (let i = 0; i < W * H; i += 97) {
+        const want = alone(rgb(order(i)))
+        expect(`${px[i * 8]},${px[i * 8 + 1]},${px[i * 8 + 2]}`).toBe(want)
+        expect(`${px[i * 8 + 4]},${px[i * 8 + 5]},${px[i * 8 + 6]}`).toBe(want)
+      }
+    }
+  })
+
   it('maps grey through the brightness curve, keeps no-data black and is monotonic', () => {
     const greys = [0, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5]
     const px = crop(greys.length, 1, (x) => [greys[x], greys[x], greys[x]])

@@ -26,6 +26,7 @@ import { isOldWindow } from './Summary'
 import { selectQuietly } from './actions'
 import { coverPinKey, pinCover, pinnedOrder, useGallery } from './gallery'
 import { warmPhoto } from './images'
+import { GALLERY_NEAR } from './warm'
 import { filterCounts, filterPhotos, cardUrl, cropWidthKm, type Photo, type PhotoFilter } from './lib/photos'
 import { productLabel } from './lib/captures'
 import { dec1, int } from './lib/copy'
@@ -38,7 +39,7 @@ export const galleryCtl: { current: null | { step: (dir: 1 | -1) => boolean; exp
 
 const SETTLE_MS = 140
 const SELECT_DEBOUNCE_MS = 250
-const NEAR = 2
+const NEAR = GALLERY_NEAR
 /** Slides this far from the one on screen are mounted (and stay mounted); farther ones are an empty frame. */
 const MOUNT_NEAR = 4
 

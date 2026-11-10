@@ -11,7 +11,7 @@
  * a week; the network legs dominate: STAC ~0.5–1.1 s, GIBS 3–5 s cold for the last probe.
  *
  * Time budget: the report must land in under 4 s (docs/ARCHITECTURE.md). The GIBS leg is the only
- * one whose tail we can't control, so it is the one that gets cut: at `budgetMs` (default 3.5 s; never
+ * one whose tail we can't control, so it is the one that gets cut: at `budgetMs` (default 2.5 s; never
  * sooner than 1.2 s after its first probe, and never before the STAC leg is done, since we wait for that
  * anyway) the report keeps every mosaic verified so far, aborts the rest, and says so in a note. Those
  * passes stay 'likely', which is exactly what we know about them.
@@ -161,7 +161,12 @@ export interface EngineReport extends Report {
   timings: ReportTimings
 }
 
-export const REPORT_BUDGET_MS = 3_500
+/**
+ * The GIBS leg's cut (see the header). 2.5 s, not 3.5 s: the results land with their photo (the controller waits for the
+ * final report), and the photo is usually decoded by then; stragglers are verified in the background and patch the
+ * counts up (onUpdate).
+ */
+export const REPORT_BUDGET_MS = 2_500
 /** However late the GIBS leg starts (slow device), give it at least this long before cutting it. */
 const MIN_WEATHER_MS = 1_200
 const ARCHIVE_TIMEOUT_MS = 20_000

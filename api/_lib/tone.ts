@@ -613,44 +613,55 @@ const BAND_ROWS = 32
  * pauses between row bands (see toneSteps); its return value is the blurred image.
  */
 function* blurSteps(src: Float32Array, wt: Float32Array | null, w: number, h: number, k: Float32Array): Generator<void, Float32Array> {
-  const r = (k.length - 1) >> 1
   const tmpV = new Float32Array(w * h)
   const tmpW = wt ? new Float32Array(w * h) : null
   for (let y = 0; y < h; y++) {
-    const row = y * w
-    for (let x = 0; x < w; x++) {
-      let a = 0
-      let b = 0
-      for (let j = -r; j <= r; j++) {
-        const xx = x + j < 0 ? 0 : x + j >= w ? w - 1 : x + j
-        const kw = k[j + r]
-        if (wt) {
-          const ww = wt[row + xx] * kw
-          a += src[row + xx] * ww
-          b += ww
-        } else a += src[row + xx] * kw
-      }
-      tmpV[row + x] = a
-      if (tmpW) tmpW[row + x] = b
-    }
+    blurRow(src, wt, w, y, k, tmpV, tmpW)
     if (y % BAND_ROWS === BAND_ROWS - 1) yield
   }
   const out = new Float32Array(w * h)
   for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let a = 0
-      let b = 0
-      for (let j = -r; j <= r; j++) {
-        const yy = y + j < 0 ? 0 : y + j >= h ? h - 1 : y + j
-        const kw = k[j + r]
-        a += tmpV[yy * w + x] * kw
-        if (tmpW) b += tmpW[yy * w + x] * kw
-      }
-      out[y * w + x] = tmpW ? (b > 1e-6 ? a / b : 0) : a
-    }
+    blurColumnRow(tmpV, tmpW, w, h, y, k, out)
     if (y % BAND_ROWS === BAND_ROWS - 1) yield
   }
   return out
+}
+
+/** blurSteps' horizontal pass for row `y` (a plain function: see toneSteps). */
+function blurRow(src: Float32Array, wt: Float32Array | null, w: number, y: number, k: Float32Array, tmpV: Float32Array, tmpW: Float32Array | null): void {
+  const r = (k.length - 1) >> 1
+  const row = y * w
+  for (let x = 0; x < w; x++) {
+    let a = 0
+    let b = 0
+    for (let j = -r; j <= r; j++) {
+      const xx = x + j < 0 ? 0 : x + j >= w ? w - 1 : x + j
+      const kw = k[j + r]
+      if (wt) {
+        const ww = wt[row + xx] * kw
+        a += src[row + xx] * ww
+        b += ww
+      } else a += src[row + xx] * kw
+    }
+    tmpV[row + x] = a
+    if (tmpW) tmpW[row + x] = b
+  }
+}
+
+/** blurSteps' vertical pass for output row `y`. */
+function blurColumnRow(tmpV: Float32Array, tmpW: Float32Array | null, w: number, h: number, y: number, k: Float32Array, out: Float32Array): void {
+  const r = (k.length - 1) >> 1
+  for (let x = 0; x < w; x++) {
+    let a = 0
+    let b = 0
+    for (let j = -r; j <= r; j++) {
+      const yy = y + j < 0 ? 0 : y + j >= h ? h - 1 : y + j
+      const kw = k[j + r]
+      a += tmpV[yy * w + x] * kw
+      if (tmpW) b += tmpW[yy * w + x] * kw
+    }
+    out[y * w + x] = tmpW ? (b > 1e-6 ? a / b : 0) : a
+  }
 }
 
 /** Run a step generator to its end, here and now. */
@@ -691,73 +702,15 @@ export function* toneSteps(
   sigma: number,
   jpeg = false,
 ): Generator<void, void> {
-  const lin = linTable()
-  const lut = ratioTable()
   const curve = new Float32Array(TONE_STEPS + 1)
   for (let i = 0; i <= TONE_STEPS; i++) curve[i] = Math.pow(i / TONE_STEPS, p.gamma) * 255
-  const pow = (x: number) => (x >= RATIO_MAX ? Math.pow(x, CHROMA) : lut[Math.round(x * RATIO_STEPS)])
-  const black = p.black
-  const cb = CHROMA_BLACK * black
-  const span = p.white - p.black
   const n = width * height
   let holes = 0
-  const s = p.saturation
   const band = BAND_ROWS * width
+  const memo: ColourMemo = { keys: new Int32Array(MEMO_SIZE).fill(-1), vals: new Int32Array(MEMO_SIZE) }
   for (let start = 0; start < n; start += band) {
     if (start) yield
-    const end = Math.min(n, start + band)
-    for (let i = start, o = start * 4; i < end; i++, o += 4) {
-      const r8 = rgba[o]
-      const g8 = rgba[o + 1]
-      const b8 = rgba[o + 2]
-      if (r8 + g8 + b8 === 0) {
-        holes++
-        continue
-      }
-      const r = lin[r8]
-      const g = lin[g8]
-      const b = lin[b8]
-      const L = 0.2126 * r + 0.7152 * g + 0.0722 * b
-      const d = L - black
-      const ly = d <= 0 ? 0 : curve[Math.round((d >= span ? 1 : d / span) * TONE_STEPS)]
-      let R = ly
-      let G = ly
-      let B = ly
-      if (ly > 0 && L - cb > 1e-6) {
-        const k = 1 / (L - cb)
-        const fr = pow(r > cb ? (r - cb) * k : 0)
-        const fg = pow(g > cb ? (g - cb) * k : 0)
-        const fb = pow(b > cb ? (b - cb) * k : 0)
-        const l = 0.2126 * fr + 0.7152 * fg + 0.0722 * fb
-        if (l > 1e-6) {
-          const q = s / l
-          let kr = 1 - s + fr * q
-          let kg = 1 - s + fg * q
-          let kb = 1 - s + fb * q
-          const kmax = kr > kg ? (kr > kb ? kr : kb) : kg > kb ? kg : kb
-          const kmin = kr < kg ? (kr < kb ? kr : kb) : kg < kb ? kg : kb
-          let tau = 1
-          if (ly * kmax > 255) tau = ly >= 255 ? 0 : (255 - ly) / (ly * (kmax - 1))
-          if (kmin < 0 && 1 / (1 - kmin) < tau) tau = 1 / (1 - kmin)
-          if (tau < 1) {
-            kr = 1 + tau * (kr - 1)
-            kg = 1 + tau * (kg - 1)
-            kb = 1 + tau * (kb - 1)
-          }
-          R = ly * kr
-          G = ly * kg
-          B = ly * kb
-        }
-      }
-      // A toned pixel is never pure black: (0, 0, 0) stays the mark of no data for the steps below.
-      const R8 = clamp8(R)
-      const G8 = clamp8(G)
-      const B8 = clamp8(B)
-      const lift = R8 + G8 + B8 === 0 ? 1 : 0
-      rgba[o] = R8 + lift
-      rgba[o + 1] = G8 + lift
-      rgba[o + 2] = B8 + lift
-    }
+    holes += curveBand(rgba, start, Math.min(n, start + band), curve, p, memo)
   }
   if (jpeg) {
     yield
@@ -769,12 +722,7 @@ export function* toneSteps(
   const valid = new Uint8Array(n)
   for (let start = 0; start < n; start += band) {
     if (start) yield
-    const end = Math.min(n, start + band)
-    for (let i = start, o = start * 4; i < end; i++, o += 4) {
-      if (rgba[o] + rgba[o + 1] + rgba[o + 2] === 0) continue
-      Y[i] = 0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2]
-      valid[i] = 1
-    }
+    lumaBand(rgba, start, Math.min(n, start + band), Y, valid)
   }
   let wt: Float32Array | null = null
   if (holes) {
@@ -785,16 +733,127 @@ export function* toneSteps(
   const soft = yield* blurSteps(Y, wt, width, height, gaussKernel(sigma))
   for (let start = 0; start < n; start += band) {
     yield
-    const end = Math.min(n, start + band)
-    for (let i = start, o = start * 4; i < end; i++, o += 4) {
-      if (valid[i] === 0) continue
-      const d = Y[i] - soft[i]
-      if (d < SHARPEN_THRESHOLD && d > -SHARPEN_THRESHOLD) continue
-      const add = SHARPEN_AMOUNT * (d > SHARPEN_LIMIT ? SHARPEN_LIMIT : d < -SHARPEN_LIMIT ? -SHARPEN_LIMIT : d)
-      rgba[o] = clamp8(rgba[o] + add)
-      rgba[o + 1] = clamp8(rgba[o + 1] + add)
-      rgba[o + 2] = clamp8(rgba[o + 2] + add)
+    sharpenBand(rgba, start, Math.min(n, start + band), Y, soft, valid)
+  }
+}
+
+/*
+ * The per-band work of toneSteps, as plain functions: the generator only decides when to pause. (Hot loops inside a
+ * generator body run several times slower in V8; the pixels are the same either way.)
+ */
+
+/**
+ * Steps 1–3 depend on nothing but a pixel's own (r, g, b) for one photo's curve, and a photo repeats its colours a
+ * lot (flat water, fields, roofs, the JPEG's own blocks): each result is remembered in a small direct-mapped table
+ * (one slot per hash of the colour, the newest colour wins a shared slot). The pixels are exactly the same.
+ */
+interface ColourMemo {
+  /** 0xRRGGBB of the colour in each slot, -1 = empty */
+  keys: Int32Array
+  /** its toned 0xRRGGBB */
+  vals: Int32Array
+}
+const MEMO_BITS = 16
+const MEMO_SIZE = 1 << MEMO_BITS
+
+/** Steps 1–3 of applyTone on pixels [start, end). Returns how many were no data. */
+function curveBand(rgba: Uint8Array | Uint8ClampedArray, start: number, end: number, curve: Float32Array, p: ToneParams, memo: ColourMemo): number {
+  const { keys, vals } = memo
+  const lin = linTable()
+  const lut = ratioTable()
+  const black = p.black
+  const cb = CHROMA_BLACK * black
+  const span = p.white - p.black
+  const s = p.saturation
+  let holes = 0
+  for (let i = start, o = start * 4; i < end; i++, o += 4) {
+    const r8 = rgba[o]
+    const g8 = rgba[o + 1]
+    const b8 = rgba[o + 2]
+    if (r8 + g8 + b8 === 0) {
+      holes++
+      continue
     }
+    const key = (r8 << 16) | (g8 << 8) | b8
+    const slot = Math.imul(key, 0x9e3779b1) >>> (32 - MEMO_BITS)
+    if (keys[slot] === key) {
+      const v = vals[slot]
+      rgba[o] = v >>> 16
+      rgba[o + 1] = (v >>> 8) & 255
+      rgba[o + 2] = v & 255
+      continue
+    }
+    const r = lin[r8]
+    const g = lin[g8]
+    const b = lin[b8]
+    const L = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    const d = L - black
+    const ly = d <= 0 ? 0 : curve[Math.round((d >= span ? 1 : d / span) * TONE_STEPS)]
+    let R = ly
+    let G = ly
+    let B = ly
+    if (ly > 0 && L - cb > 1e-6) {
+      const k = 1 / (L - cb)
+      const xr = r > cb ? (r - cb) * k : 0
+      const xg = g > cb ? (g - cb) * k : 0
+      const xb = b > cb ? (b - cb) * k : 0
+      const fr = xr >= RATIO_MAX ? Math.pow(xr, CHROMA) : lut[Math.round(xr * RATIO_STEPS)]
+      const fg = xg >= RATIO_MAX ? Math.pow(xg, CHROMA) : lut[Math.round(xg * RATIO_STEPS)]
+      const fb = xb >= RATIO_MAX ? Math.pow(xb, CHROMA) : lut[Math.round(xb * RATIO_STEPS)]
+      const l = 0.2126 * fr + 0.7152 * fg + 0.0722 * fb
+      if (l > 1e-6) {
+        const q = s / l
+        let kr = 1 - s + fr * q
+        let kg = 1 - s + fg * q
+        let kb = 1 - s + fb * q
+        const kmax = kr > kg ? (kr > kb ? kr : kb) : kg > kb ? kg : kb
+        const kmin = kr < kg ? (kr < kb ? kr : kb) : kg < kb ? kg : kb
+        let tau = 1
+        if (ly * kmax > 255) tau = ly >= 255 ? 0 : (255 - ly) / (ly * (kmax - 1))
+        if (kmin < 0 && 1 / (1 - kmin) < tau) tau = 1 / (1 - kmin)
+        if (tau < 1) {
+          kr = 1 + tau * (kr - 1)
+          kg = 1 + tau * (kg - 1)
+          kb = 1 + tau * (kb - 1)
+        }
+        R = ly * kr
+        G = ly * kg
+        B = ly * kb
+      }
+    }
+    // A toned pixel is never pure black: (0, 0, 0) stays the mark of no data for the steps below.
+    const R8 = clamp8(R)
+    const G8 = clamp8(G)
+    const B8 = clamp8(B)
+    const lift = R8 + G8 + B8 === 0 ? 1 : 0
+    rgba[o] = R8 + lift
+    rgba[o + 1] = G8 + lift
+    rgba[o + 2] = B8 + lift
+    keys[slot] = key
+    vals[slot] = ((R8 + lift) << 16) | ((G8 + lift) << 8) | (B8 + lift)
+  }
+  return holes
+}
+
+/** Luma of the toned pixels [start, end) for the unsharp mask, and which of them carry data. */
+function lumaBand(rgba: Uint8Array | Uint8ClampedArray, start: number, end: number, Y: Float32Array, valid: Uint8Array): void {
+  for (let i = start, o = start * 4; i < end; i++, o += 4) {
+    if (rgba[o] + rgba[o + 1] + rgba[o + 2] === 0) continue
+    Y[i] = 0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2]
+    valid[i] = 1
+  }
+}
+
+/** Step 4 of applyTone on pixels [start, end): the unsharp mask, from luma and its blur. */
+function sharpenBand(rgba: Uint8Array | Uint8ClampedArray, start: number, end: number, Y: Float32Array, soft: Float32Array, valid: Uint8Array): void {
+  for (let i = start, o = start * 4; i < end; i++, o += 4) {
+    if (valid[i] === 0) continue
+    const d = Y[i] - soft[i]
+    if (d < SHARPEN_THRESHOLD && d > -SHARPEN_THRESHOLD) continue
+    const add = SHARPEN_AMOUNT * (d > SHARPEN_LIMIT ? SHARPEN_LIMIT : d < -SHARPEN_LIMIT ? -SHARPEN_LIMIT : d)
+    rgba[o] = clamp8(rgba[o] + add)
+    rgba[o + 1] = clamp8(rgba[o + 1] + add)
+    rgba[o + 2] = clamp8(rgba[o + 2] + add)
   }
 }
 

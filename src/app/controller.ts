@@ -369,6 +369,7 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
   /** Called whenever finalReport changes, while the first paint waits for the settled report. */
   let onNewer: (() => void) | undefined
   let heroP: Promise<unknown> | undefined
+  let firstWarm: Promise<void> | undefined
   let firstShow: Promise<void> | undefined
   let shown = false
   /** The clear cover already preloaded for this run (its id), and its decode (shared by every later swap). */
@@ -382,6 +383,9 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     //     model in idle time, so the handoff render only reads the cache (R2K3).
     heroP ??= preloadHero(r, opts)
     void prewarmModel(r)
+    // …and start the panel's first thumbnails and the gallery's next photos (after the hero's decode), so the panel
+    // does not request them only when it mounts.
+    firstWarm ??= warmFirst(r, heroP, !leadsWithPass(opts))
     // (2) Land ~1 s before the camera arrives, never sooner than 1.8 s after the search.
     await waitForCamera(started, flightBefore, ctrl.signal)
     mark('camera-window')
@@ -725,6 +729,14 @@ async function heroIsReady(next: Report, prev: Report, opts: RunOpts): Promise<b
   } catch {
     return false
   }
+}
+
+/** The results' first photos after the hero (ui/results warm.ts), once the report's model is built. Never rejects. */
+function warmFirst(r: Report, heroDecoded: Promise<unknown>, withGallery: boolean): Promise<void> {
+  return prewarmModel(r)
+    .then(() => import('@/ui/results'))
+    .then((m) => m.warmFirstPhotos(r, heroDecoded, withGallery))
+    .catch((err) => console.error(err))
 }
 
 /** Download and decode the report's cover photo (gallery photo #1: the clear cover when it leads). Never rejects. */
