@@ -7,7 +7,7 @@
  * cached for long; the client then keeps the photo it has (photos.ts / pixels.ts fall back to the 30 m layer).
  *
  *   200  image/png (8-bit grey, √ encoded; 0 = no data)
- *   400  not an app crop · 404 no Landsat pan at that place and hour · 502 CDSE refused or unreachable
+ *   400  not an app crop · 404 no Landsat pan at that place and hour (or an all-no-data answer) · 502 CDSE refused or unreachable
  *   503  not configured
  */
 import { parsePanQuery, processBody } from './_lib/pan.js'
@@ -15,6 +15,8 @@ import { parsePanQuery, processBody } from './_lib/pan.js'
 const TOKEN_URL = 'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token'
 const PROCESS_URL = 'https://sh.dataspace.copernicus.eu/api/v1/process'
 const TIMEOUT_MS = 12_000
+/** Below this many bytes a 1000 px PNG is (nearly) all no data. */
+const NO_DATA_BYTES = 16_384
 
 let token: { value: string; until: number } | null = null
 
@@ -53,7 +55,11 @@ export async function handlePan(req: Request): Promise<Response> {
     })
     if (res.status === 401) token = null
     if (!res.ok) return empty(res.status === 400 || res.status === 404 ? 404 : 502)
-    return new Response(await res.arrayBuffer(), {
+    const body = await res.arrayBuffer()
+    // No Level-1 scene at that place and hour (not published yet, or none): CDSE answers an all-zero picture, which
+    // compresses to ~1 KB (a real 1000 px pan band is hundreds). Not cached for long: it may yet be published.
+    if (body.byteLength < NO_DATA_BYTES) return empty(404)
+    return new Response(body, {
       status: 200,
       headers: {
         'content-type': 'image/png',

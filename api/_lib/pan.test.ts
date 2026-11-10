@@ -32,7 +32,7 @@ describe('parsePanQuery', () => {
 
 describe('handlePan', () => {
   const url = (s = panQuery(BOX, 32640, T)) => new Request(`https://www.watched.earth/api/pan?${s}`)
-  const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
+  const png = new Uint8Array(40_000).map((_, i) => i % 251)
   let fetchMock: ReturnType<typeof vi.fn>
   beforeEach(() => {
     vi.useFakeTimers({ now: NOW, toFake: ['Date'] })
@@ -75,6 +75,11 @@ describe('handlePan', () => {
     fetchMock.mockImplementation(async (u: string) => (String(u).includes('/token') ? new Response(JSON.stringify({ access_token: 'tok', expires_in: 600 })) : new Response('', { status: 503 })))
     const bad = await handlePan(url())
     expect(bad.status).toBe(502)
+    // An all-zero picture (no scene that hour) compresses to ~1 KB: not found, not cached for a year.
+    fetchMock.mockImplementation(async (u: string) => (String(u).includes('/token') ? new Response(JSON.stringify({ access_token: 'tok', expires_in: 600 })) : new Response(new Uint8Array(1049))))
+    const none = await handlePan(url())
+    expect(none.status).toBe(404)
+    expect(none.headers.get('cache-control')).toBe('public, max-age=300, s-maxage=300')
     expect(bad.headers.get('cache-control')).toBe('public, max-age=300, s-maxage=300')
   })
 })
