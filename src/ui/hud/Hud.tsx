@@ -133,11 +133,13 @@ function CatalogAge({ fetchedAt }: { fetchedAt: string }) {
  * Memoised on whether there is an About action, not on its identity: the app re-renders (and passes a
  * fresh callback) for reasons that change nothing here. The latest callback is always the one called.
  */
-export const Hud = memo(HudImpl, (a, b) => !!a.onAbout === !!b.onAbout)
+export const Hud = memo(HudImpl, (a, b) => !!a.onAbout === !!b.onAbout && !!a.onHome === !!b.onHome)
 
-function HudImpl({ onAbout }: { onAbout?: () => void }) {
+function HudImpl({ onAbout, onHome }: { onAbout?: () => void; onHome?: () => void }) {
   const aboutRef = useRef(onAbout)
   aboutRef.current = onAbout
+  const homeRef = useRef(onHome)
+  homeRef.current = onHome
   const live = useApp((st) => st.timeMode === 'live')
   const scene = useApp((st) => (st.selectedPassId ? 'pass' : st.phase === 'computing' || st.phase === 'results' ? 'results' : undefined))
   const catalog = useCatalogStatus()
@@ -166,7 +168,23 @@ function HudImpl({ onAbout }: { onAbout?: () => void }) {
       <CornerReadout corner="tl" label="Watched" ref={topLeft}>
         <div className={s.line}>
           <span className={s.mark} data-hud-wordmark>
-            <Wordmark height={17} className={s.wordmark} />
+            {onHome ? (
+              // Back to the landing (a real link: a new tab or a copied address opens the home page).
+              <a
+                href="/"
+                className={s.home}
+                aria-label="Watched, home"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+                  e.preventDefault()
+                  homeRef.current?.()
+                }}
+              >
+                <Wordmark height={17} className={s.wordmark} />
+              </a>
+            ) : (
+              <Wordmark height={17} className={s.wordmark} />
+            )}
           </span>
           <Reveal key={`${k}-version`} skip={booting} axis="x" duration={480} delay={at(480)} as="span" className={s.versionWrap}>
             <span className={s.version}>{VERSION}</span>

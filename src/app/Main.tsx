@@ -129,6 +129,14 @@ const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<Re
   return <View onBack={resetToLanding} onRetry={retryReport} onSearch={searchFromPanel} />
 })
 const closeAbout = () => useApp.getState().setAboutOpen(false)
+/** The HUD's wordmark: back to the landing from a search (as "New search" / Esc do); on the landing it clears a pin. */
+function goHome() {
+  const st = useApp.getState()
+  if (st.phase === 'boot') return
+  if (st.aboutOpen) st.setAboutOpen(false)
+  if (st.phase === 'results' || st.phase === 'computing' || st.phase === 'error') resetToLanding()
+  else if (st.pin) st.setPin(undefined)
+}
 /** The address bar for what is on screen now (the back stack calls it when its own history move lands). */
 function writeUrlNow() {
   const st = useApp.getState()
@@ -286,7 +294,7 @@ export default function Main() {
         {panel && panelReady && ResultsView ? <ResultsSlot key="results" View={ResultsView} /> : null}
         {phase === 'error' && <ErrorNotice message={error} onRetry={retryReport} onBack={resetToLanding} />}
       </div>
-      <Hud onAbout={openAbout} />
+      <Hud onAbout={openAbout} onHome={goHome} />
       {/* On <body>, beside the photo viewer: About ("?") opened over the viewer paints over it (CR-7). The root is
           position: fixed, a stacking context of its own, so a z-index inside it never reaches above the viewer. */}
       {about && AboutPage ? createPortal(<AboutPage onClose={closeAbout} />, document.body) : null}

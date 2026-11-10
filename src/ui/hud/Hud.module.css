@@ -109,6 +109,33 @@
   display: inline-flex;
   line-height: 0;
 }
+/* The wordmark is the way home: a generous hit area reaching up into the bezel's margin (nothing else lives there),
+   above the About button's tall touch box, which reaches up over this line on phones. */
+.home {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  padding: 12px 8px 3px 0;
+  margin: -12px -8px -3px 0;
+  border-radius: 1px;
+  transition: opacity var(--d-hover) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .home:hover {
+    opacity: 0.78;
+  }
+}
+.home:active {
+  opacity: 0.66;
+  transition-duration: 0ms;
+}
+.home:focus-visible {
+  outline: none;
+}
+.home:focus-visible .wordmark {
+  text-decoration: none;
+  filter: drop-shadow(0 2px 0 var(--signal));
+}
 :global(html[data-boot]) .mark {
   visibility: hidden;
 }
