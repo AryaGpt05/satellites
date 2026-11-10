@@ -31,8 +31,9 @@ describe('formats', () => {
     expect(fmtPct(0.0612)).toBe('6.1%')
     expect(fmtPct(0.5)).toBe('50%')
     expect(fmtPct(null)).toBe('—')
-    expect(fmtBucket(Date.UTC(2026, 10, 8, 14), 'hour')).toBe('NOV 08 14:00')
-    expect(fmtBucket(Date.UTC(2026, 10, 8, 0), 'hour', true)).toBe('NOV 08')
+    expect(fmtBucket(Date.UTC(2026, 10, 8, 14), 'hour')).toBe('NOV 08 09:00') // EST = UTC-5
+    expect(fmtBucket(Date.UTC(2026, 10, 8, 5), 'hour', true)).toBe('NOV 08') // ET midnight
+    expect(fmtBucket(Date.UTC(2026, 6, 8, 14), 'hour')).toBe('JUL 08 10:00') // EDT = UTC-4
     expect(fmtBucket(Date.UTC(2026, 10, 8), 'day')).toBe('NOV 08')
   })
 })

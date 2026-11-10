@@ -337,7 +337,7 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
         </div>
       </Section>
 
-      <Section n={2} title={s.bucket === 'hour' ? 'ACTIVITY · HOURLY UTC' : 'ACTIVITY · DAILY UTC'}>
+      <Section n={2} title={s.bucket === 'hour' ? 'ACTIVITY · HOURLY ET' : 'ACTIVITY · DAILY (UTC DAYS)'}>
         <ActivityChart series={s.series} bucket={s.bucket} />
       </Section>
 
@@ -455,7 +455,7 @@ function Dashboard({ s, busy, onRefresh }: { s: AdminStats; busy: boolean; onRef
       </div>
 
       <p className="a-foot">
-        Counted per browser tab: no cookies, no IPs, places at city level and 0.1° cells. Raw events are kept 90 days; daily totals after that. Times are UTC.
+        Counted per browser tab: no cookies, no IPs, places at city level and 0.1° cells. Raw events are kept 90 days; daily totals after that. Times are US Eastern; daily totals are UTC days.
       </p>
     </div>
   )

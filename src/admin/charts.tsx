@@ -4,7 +4,7 @@
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Ranked } from './api'
-import { fmtBucket, fmtInt, fmtPct, niceMax } from './format'
+import { etParts, fmtBucket, fmtInt, fmtPct, niceMax } from './format'
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T>(null)
@@ -118,7 +118,7 @@ function tickIndexes(ts: number[], bucket: 'hour' | 'day', want: number): number
     const every = [3, 6, 12, 24, 48, 72].find((h) => span / h <= want) ?? 72
     let midnights = 0
     ts.forEach((t, i) => {
-      const h = new Date(t).getUTCHours()
+      const h = etParts(t).h
       if (every < 24 ? h % every === 0 : h === 0 && midnights++ % (every / 24) === 0) out.push(i)
     })
   } else {

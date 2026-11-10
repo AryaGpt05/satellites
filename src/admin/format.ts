@@ -1,4 +1,7 @@
-/** Number and time formats for the admin page (UTC throughout, like the app's HUD clock). */
+/**
+ * Number and time formats for the admin page. Times are US Eastern (the owner's clock, EST/EDT handled by Intl).
+ * Daily buckets are the database's UTC days, so they keep their UTC date.
+ */
 
 const INT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
 const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -15,13 +18,30 @@ export const fmtSec = (ms: number | null | undefined): string => (ms == null || 
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
+export const ADMIN_TZ = 'America/New_York'
+const ET = new Intl.DateTimeFormat('en-US', { timeZone: ADMIN_TZ, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+/** Calendar fields of an instant on the admin clock (US Eastern). */
+export function etParts(t: number): { y: number; mo: number; d: number; h: number; mi: number } {
+  const v: Record<string, number> = {}
+  for (const p of ET.formatToParts(new Date(t))) if (p.type !== 'literal') v[p.type] = Number(p.value)
+  return { y: v.year, mo: v.month, d: v.day, h: v.hour % 24, mi: v.minute }
+}
+/** "EST" or "EDT" for an instant. */
+export function etZone(t: number): string {
+  const part = new Intl.DateTimeFormat('en-US', { timeZone: ADMIN_TZ, timeZoneName: 'short' }).formatToParts(new Date(t)).find((p) => p.type === 'timeZoneName')
+  return part?.value ?? 'ET'
+}
+
 /** "NOV 08 14:00" (hour buckets) / "NOV 08" (days); `short` drops the date on hour ticks except at midnight. */
 export function fmtBucket(t: number, bucket: 'hour' | 'day', short = false): string {
-  const d = new Date(t)
-  const day = `${MON[d.getUTCMonth()]} ${pad(d.getUTCDate())}`
-  if (bucket === 'day') return day
-  const hh = `${pad(d.getUTCHours())}:00`
-  if (short) return d.getUTCHours() === 0 ? day : hh
+  if (bucket === 'day') {
+    const d = new Date(t) // a UTC day from the rollup: keep its date
+    return `${MON[d.getUTCMonth()]} ${pad(d.getUTCDate())}`
+  }
+  const e = etParts(t)
+  const day = `${MON[e.mo - 1]} ${pad(e.d)}`
+  const hh = `${pad(e.h)}:00`
+  if (short) return e.h === 0 ? day : hh
   return `${day} ${hh}`
 }
 
@@ -36,8 +56,8 @@ export function fmtAgo(t: number, now = Date.now()): string {
 }
 
 export function fmtStamp(t: number): string {
-  const d = new Date(t)
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
+  const e = etParts(t)
+  return `${e.y}-${pad(e.mo)}-${pad(e.d)} ${pad(e.h)}:${pad(e.mi)} ${etZone(t)}`
 }
 
 /** 1, 2, 2.5, 5 × 10^k at or above `v`. */
