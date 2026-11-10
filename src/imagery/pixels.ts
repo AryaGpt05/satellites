@@ -21,6 +21,9 @@
  * shared).
  */
 import { PHOTO_PX, canShareCurve, isMagnifiedView, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams, type TonePlan } from '../../api/_lib/tone'
+import { HttpError } from './net'
+import { panSharpen } from './panSharpen'
+import { panApiPath, parsePanSharpUrl } from './panUrl'
 
 export interface Pixels {
   data: Uint8ClampedArray
@@ -319,3 +322,68 @@ export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jp
   const type = fmt === 'png' ? 'image/png' : 'image/jpeg'
   return { status: res.status, contentType: type, blob: await encode(c, type) }
 }
+
+/**
+ * The lightbox's sharper layer of a Landsat 8/9 photo (panUrl.ts): the card's own crop, toned exactly as the card was
+ * (the curve it was shown with; measured with its mask if the card was never toned here), then pan-sharpened with the
+ * same capture's 15 m band (api/pan; panSharpen.ts). Its crop is usually still in the HTTP cache from the card. Rejects
+ * when the pan can't be had or is mostly no data: the caller falls back to the 30 m sharper layer.
+ */
+export async function fetchPanSharpHere(url: string, signal?: AbortSignal): Promise<CheckedImage> {
+  const parsed = parsePanSharpUrl(url)
+  const plan = parsed && tonePlanForUrl(parsed.cardUrl)
+  const api = parsed && panApiPath(parsed.cardUrl, parsed.t)
+  if (!parsed || !plan || !api) throw new Error('not a pan-sharpened layer')
+  const origin = typeof location !== 'undefined' ? location.origin : ''
+  // Both downloads at once; the mask only if no curve is known for this capture yet.
+  const panP = fetch(origin + api, { signal })
+  const colourP = fetch(parsed.cardUrl, { signal })
+  panP.catch(() => undefined)
+  colourP.catch(() => undefined)
+  let known = shown.get(plan.key) ?? curves.get(plan.key)
+  const pending = known ? undefined : fetchMaskHere(plan.maskUrl)
+  pending?.catch(() => undefined)
+  const colourRes = await colourP
+  if (!colourRes.ok) {
+    await colourRes.body?.cancel().catch(() => undefined)
+    throw new HttpError(colourRes.status, parsed.cardUrl)
+  }
+  const bmp = await createImageBitmap(await colourRes.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width, height } = bmp
+  const c = canvas2d(width, height)
+  if (!c) {
+    bmp.close()
+    throw new Error('2D canvas unavailable')
+  }
+  c.ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  const img = c.ctx.getImageData(0, 0, width, height)
+  const mask = known || !pending ? null : await maskWithin(pending, MASK_WAIT_MS)
+  known ??= shown.get(plan.key) ?? curves.get(plan.key)
+  await toneCropAsync(img.data, width, height, plan, mask, known, pause)
+
+  const panRes = await panP
+  if (!panRes.ok || !(panRes.headers.get('content-type') ?? '').startsWith('image/')) {
+    await panRes.body?.cancel().catch(() => undefined)
+    throw new HttpError(panRes.status, api)
+  }
+  const pbmp = await createImageBitmap(await panRes.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  if (pbmp.width !== width || pbmp.height !== height) {
+    pbmp.close()
+    throw new Error('pan size')
+  }
+  const pc = canvas2d(width, height)
+  if (!pc) {
+    pbmp.close()
+    throw new Error('2D canvas unavailable')
+  }
+  pc.ctx.drawImage(pbmp, 0, 0)
+  pbmp.close()
+  const covered = panSharpen(img.data, pc.ctx.getImageData(0, 0, width, height).data, width, height)
+  if (covered < PAN_MIN_COVER) throw new Error('pan mostly no data')
+  c.ctx.putImageData(img, 0, 0)
+  return { status: 200, contentType: 'image/jpeg', blob: await encode(c, 'image/jpeg') }
+}
+
+/** A pan band covering less of the crop than this is not used (the 30 m layer is shown instead). */
+const PAN_MIN_COVER = 0.9

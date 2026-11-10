@@ -7,17 +7,18 @@
  *        { type: 'image', id, url }        fetch an image for display and measure its no-data share (fetchCheckedImageHere)
  *        { type: 'tone', id, url, fmt }    fetch a Sentinel-2 / Landsat crop and tone it (fetchTonedHere)
  *        { type: 'mask', id, url }         fetch a cloud mask (fetchMaskHere; kept here for the photos' curve too)
+ *        { type: 'pan', id, url }          a Landsat photo's pan-sharpened lightbox layer (fetchPanSharpHere)
  *        { type: 'abort', id }             abort that request
  *   out: { type: 'ok', id, r }             a PixelFetch (pixel buffer transferred), a CheckedImage (blob) or a MaskFetch
  *        { type: 'error', id, name, message }   a network failure (TypeError) or an abort
  */
-import { fetchCheckedImageHere, fetchMaskHere, fetchPixelsHere, fetchTonedHere } from './pixels'
+import { fetchCheckedImageHere, fetchMaskHere, fetchPanSharpHere, fetchPixelsHere, fetchTonedHere } from './pixels'
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
 const inflight = new Map<number, AbortController>()
 
 type In =
-  | { type: 'fetch' | 'image' | 'mask'; id: number; url: string }
+  | { type: 'fetch' | 'image' | 'mask' | 'pan'; id: number; url: string }
   | { type: 'tone'; id: number; url: string; fmt?: 'jpeg' | 'png' }
   | { type: 'abort'; id: number }
 
@@ -28,7 +29,7 @@ ctx.onmessage = async (ev: MessageEvent<In>) => {
     inflight.delete(m.id)
     return
   }
-  if (m?.type !== 'fetch' && m?.type !== 'image' && m?.type !== 'tone' && m?.type !== 'mask') return
+  if (m?.type !== 'fetch' && m?.type !== 'image' && m?.type !== 'tone' && m?.type !== 'mask' && m?.type !== 'pan') return
   const ctl = new AbortController()
   inflight.set(m.id, ctl)
   try {
@@ -38,6 +39,10 @@ ctx.onmessage = async (ev: MessageEvent<In>) => {
     }
     if (m.type === 'tone') {
       ctx.postMessage({ type: 'ok', id: m.id, r: await fetchTonedHere(m.url, ctl.signal, m.fmt) })
+      return
+    }
+    if (m.type === 'pan') {
+      ctx.postMessage({ type: 'ok', id: m.id, r: await fetchPanSharpHere(m.url, ctl.signal) })
       return
     }
     if (m.type === 'mask') {

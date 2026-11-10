@@ -10,16 +10,17 @@
  * Abort semantics match fetch: aborting `signal` rejects at once with the signal's reason and aborts the
  * worker's request. A network failure rejects with a TypeError, as fetch does (withRetry retries those).
  */
-import { fetchCheckedImageHere, fetchMaskHere, fetchPixelsHere, fetchTonedHere, type CheckedImage, type MaskFetch, type PixelFetch } from './pixels'
+import { fetchCheckedImageHere, fetchMaskHere, fetchPanSharpHere, fetchPixelsHere, fetchTonedHere, type CheckedImage, type MaskFetch, type PixelFetch } from './pixels'
 import { abortReason } from './net'
 
-type Kind = 'fetch' | 'image' | 'tone' | 'tone-png' | 'mask'
+type Kind = 'fetch' | 'image' | 'tone' | 'tone-png' | 'mask' | 'pan'
 const HERE: Record<Kind, (url: string, signal?: AbortSignal) => Promise<unknown>> = {
   fetch: fetchPixelsHere,
   image: fetchCheckedImageHere,
   tone: (url, signal) => fetchTonedHere(url, signal, 'jpeg'),
   'tone-png': (url, signal) => fetchTonedHere(url, signal, 'png'),
   mask: (url) => fetchMaskHere(url),
+  pan: fetchPanSharpHere,
 }
 
 interface Pending {
@@ -94,6 +95,11 @@ export function fetchCheckedImage(url: string, signal?: AbortSignal): Promise<Ch
 /** Fetch a Sentinel-2 / Landsat crop and tone it (api/_lib/tone.ts), in the pixels worker when possible. */
 export function fetchToned(url: string, signal?: AbortSignal, fmt: 'jpeg' | 'png' = 'jpeg'): Promise<CheckedImage> {
   return request<CheckedImage>(fmt === 'png' ? 'tone-png' : 'tone', url, signal)
+}
+
+/** A Landsat photo's pan-sharpened lightbox layer (panUrl.ts), in the pixels worker when possible. Rejects when the pan can't be had. */
+export function fetchPanSharp(url: string, signal?: AbortSignal): Promise<CheckedImage> {
+  return request<CheckedImage>('pan', url, signal)
 }
 
 /** A capture's cloud mask (tone.ts maskUrl), fetched once per session in the pixels worker when possible. */
