@@ -157,9 +157,16 @@ export function initTelemetry({ useApp, getSatInfo, cityLevelLabel, arrival }: T
   watchVitals()
 }
 
+/**
+ * Share of tabs that report web vitals. The admin page shows their 75th percentiles, which a quarter of ~20 000 daily
+ * tabs estimates just as well; every tab reporting was ~10% of all rows.
+ */
+const VITALS_SAMPLE = 0.25
+
 /** LCP, FCP, CLS and the slowest interaction (an INP approximation), sent once when the tab is first hidden. */
 function watchVitals(): void {
   if (typeof PerformanceObserver === 'undefined') return
+  if (Math.random() >= VITALS_SAMPLE) return
   let lcp: number | undefined
   let fcp: number | undefined
   let cls = 0
