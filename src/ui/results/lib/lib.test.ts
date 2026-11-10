@@ -6,6 +6,8 @@ import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences
 import { cardUrl, filterCounts, filterPhotos, hiResHelps, hiResUrl, orderPhotos, photoHeadingDeg, placeOffset, thumbUrl } from './photos'
 import { isMagnifiedView, placeInCrop, tonePlanForUrl } from '../../../../api/_lib/toneRender'
 import { pcCropUrl, type CropOpts } from '@/imagery'
+import { panApiPath, parsePanSharpUrl } from '@/imagery/panUrl'
+import { parsePanQuery } from '../../../../api/_lib/pan'
 import { groupPasses, visibleCount } from './groups'
 import { glyphForPass, markColorVar, VERDICT_META, VERDICT_TAG, VERDICT_TITLE, verdictUnit, type SatMeta } from './meta'
 import { frontLine, motionVector, revealProgress, scannedPolygon, sweepRange } from './pushbroom'
@@ -753,6 +755,25 @@ describe('photos: one order everywhere (owner B1 + D1)', () => {
         return { dx: o.fx - 0.5, dy: o.fy - 0.5 }
       })()) // the reticle sits on the same ground in both
     }
+  })
+
+  it('Landsat 8 / 9: the sharper layer is the card pan-sharpened with its 15 m band, the 30 m layer its fallback', () => {
+    const at = { lat: 25.1124, lon: 55.139 }
+    const id = 'LC09_L2SP_160043_20261103_02_T1'
+    const t = Date.UTC(2026, 10, 3, 6, 46)
+    const ls = (platform: string) => ({ ...s2, collection: 'landsat-c2-l2' as const, itemId: id, platform, datetime: t, cropUrl: (o: CropOpts) => pcCropUrl('landsat-c2-l2', id, at, o) })
+    const l9 = ls('landsat-9')
+    const p = parsePanSharpUrl(hiResUrl(l9)!)!
+    expect(p.cardUrl).toBe(cardUrl(l9))
+    expect(p.fallbackUrl).toBe(displayUrl(l9, { ...cropSpec('landsat-c2-l2'), px: 2000 }))
+    expect(p.t).toBe(t)
+    // The pan request is one api/pan accepts: the card's very box on its grid (EPSG:32640), at 1000 px.
+    const q = new URLSearchParams(panApiPath(p.cardUrl, p.t)!.split('?')[1])
+    const r = parsePanQuery(q, t + 86_400_000)
+    expect(typeof r).toBe('object')
+    expect(r).toMatchObject({ crs: 32640, box: tonePlanForUrl(cardUrl(l9))!.box, t })
+    // Landsat 7 has no Level-1 pan on CDSE here: its layer stays the 30 m one.
+    expect(hiResUrl(ls('landsat-7'))).toBe(p.fallbackUrl)
   })
 
   it('asks for the sharper layer only where it shows more than the card', () => {

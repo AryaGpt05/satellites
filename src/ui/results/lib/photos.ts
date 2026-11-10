@@ -23,6 +23,7 @@ import type { Capture, Pass, Report, SpotCloud } from '@/types'
 import { pickLead, SPOT_RANK as CLARITY_SPOT_RANK, type Ranked } from '@/lib/clarity'
 import { isClouded } from './bestLook'
 import { northInCropDeg, placeInCrop } from '../../../../api/_lib/toneRender'
+import { panSharpUrl } from '@/imagery/panUrl'
 import { captureFor, cropSpec, displayUrl, isDetailed, type CropSpec } from './captures'
 
 export interface Photo {
@@ -146,12 +147,18 @@ export const thumbUrl = (c: Capture) => displayUrl(c, { ...cardSpec(c), px: THUM
  * the browser's own upscaling of the 1000 px card where the photo is shown larger than that in device pixels (a
  * phone at 3×, a Retina laptop) or zoomed in (hiResHelps). Only the lightbox asks for it, once per photo (the
  * gallery and the hero never do). Weather mosaics, geostationary frames and an archive thumbnail (no crop): none.
+ *
+ * Landsat 8 and 9 do better: their layer is the card itself pan-sharpened with the capture's 15 m band (imagery
+ * panUrl.ts, api/pan), real ground detail twice as fine as the colour's 30 m, with the 30 m layer above as its
+ * fallback whenever the pan can't be had.
  */
 export const HIRES_PX = 2000
 export function hiResUrl(c: Capture): string | undefined {
   if (!isDetailed(c)) return undefined
   const url = displayUrl(c, { ...cardSpec(c), px: HIRES_PX })
-  return url !== cardUrl(c) ? url : undefined
+  if (url === cardUrl(c)) return undefined
+  if (c.collection === 'landsat-c2-l2' && /^landsat-[89]$/.test(c.platform)) return panSharpUrl(cardUrl(c), c.datetime, url) ?? url
+  return url
 }
 
 /** Device pixels across the shown photo past which the 1000 px card is magnified on screen (iPhone 15 Pro: 1179). */
