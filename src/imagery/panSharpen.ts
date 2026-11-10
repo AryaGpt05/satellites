@@ -28,38 +28,41 @@ function luts() {
   return { toLin, toEnc }
 }
 
-/** Separable box mean of side k (edges clamped), weighted by `w` (0 = no data): the mean of the valid pixels. */
-function boxMean(src: Float32Array, w: Float32Array, width: number, height: number, k: number): { v: Float32Array; w: Float32Array } {
-  const lo = -Math.floor((k - 1) / 2)
-  const hi = lo + k - 1
-  const tv = new Float32Array(src.length)
-  const tw = new Float32Array(src.length)
+/**
+ * Separable box mean of side k (2: this pixel and the next; 3: centred), edges clamped, weighted by `w` (0 = no data):
+ * the mean of the valid pixels. Written out per side (no inner loop): it runs over a million pixels twice.
+ */
+function boxMean(src: Float32Array, w: Float32Array, width: number, height: number, k: 2 | 3): { v: Float32Array; w: Float32Array } {
+  const n = src.length
+  const sw = new Float32Array(n)
+  for (let i = 0; i < n; i++) sw[i] = src[i] * w[i]
+  const tv = new Float32Array(n)
+  const tw = new Float32Array(n)
   for (let y = 0; y < height; y++) {
-    const row = y * width
-    for (let x = 0; x < width; x++) {
-      let a = 0
-      let b = 0
-      for (let j = lo; j <= hi; j++) {
-        const xx = x + j < 0 ? 0 : x + j >= width ? width - 1 : x + j
-        a += src[row + xx] * w[row + xx]
-        b += w[row + xx]
+    const r = y * width
+    const last = r + width - 1
+    for (let i = r; i <= last; i++) {
+      const a = i > r ? i - 1 : r
+      const b = i < last ? i + 1 : last
+      if (k === 2) {
+        tv[i] = sw[i] + sw[b]
+        tw[i] = w[i] + w[b]
+      } else {
+        tv[i] = sw[a] + sw[i] + sw[b]
+        tw[i] = w[a] + w[i] + w[b]
       }
-      tv[row + x] = a
-      tw[row + x] = b
     }
   }
-  const v = new Float32Array(src.length)
-  const ow = new Float32Array(src.length)
+  const v = new Float32Array(n)
+  const ow = new Float32Array(n)
   for (let y = 0; y < height; y++) {
+    const up = (y > 0 ? y - 1 : 0) * width
+    const dn = (y < height - 1 ? y + 1 : height - 1) * width
+    const r = y * width
     for (let x = 0; x < width; x++) {
-      let a = 0
-      let b = 0
-      for (let j = lo; j <= hi; j++) {
-        const yy = y + j < 0 ? 0 : y + j >= height ? height - 1 : y + j
-        a += tv[yy * width + x]
-        b += tw[yy * width + x]
-      }
-      const i = y * width + x
+      const i = r + x
+      const a = k === 2 ? tv[i] + tv[dn + x] : tv[up + x] + tv[i] + tv[dn + x]
+      const b = k === 2 ? tw[i] + tw[dn + x] : tw[up + x] + tw[i] + tw[dn + x]
       v[i] = b > 0 ? a / b : 0
       ow[i] = b > 0 ? 1 : 0
     }
@@ -99,14 +102,13 @@ export function panSharpen(rgba: Uint8ClampedArray | Uint8Array, pan: Uint8Clamp
     if (r8 + g8 + b8 === 0) continue
     let k = P[i] / low[i]
     k = k < RATIO_MIN ? RATIO_MIN : k > RATIO_MAX ? RATIO_MAX : k
-    const enc = (v: number) => {
-      const x = toLin[v] * k
-      return toEnc[x >= 1 ? OUT_STEPS : Math.round(x * OUT_STEPS)]
-    }
+    const xr = toLin[r8] * k
+    const xg = toLin[g8] * k
+    const xb = toLin[b8] * k
     // Never pure black: (0, 0, 0) stays the mark of no data.
-    const R = enc(r8)
-    const G = enc(g8)
-    const B = enc(b8)
+    const R = toEnc[xr >= 1 ? OUT_STEPS : (xr * OUT_STEPS + 0.5) | 0]
+    const G = toEnc[xg >= 1 ? OUT_STEPS : (xg * OUT_STEPS + 0.5) | 0]
+    const B = toEnc[xb >= 1 ? OUT_STEPS : (xb * OUT_STEPS + 0.5) | 0]
     const lift = R + G + B === 0 ? 1 : 0
     rgba[o] = R + lift
     rgba[o + 1] = G + lift
