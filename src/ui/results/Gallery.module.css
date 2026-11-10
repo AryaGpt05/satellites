@@ -222,6 +222,15 @@
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
 }
+/*
+ * A phone's bottom sheet below its top snap (Sheet.tsx: the body is then the sheet's handle): a vertical swipe on the
+ * photos must move the sheet. With pan-y allowed here (the track is its own scroll container, so the body's
+ * touch-action: none doesn't reach it) the browser claimed every vertical pan on the photo and cancelled the sheet's
+ * drag, so only the thin strip above the photos could pull the sheet down. Sideways swipes stay native.
+ */
+:global([data-at-max='false']) .track {
+  touch-action: pan-x;
+}
 .track::-webkit-scrollbar {
   display: none;
 }
