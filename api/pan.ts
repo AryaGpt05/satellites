@@ -10,7 +10,7 @@
  *   400  not an app crop · 404 no Landsat pan at that place and hour · 502 CDSE refused or unreachable
  *   503  not configured
  */
-import { panQuery, parsePanQuery, processBody } from './_lib/pan.js'
+import { parsePanQuery, processBody } from './_lib/pan.js'
 
 const TOKEN_URL = 'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token'
 const PROCESS_URL = 'https://sh.dataspace.copernicus.eu/api/v1/process'
@@ -42,9 +42,6 @@ export async function handlePan(req: Request): Promise<Response> {
   if (req.method !== 'GET') return empty(405, 'no-store')
   const parsed = parsePanQuery(new URL(req.url).searchParams, Date.now())
   if (typeof parsed === 'string') return empty(400, 'public, max-age=86400')
-  // One spelling per crop, so the edge cache has one entry per crop.
-  const canonical = panQuery(parsed.box, parsed.crs, parsed.t)
-  if (new URL(req.url).search.slice(1) !== canonical) return Response.redirect(new URL(`/api/pan?${canonical}`, req.url).toString(), 308)
   try {
     const tok = await accessToken()
     if (!tok) return empty(503, 'no-store')

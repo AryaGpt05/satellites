@@ -69,12 +69,6 @@ describe('handlePan', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('redirects another spelling of the same crop to the canonical one', async () => {
-    const r = await handlePan(url(`t=${T}&crs=32640&bbox=${BOX.join(',')}`))
-    expect(r.status).toBe(308)
-    expect(r.headers.get('location')).toBe(`https://www.watched.earth/api/pan?${panQuery(BOX, 32640, T)}`)
-  })
-
   it('says so without a body when CDSE has nothing, refuses, or is not configured', async () => {
     fetchMock.mockImplementation(async (u: string) => (String(u).includes('/token') ? new Response(JSON.stringify({ access_token: 'tok', expires_in: 600 })) : new Response('{}', { status: 400 })))
     expect((await handlePan(url())).status).toBe(404)
