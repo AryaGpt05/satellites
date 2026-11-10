@@ -15,7 +15,7 @@
 import type { Capture, LatLon } from '@/types'
 import { ES_STAC_SEARCH, PC_STAC_SEARCH, type CropOpts, type StacCollection } from './endpoints'
 import { pcCropUrl } from './pcCrop'
-import { fetchJson, isAbortError, throwIfAborted } from './net'
+import { fetchJson, HttpError, isAbortError, throwIfAborted } from './net'
 import { CROP_HALF_KM, s2EpsgFromItemId, sceneEpsgFromStac, sceneOnPlaceGrid } from '../../api/_lib/toneRender'
 
 // ── STAC wire types (only what we read) ────────────────────────────────────────────────────
@@ -341,11 +341,72 @@ export function searchBody(collection: string, place: LatLon, start: number, end
 }
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6
 
-/** POST a STAC search and follow `next` links (POST with body/merge, or plain GET). */
+/**
+ * A search body as the query string of a GET search (STAC API "Item Search": the same fields, `collections` and
+ * `sortby` as comma lists with `-field` for descending, objects as JSON). Undefined when the body holds anything
+ * this does not know how to write, so the caller keeps the POST.
+ */
+export function searchGetUrl(url: string, body: Record<string, unknown>): string | undefined {
+  const q = new URLSearchParams()
+  for (const [key, v] of Object.entries(body)) {
+    if (v === undefined) continue
+    if (key === 'collections' && Array.isArray(v) && v.every((c) => typeof c === 'string' && !c.includes(','))) q.set(key, v.join(','))
+    else if (key === 'sortby' && Array.isArray(v) && v.every(isSortField)) q.set(key, v.map((f) => (f.direction === 'desc' ? '-' : '+') + f.field).join(','))
+    else if ((key === 'intersects' || key === 'query') && typeof v === 'object' && v !== null) q.set(key, JSON.stringify(v))
+    else if (key === 'datetime' && typeof v === 'string') q.set(key, v)
+    else if (key === 'limit' && typeof v === 'number' && Number.isInteger(v)) q.set(key, String(v))
+    else return undefined
+  }
+  const out = `${url}?${q}`
+  return out.length <= MAX_GET_URL ? out : undefined
+}
+const isSortField = (f: unknown): f is { field: string; direction: 'asc' | 'desc' } =>
+  typeof f === 'object' && f !== null && typeof (f as { field?: unknown }).field === 'string' && !(f as { field: string }).field.includes(',') && ['asc', 'desc'].includes((f as { direction?: string }).direction ?? '')
+/** The app's longest search is ~400 characters; anything far beyond that is not one of ours. */
+const MAX_GET_URL = 1800
+
+/** Endpoints that refused the GET form in this tab: later searches there go straight to POST. */
+const getRefused = new Set<string>()
+
+/**
+ * One page of a search, asked for with GET.
+ *
+ * Why not POST, which is what a search body is written for: a cross-origin POST of JSON is not a "simple" request,
+ * so the browser first sends an OPTIONS preflight and waits for its answer. Planetary Computer's preflight answer
+ * carries no Access-Control-Max-Age, so it is never remembered for longer than a few seconds: every search paid a
+ * round trip before the archive even heard the question, on the path to the first photo (measured in Chromium on a
+ * datacentre link, the same query 14 times each way: 370 ms by POST, 220 ms by GET; the difference is one round trip
+ * plus the preflight's handling, so it grows with a phone's latency). A GET with no custom headers needs no
+ * preflight. Both archives answer it with the very same features as the POST (compared live for every body this
+ * module builds: week, Landsat platform filter, clear scenes with `query` + `sortby`, limit 1, and paging).
+ *
+ * POST stays as the fallback for one case only: the server refuses the GET form (a 4xx that is not worth a retry).
+ * A timeout, a network failure or a 5xx is the archive being down, and is reported as before: asking again by POST
+ * would only double the wait before the Earth Search fallback or the "unreachable" note.
+ */
+async function searchPage(url: string, body: Record<string, unknown>, opts: { signal?: AbortSignal; timeoutMs: number; retries: number }): Promise<StacItemCollection> {
+  const get = getRefused.has(url) ? undefined : searchGetUrl(url, body)
+  if (get) {
+    try {
+      return await fetchJson<StacItemCollection>(get, opts)
+    } catch (err) {
+      if (!(err instanceof HttpError) || err.retryable || opts.signal?.aborted) throw err
+      getRefused.add(url)
+    }
+  }
+  return fetchJson<StacItemCollection>(url, { ...opts, body })
+}
+
+/** Test hook: forget which endpoints refused GET. */
+export function _resetSearchTransport(): void {
+  getRefused.clear()
+}
+
+/** Run a STAC search (GET, see searchPage) and follow `next` links (plain GET, or POST with body/merge). */
 export async function stacSearchAll(url: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<StacItem[]> {
   const items = new Map<string, StacItem>()
   const opts = { signal, timeoutMs: SEARCH_TIMEOUT_MS, retries: 1 }
-  let page = await fetchJson<StacItemCollection>(url, { ...opts, body })
+  let page = await searchPage(url, body, opts)
   let lastBody = body
   for (let i = 0; ; i++) {
     for (const f of page.features ?? []) items.set(f.id, f)
@@ -469,7 +530,7 @@ export async function searchClearScenes(place: LatLon, start: number, end: numbe
   throwIfAborted(signal)
   if (!(end > start) || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) return []
   const one = async (collection: StacCollection) => {
-    const page = await fetchJson<StacItemCollection>(PC_STAC_SEARCH, { body: clearSceneBody(collection, place, start, end), signal, timeoutMs: SEARCH_TIMEOUT_MS, retries: 1 })
+    const page = await searchPage(PC_STAC_SEARCH, clearSceneBody(collection, place, start, end), { signal, timeoutMs: SEARCH_TIMEOUT_MS, retries: 1 })
     return (page.features ?? [])
       .map((it) => pcItemToCandidate({ ...it, collection: it.collection ?? collection }, place))
       .filter((c): c is Candidate => !!c && (c.capture.cloudCoverPct ?? 100) < CLEAR_SCENE_MAX_CLOUD)
@@ -493,7 +554,7 @@ export async function sentinel2PlanCovers(place: LatLon, end: number, signal?: A
   throwIfAborted(signal)
   const body = { ...searchBody('sentinel-2-l2a', place, end - PLAN_LOOKBACK_MS, end), limit: 1 }
   try {
-    const page = await fetchJson<StacItemCollection>(PC_STAC_SEARCH, { body, signal, timeoutMs: 6_000, retries: 1 })
+    const page = await searchPage(PC_STAC_SEARCH, body, { signal, timeoutMs: 6_000, retries: 1 })
     return Array.isArray(page.features) ? page.features.length > 0 : undefined
   } catch (err) {
     if (isAbortError(err) || signal?.aborted) throw err

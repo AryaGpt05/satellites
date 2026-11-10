@@ -15,8 +15,10 @@ import {
   pcItemIdFromProductUri,
   pcItemToCandidate,
   clearSceneBody,
+  _resetSearchTransport,
   searchBody,
   searchClearScenes,
+  searchGetUrl,
   searchCapturesDetailed,
   stacIso,
   stacSearchAll,
@@ -30,6 +32,15 @@ const s2Items = (pcS2 as unknown as StacItemCollection).features
 const lsItems = (pcLandsat as unknown as StacItemCollection).features
 const esItems = (esS2 as unknown as StacItemCollection).features
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
+
+/** The search a mocked fetch was asked for, whether it came as a GET's query string or a POST's JSON body. */
+function askedFor(url: string, init?: RequestInit): Record<string, any> {
+  if (init?.body !== undefined && init.body !== null) return JSON.parse(String(init.body))
+  const q = new URL(url).searchParams
+  const out: Record<string, any> = {}
+  for (const [k, v] of q) out[k] = k === 'collections' ? v.split(',') : k === 'intersects' || k === 'query' ? JSON.parse(v) : k === 'limit' ? Number(v) : v
+  return out
+}
 
 describe('platforms', () => {
   it('normalizes archive platform names to lowercase ids', () => {
@@ -266,28 +277,45 @@ describe('search', () => {
   })
 
   it('follows POST next links with their token body', async () => {
-    const calls: { url: string; body: unknown }[] = []
+    const calls: { url: string; method: string; body: Record<string, any> }[] = []
     const page1 = { features: s2Items.slice(0, 2), links: [{ rel: 'next', method: 'POST', href: 'https://x/search', body: { token: 'next:2' } }] }
     const page2 = { features: s2Items.slice(2, 3), links: [] }
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: RequestInit) => {
-        const body = JSON.parse(String(init.body))
-        calls.push({ url, body })
+        const body = askedFor(url, init)
+        calls.push({ url, method: init.method ?? 'GET', body })
         return new Response(JSON.stringify(body.token ? page2 : page1), { status: 200, headers: { 'content-type': 'application/json' } })
       }),
     )
     const items = await stacSearchAll('https://x/search', { collections: ['sentinel-2-l2a'] }, undefined)
     expect(items.map((i) => i.id)).toEqual(s2Items.slice(0, 3).map((i) => i.id))
     expect(calls).toHaveLength(2)
+    expect(calls[0].method).toBe('GET')
+    expect(calls[1].method).toBe('POST')
     expect(calls[1].body).toEqual({ token: 'next:2' }) // merge: false → body replaces
+  })
+
+  it('follows GET next links as they are (what a GET search is answered with)', async () => {
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url)
+        const second = url.includes('token=next')
+        return Response.json({ features: second ? s2Items.slice(2, 3) : s2Items.slice(0, 2), links: second ? [] : [{ rel: 'next', href: 'https://x/search?collections=sentinel-2-l2a&token=next:2' }] })
+      }),
+    )
+    const items = await stacSearchAll('https://x/search', { collections: ['sentinel-2-l2a'] }, undefined)
+    expect(items.map((i) => i.id)).toEqual(s2Items.slice(0, 3).map((i) => i.id))
+    expect(urls).toEqual(['https://x/search?collections=sentinel-2-l2a', 'https://x/search?collections=sentinel-2-l2a&token=next:2'])
   })
 
   it('falls back to Earth Search for Sentinel-2 when PC search fails, and reports it', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: RequestInit) => {
-        const body = JSON.parse(String(init.body))
+        const body = askedFor(url, init)
         if (url.includes('planetarycomputer') && body.collections[0] === 'sentinel-2-l2a') return new Response('down', { status: 503 })
         if (url.includes('planetarycomputer')) return Response.json({ features: lsItems, links: [] })
         return Response.json({ features: esItems, links: [] })
@@ -306,7 +334,7 @@ describe('search', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init: RequestInit) => {
-        const body = JSON.parse(String(init.body))
+        const body = askedFor(_url, init)
         if (body.collections[0] === 'landsat-c2-l2') await landsatHeld
         return Response.json({ features: body.collections[0] === 'landsat-c2-l2' ? lsItems : s2Items, links: [] })
       }),
@@ -332,6 +360,83 @@ describe('search', () => {
   })
 })
 
+describe('searches go out as GET: no CORS preflight ahead of the archive (a round trip saved on every search)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    _resetSearchTransport()
+  })
+  const start = Date.parse('2026-11-01T00:00:00Z')
+  const end = Date.parse('2026-11-08T00:00:00Z')
+
+  it('writes every body this module builds as a query string that reads back as the same search', () => {
+    for (const body of [
+      searchBody('sentinel-2-l2a', WATERLOO, start, end),
+      searchBody('landsat-c2-l2', WATERLOO, start, end),
+      clearSceneBody('sentinel-2-l2a', WATERLOO, start, end),
+      clearSceneBody('landsat-c2-l2', WATERLOO, start, end),
+      { ...searchBody('sentinel-2-l2a', WATERLOO, start, end), limit: 1 },
+    ]) {
+      const url = searchGetUrl('https://x/search', body)!
+      const { sortby, ...rest } = askedFor(url)
+      const { sortby: bodySort, ...bodyRest } = body
+      expect(rest).toEqual(bodyRest)
+      expect(sortby).toBe(bodySort ? '-datetime' : undefined)
+    }
+    const q = new URL(searchGetUrl('https://x/search', clearSceneBody('landsat-c2-l2', WATERLOO, start, end))!).searchParams
+    expect(q.get('collections')).toBe('landsat-c2-l2')
+    expect(q.get('intersects')).toBe('{"type":"Point","coordinates":[-80.5449,43.4723]}')
+    expect(q.get('datetime')).toBe('2026-11-01T00:00:00Z/2026-11-08T00:00:00Z')
+    expect(q.get('query')).toBe('{"platform":{"in":["landsat-8","landsat-9"]},"eo:cloud_cover":{"lt":20}}')
+    // An ascending sort's "+" must survive the query string (a bare "+" reads back as a space).
+    expect(searchGetUrl('https://x/search', { sortby: [{ field: 'datetime', direction: 'asc' }] })).toBe('https://x/search?sortby=%2Bdatetime')
+  })
+
+  it('keeps the POST for a body it cannot write faithfully', () => {
+    expect(searchGetUrl('https://x/search', { collections: ['a'], filter: { op: '=' } })).toBeUndefined()
+    expect(searchGetUrl('https://x/search', { collections: ['a,b'] })).toBeUndefined()
+    expect(searchGetUrl('https://x/search', { sortby: [{ field: 'datetime' }] })).toBeUndefined()
+    expect(searchGetUrl('https://x/search', { limit: 1.5 })).toBeUndefined()
+    expect(searchGetUrl('https://x/search', { query: { note: 'x'.repeat(2000) } })).toBeUndefined()
+  })
+
+  it('a search is one simple GET: no method, no body, no headers that would need a preflight', async () => {
+    const seen: { url: string; init: RequestInit }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => (seen.push({ url, init }), Response.json({ features: [], links: [] }))))
+    await searchCapturesDetailed(WATERLOO, start, end)
+    await searchClearScenes(WATERLOO, start, end)
+    expect(seen).toHaveLength(4)
+    for (const { url, init } of seen) {
+      expect(url.startsWith('https://planetarycomputer.microsoft.com/api/stac/v1/search?')).toBe(true)
+      expect(init.method ?? 'GET').toBe('GET')
+      expect(init.body).toBeUndefined()
+      expect(init.headers).toBeUndefined()
+    }
+  })
+
+  it('an archive that refuses the GET form is asked by POST, and from then on by POST only', async () => {
+    const methods: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const method = init.method ?? 'GET'
+        methods.push(method)
+        return method === 'GET' ? new Response('{"code":"BadRequest"}', { status: 400 }) : Response.json({ features: s2Items.slice(0, 1), links: [] })
+      }),
+    )
+    expect(await stacSearchAll('https://x/search', { collections: ['sentinel-2-l2a'] })).toHaveLength(1)
+    expect(methods).toEqual(['GET', 'POST'])
+    expect(await stacSearchAll('https://x/search', { collections: ['sentinel-2-l2a'] })).toHaveLength(1)
+    expect(methods).toEqual(['GET', 'POST', 'POST'])
+  })
+
+  it('an archive that is down is not asked a second way: the wait before the fallback stays what it was', async () => {
+    const methods: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => (methods.push(init.method ?? 'GET'), new Response('down', { status: 503 }))))
+    await expect(stacSearchAll('https://x/search', { collections: ['sentinel-2-l2a'] })).rejects.toMatchObject({ status: 503 })
+    expect(methods).toEqual(['GET', 'GET']) // one attempt and its one retry, as the POST had
+  })
+})
+
 describe('clear scenes (owner D: the last clear look before a cloudy week)', () => {
   afterEach(() => vi.unstubAllGlobals())
   const start = Date.parse('2026-09-02T00:00:00Z')
@@ -352,7 +457,7 @@ describe('clear scenes (owner D: the last clear look before a cloudy week)', () 
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init: RequestInit) => {
-        const body = JSON.parse(String(init.body)) as { collections: string[] }
+        const body = askedFor(_url, init) as { collections: string[] }
         bodies.push(body)
         return Response.json(body.collections[0] === 'sentinel-2-l2a' ? clearS2 : clearLs)
       }),
@@ -371,7 +476,7 @@ describe('clear scenes (owner D: the last clear look before a cloudy week)', () 
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init: RequestInit) => {
-        const body = JSON.parse(String(init.body)) as { collections: string[] }
+        const body = askedFor(_url, init) as { collections: string[] }
         return body.collections[0] === 'sentinel-2-l2a' ? new Response('down', { status: 503 }) : Response.json(clearLs)
       }),
     )
