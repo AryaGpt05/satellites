@@ -117,7 +117,12 @@ async function loadPanSharp(url: string, timeoutMs: number): Promise<HTMLImageEl
   const timer = setTimeout(() => ctl.abort(), PAN_TIMEOUT_MS)
   try {
     const r = await fetchPanSharp(url, ctl.signal)
-    if (r.blob) return await loadOnce(URL.createObjectURL(r.blob), timeoutMs)
+    if (r.blob) {
+      const img = await loadOnce(URL.createObjectURL(r.blob), timeoutMs)
+      // Says what it shows (15 m detail), so the lightbox's labels can say so too; the 30 m fallback is not marked.
+      img.dataset.pan = '15'
+      return img
+    }
   } catch {
     /* the 30 m layer below */
   } finally {

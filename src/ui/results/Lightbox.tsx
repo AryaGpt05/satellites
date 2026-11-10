@@ -131,6 +131,9 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   // Photos zoomed in this opening: their sharper layer loads even where 1× does not ask for it.
   const zoomedRef = useRef(new Set<string>())
   const [zoomedKeys, setZoomedKeys] = useState<ReadonlySet<string>>(zoomedRef.current)
+  // Photos whose pan-sharpened 15 m layer is on screen (Landsat 8/9): their labels say 15 m, not the colour's 30 m.
+  const [panKeys, setPanKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const onPanShown = useCallback((key: string) => setPanKeys((s) => (s.has(key) ? s : new Set(s).add(key))), [])
   const reduced = prefersReducedMotion()
   const photo = items[index]
   const n = items.length
@@ -624,7 +627,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
             return (
               <div key={p.key} className={s.slide} style={{ transform: `translateX(${d * (side + GAP)}px)` }} aria-hidden={d !== 0 || undefined}>
                 <div ref={d === 0 ? zoomRef : undefined} className={s.zoom}>
-                  <LbPhoto photo={p} model={model} hires={opened && !closing && d === 0 && (hiAt1x || zoomedKeys.has(p.key))} reveal={p.key === revealKey} />
+                  <LbPhoto photo={p} model={model} hires={opened && !closing && d === 0 && (hiAt1x || zoomedKeys.has(p.key))} reveal={p.key === revealKey} onPanShown={onPanShown} />
                 </div>
               </div>
             )
@@ -636,7 +639,9 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
         <span className={cx(s.chip, s.tl)}>
           {meta.name} · {sensorName(photo.capture)}
         </span>
-        <span className={cx(s.chip, s.tr)}>{int(photo.capture.gsdM)} m / pixel</span>
+        <span className={cx(s.chip, s.tr)} title={panKeys.has(photo.key) ? "Pan-sharpened with Landsat's 15 m band" : undefined}>
+          {panKeys.has(photo.key) ? 15 : int(photo.capture.gsdM)} m / pixel
+        </span>
         <span className={s.scale}>
           <span ref={barRef} className={s.scaleBar} />
           <span ref={barTextRef} className={s.scaleText} />
@@ -680,7 +685,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
       ) : null}
 
       <div ref={setChrome(1)} className={s.meta} style={{ top: layout.top + side + 12, left: mobile ? undefined : layout.left, width: mobile ? undefined : side }}>
-        <MetaStrip photo={photo} model={model} mobile={mobile} />
+        <MetaStrip photo={photo} model={model} mobile={mobile} pan={panKeys.has(photo.key)} />
         {photo.pass && onReplay ? (
           <Button
             size="sm"
@@ -715,7 +720,20 @@ const hiFailed = new Set<string>()
  * once the card shows (so the card's curve is the one it is toned with) and crossfades in over it, the same box pixel
  * for pixel. A layer already decoded this session shows in the first frame. A failure leaves the card, silently.
  */
-function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: ResultsModel; hires: boolean; reveal: boolean }) {
+function LbPhoto({
+  photo,
+  model,
+  hires,
+  reveal,
+  onPanShown,
+}: {
+  photo: Photo
+  model: ResultsModel
+  hires: boolean
+  reveal: boolean
+  /** The photo's pan-sharpened layer (15 m) is the one shown */
+  onPanShown?: (key: string) => void
+}) {
   const base = cardUrl(photo.capture)
   const hi = hiResUrl(photo.capture)
   const [baseOk, setBaseOk] = useState(() => !!decodedPhoto(base) || hasPhotoElement('lightbox', base))
@@ -748,6 +766,11 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
       })
     return () => ctl.abort()
   }, [hires, hi, hiOk, cardShown])
+  // The sharper layer on screen is the pan-sharpened one (not its 30 m fallback): the labels say 15 m.
+  const hiShown = hiOk && (!reveal || !photo.pass || revealed)
+  useEffect(() => {
+    if (hiShown && hi && decodedPhoto(hi)?.dataset.pan === '15') onPanShown?.(photo.key)
+  }, [hiShown, hi, photo.key, onPanShown])
   const alt = `${model.meta(photo.pass?.norad ?? photo.capture.norad ?? 0).name} image of ${model.report.place.label}. The place is at the centre.`
   const dim = photo.clouded ? ((photo.capture.cloudCoverPct ?? 0) >= 90 ? s.dimOvercast : s.dimCloud) : undefined
   const hiLayer = hiOk && hi ? <Img view="lightbox-hi" url={hi} alt="" ariaHidden className={cx(s.img, dim)} fadeClass={hiFade ? s.hiFade : undefined} /> : null
@@ -782,7 +805,7 @@ function LbPhoto({ photo, model, hires, reveal }: { photo: Photo; model: Results
  * first row never truncates: the relative time ("· 2 days ago") is dropped whole when the row is too narrow for it
  * (it wraps into a clipped second line), so the satellite, day and time always read in full.
  */
-function MetaStrip({ photo, model, mobile }: { photo: Photo; model: ResultsModel; mobile: boolean }) {
+function MetaStrip({ photo, model, mobile, pan }: { photo: Photo; model: ResultsModel; mobile: boolean; pan?: boolean }) {
   const { capture, pass } = photo
   const meta = model.meta(pass?.norad ?? capture.norad ?? 0)
   const tz = model.tz
@@ -810,7 +833,7 @@ function MetaStrip({ photo, model, mobile }: { photo: Photo; model: ResultsModel
           ) : null}
         </span>
         <span className={s.metaLine}>
-          {productLabel(capture)} · {km}
+          {pan ? 'Landsat C2 L2 + L1 pan · 15 m' : productLabel(capture)} · {km}
         </span>
         <span className={s.metaLine}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
         <span className={s.credit}>{credit(capture)}</span>
@@ -832,7 +855,7 @@ function MetaStrip({ photo, model, mobile }: { photo: Photo; model: ResultsModel
       </span>
       <span className={s.metaRow}>
         <span className={s.metaMain}>
-          {productLabel(capture)} · {km} · <span className={s.nowrap}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
+          {pan ? 'Landsat C2 L2 + L1 pan · 15 m' : productLabel(capture)} · {km} · <span className={s.nowrap}>{coordsOf(model.report.place.lat, model.report.place.lon)}</span>
         </span>
       </span>
       <span className={s.credit}>{credit(capture)}</span>
