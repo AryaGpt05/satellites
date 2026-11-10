@@ -547,9 +547,16 @@ function LocatingStatus({ state }: { state: Extract<LocateState, { kind: 'locati
   )
 }
 
+/** Touch screens: a finger can't hover the globe to discover the pin, so a chip drops one (see Examples). */
+const TOUCH_QUERY = '(hover: none) and (pointer: coarse)'
+
 function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; disabled?: boolean; locate: ReturnType<typeof useLocate> }) {
   const locating = locate.state.kind === 'locating'
   const [hover, setHover] = useState<ExamplePlace | null>(null)
+  // A pin dropped on the globe searches too (globe/PinMarker.tsx), once the 3D globe is up: with a mouse, the
+  // header's idle hint says so (a click on the planet drops it); on touch, a chip drops one in the middle of the globe.
+  const pinReady = useApp((st) => st.pinReady)
+  const touch = useMediaQuery(TOUCH_QUERY)
   // Swipeable row (stacked): the edge fade that says "more" lifts once the row is scrolled to its end, and the
   // leading edge fades too once the row has scrolled (a chip is never hard-cut at either edge).
   const listRef = useRef<HTMLUListElement>(null)
@@ -587,6 +594,11 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
               <span className={s.exSep}>·</span>
               {hover.sublabel}
             </>
+          ) : pinReady && !touch ? (
+            <span className={s.pinHint}>
+              <Glyph name="reticle" size={11} />
+              Or click the globe to drop a pin
+            </span>
           ) : null}
         </span>
       </div>
@@ -609,6 +621,14 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
             {locating ? 'Locating…' : 'Near me'}
           </button>
         </li>
+        {pinReady && touch ? (
+          <li>
+            <button type="button" className={cx(s.chip, s.chipLocate)} disabled={disabled} onClick={() => useApp.getState().dropPinAtCentre()}>
+              <Glyph name="reticle" size={12} />
+              Drop a pin
+            </button>
+          </li>
+        ) : null}
         {EXAMPLE_PLACES.map((p) => (
           <li key={p.chip}>
             <button

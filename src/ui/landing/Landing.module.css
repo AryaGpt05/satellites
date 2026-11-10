@@ -406,6 +406,19 @@
 .exCoord {
   color: var(--bone-2);
 }
+/* The header's idle hint (a mouse): a click on the globe drops a pin. */
+.pinHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--bone-3);
+  animation: pin-hint-in var(--d-md) var(--ease-out) both;
+}
+@keyframes pin-hint-in {
+  from {
+    opacity: 0;
+  }
+}
 .exSep {
   margin: 0 0.7em;
   color: var(--bone-4);
