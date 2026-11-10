@@ -29,7 +29,6 @@ import { useApp } from '@/state/store'
 import { ELEMENT_STRIDE, FLAG_FEATURED, getSatInfo, keplerJ2World, propagate, type CatalogBuffers } from './data'
 import { createSatellitesMaterial } from './materials'
 import { nearestWithin, projectPoints } from './picking'
-import { HOLD_MS } from './pin'
 import { FRAME, useRuntime } from './runtime'
 import { SatGlyph, useSatAnchor, type MarkTone, type SatTrackFn } from './SatMarker'
 
@@ -133,8 +132,9 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
       // A tap (no drag) on touch screens selects the nearest satellite for the callout.
       if (e.pointerType === 'mouse') return
       if (Math.hypot(e.clientX - pointer.current.downX, e.clientY - pointer.current.downY) > 8) return
-      // A press held long enough to drop a pin (PinMarker) is not also a satellite pick.
-      if (performance.now() - pointer.current.downAt >= HOLD_MS) return
+      // A press that dropped a pin (PinMarker, reset on every press) is not also a satellite pick; a slow tap that
+      // dropped nothing (over space, or while pins are off) still picks.
+      if (rt.pinPress.dropped) return
       const r = rect()
       pointer.current.x = e.clientX - r.left
       pointer.current.y = e.clientY - r.top

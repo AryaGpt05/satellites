@@ -1,6 +1,6 @@
 /*
  * The dropped pin's card and the press ring (PinOverlay.tsx). The card is the callout plate (ink-1, hairline) with the
- * search field's orange arrow; it wipes in from the pin's side (the go button's own clip-path wipe, DESIGN §5).
+ * search field's orange arrow; it fades in with a short slide away from the pin.
  */
 .layer {
   position: absolute;
@@ -56,20 +56,17 @@
 .anchor[data-side='left'] .card {
   animation-name: card-in-left;
 }
+/* A fade with a short slide off the pin (compositor-only: the card takes clicks from its first frame). */
 @keyframes card-in {
   from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
+    opacity: 0;
+    transform: translateX(-6px);
   }
 }
 @keyframes card-in-left {
   from {
-    clip-path: inset(0 0 0 100%);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
+    opacity: 0;
+    transform: translateX(6px);
   }
 }
 

@@ -455,7 +455,8 @@ export function SearchBox({
                   className={cx(s.option, i === active && s.active)}
                   onPointerDown={(e) => {
                     e.preventDefault()
-                    optTap.current = e.pointerType === 'touch' ? { id: e.pointerId, i, x: e.clientX, y: e.clientY } : null
+                    // Touch and pen (an Apple Pencil on iOS blurs the field just the same); a mouse chooses on click.
+                    optTap.current = e.pointerType !== 'mouse' ? { id: e.pointerId, i, x: e.clientX, y: e.clientY } : null
                     if (optTap.current) setTouchingList(true)
                   }}
                   onPointerMove={() => i !== active && setActive(i)}

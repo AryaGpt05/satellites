@@ -141,7 +141,8 @@ function usePinGestures() {
       rt.pinPress.at = press.at
       const p = press
       timer = window.setTimeout(() => {
-        if (press !== p || !canPin(useApp.getState())) return
+        if (press !== p) return
+        if (!canPin(useApp.getState())) return endPress()
         // Under the finger as it is now: a wobble within the slop pans the globe a little too.
         if (dropAt(p.lx, p.ly)) {
           rt.pinPress.dropped = true

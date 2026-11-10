@@ -52,6 +52,14 @@ function PinCard({ runtime, pin, onSearch }: { runtime: GlobeRuntime; pin: Dropp
   const [named, setNamed] = useState<Named | null>(null)
   const naming = useRef<Promise<Place | null> | null>(null)
   const [busy, setBusy] = useState(false)
+  /** False once this card is gone (the pin removed or replaced, a search started): a waiting search then never runs. */
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
 
   // The name, at once.
   useEffect(() => {
@@ -77,7 +85,7 @@ function PinCard({ runtime, pin, onSearch }: { runtime: GlobeRuntime; pin: Dropp
   const searchRef = useRef<() => void>(() => undefined)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key !== 'Escape' && e.key !== 'Enter') || e.defaultPrevented || e.isComposing) return
+      if ((e.key !== 'Escape' && e.key !== 'Enter') || e.defaultPrevented || e.isComposing || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
       const t = e.target as HTMLElement | null
       const own = !!t && !!card.current?.contains(t)
       if (!own && t && t !== document.body && t.closest?.('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]')) return
@@ -160,6 +168,8 @@ function PinCard({ runtime, pin, onSearch }: { runtime: GlobeRuntime; pin: Dropp
     let place = name
     if (place === undefined && naming.current) {
       place = await Promise.race([naming.current, new Promise<null>((r) => setTimeout(() => r(null), PIN_NAME_WAIT_MS))])
+      // Removed (×, Esc, a click on space) or overtaken by another search while the name was awaited: not this one.
+      if (!alive.current || useApp.getState().pin?.id !== pin.id) return
     }
     // Searching ends this card (the phase change clears the pin); the place is the pin's spot exactly.
     onSearch(
