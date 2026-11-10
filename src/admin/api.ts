@@ -35,6 +35,8 @@ export interface AdminStats {
   maintLastAt: number | null
   /** The last UTC day rolled into the daily totals, 'YYYY-MM-DD' */
   rolledThrough: string | null
+  /** When these stats were computed (the 5-minute cache, 0009), ms; null from a database before 0009 */
+  cachedAt: number | null
 }
 
 let client: SupabaseClient | null | undefined
@@ -98,13 +100,19 @@ export type StatsResult = { ok: true; stats: AdminStats } | { ok: false; denied:
 export async function fetchStats(range: Range): Promise<StatsResult> {
   const sb = supabase()
   if (!sb) return { ok: false, denied: false, message: 'Supabase is not configured for this build.' }
-  const { data, error } = await sb.rpc('admin_stats', { p_range: range })
+  let { data, error } = await sb.rpc('admin_stats', { p_range: range })
+  // A statement timeout (57014) on a cold cache usually succeeds straight after, once the pages are in memory:
+  // retry once here so the page doesn't need a second manual Refresh.
+  if (error && isTimeout(error)) ({ data, error } = await sb.rpc('admin_stats', { p_range: range }))
   if (error) return { ok: false, denied: error.code === '42501' || /not allowed|permission/i.test(error.message), message: error.message }
   const stats = parseStats(data)
   return stats ? { ok: true, stats } : { ok: false, denied: false, message: 'Unexpected response.' }
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+/** Postgres query_canceled: the authenticated role's statement_timeout (exported for tests). */
+export const isTimeout = (e: { code?: string; message?: string }): boolean => e.code === '57014' || /statement timeout/i.test(e.message ?? '')
+
+const isObj =(v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
@@ -132,6 +140,7 @@ export function parseStats(v: unknown): AdminStats | null {
     recentSearches: Array.isArray(v.recentSearches) ? (v.recentSearches.filter(isObj) as AdminStats['recentSearches']) : [],
     maintLastAt: numOrNull(v.maintLastAt),
     rolledThrough: typeof v.rolledThrough === 'string' ? v.rolledThrough : null,
+    cachedAt: numOrNull(v.cachedAt),
     recentErrors: Array.isArray(v.recentErrors) ? (v.recentErrors.filter(isObj) as AdminStats['recentErrors']) : [],
   }
 }

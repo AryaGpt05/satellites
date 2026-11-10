@@ -100,6 +100,11 @@ export const DEVICE_NAMES: Record<string, string> = { desktop: 'Desktop', phone:
 
 export const VERDICT_NAMES: Record<string, string> = { imaged: 'Watched', likely: 'Likely watched', could: 'Could have pointed here', overhead: 'Passed overhead' }
 
+/** How old the cached stats are: 'UPDATED JUST NOW' under a minute, else 'UPDATED 3 MIN AGO' (fmtAgo). */
+export function fmtUpdated(cachedAt: number, now = Date.now()): string {
+  return now - cachedAt < 60e3 ? 'UPDATED JUST NOW' : `UPDATED ${fmtAgo(cachedAt, now)}`
+}
+
 /** The hourly maintenance cron job hasn't run for over 2 hours (or never has). */
 export function maintBehind(s: { maintLastAt: number | null; generatedAt: number }): boolean {
   return s.maintLastAt == null || s.generatedAt - s.maintLastAt > 2 * 3600e3

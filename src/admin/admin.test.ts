@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStats, RANGES } from './api'
+import { isTimeout, parseStats, RANGES } from './api'
 import { mockStats } from './fixture'
 import { fmtBucket, fmtPct, niceMax } from './format'
 
@@ -46,5 +46,30 @@ describe('maintenance note', () => {
     expect(maintBehind({ generatedAt: now, maintLastAt: now - 3 * 3600e3 })).toBe(true)
     expect(maintBehind({ generatedAt: now, maintLastAt: null })).toBe(true)
     expect(parseStats({ range: '7d', maintLastAt: now, rolledThrough: '2026-11-08' })).toMatchObject({ maintLastAt: now, rolledThrough: '2026-11-08' })
+  })
+})
+
+describe('admin_stats retry', () => {
+  it('treats only statement timeouts as retryable', () => {
+    expect(isTimeout({ code: '57014', message: 'canceling statement due to statement timeout' })).toBe(true)
+    expect(isTimeout({ message: 'canceling statement due to statement timeout' })).toBe(true)
+    expect(isTimeout({ code: '42501', message: 'not allowed' })).toBe(false)
+  })
+})
+
+describe('cached stats', () => {
+  it('parses cachedAt, null from a database before 0009', () => {
+    const now = Date.UTC(2026, 10, 10, 12)
+    expect(parseStats({ range: '24h', cachedAt: now })?.cachedAt).toBe(now)
+    expect(parseStats({ range: '24h' })?.cachedAt).toBeNull()
+    expect(parseStats({ range: '24h', cachedAt: 'soon' })?.cachedAt).toBeNull()
+    expect(mockStats('7d', now).cachedAt).toBe(now - 3 * 60e3)
+  })
+  it("says how long ago the stats were updated", async () => {
+    const { fmtUpdated } = await import('./format')
+    const now = Date.UTC(2026, 10, 10, 12)
+    expect(fmtUpdated(now - 20e3, now)).toBe('UPDATED JUST NOW')
+    expect(fmtUpdated(now - 4 * 60e3, now)).toBe('UPDATED 4 MIN AGO')
+    expect(fmtUpdated(now - 16 * 60e3, now)).toBe('UPDATED 16 MIN AGO')
   })
 })
