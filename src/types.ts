@@ -20,7 +20,7 @@ export interface Place extends LatLon {
   /** ISO 3166-1 alpha-2, lowercase, if known */
   countryCode?: string
   /** Where this place came from */
-  source: 'search' | 'geolocation' | 'url' | 'demo'
+  source: 'search' | 'geolocation' | 'url' | 'demo' | 'pin'
   /** The label names a street, a building or an address (set by the geocoder): usage stats save its city instead */
   streetLevel?: boolean
 }

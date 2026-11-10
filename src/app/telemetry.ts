@@ -34,6 +34,8 @@ export function searchSource(st: Pick<AppState, 'place' | 'shared'>): string {
   switch (st.place?.source) {
     case 'demo':
       return 'example'
+    case 'pin':
+      return 'pin'
     case 'geolocation':
       return 'near_me'
     case 'url':

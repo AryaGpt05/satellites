@@ -83,6 +83,7 @@ export const SOURCE_NAMES: Record<string, string> = {
   search: 'Typed search',
   example: 'Example chip',
   near_me: 'Near me',
+  pin: 'Dropped pin',
   deep_link: 'Deep link',
   share_link: 'Share link',
   retry: 'Retry',
