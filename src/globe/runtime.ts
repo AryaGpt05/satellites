@@ -135,6 +135,11 @@ export interface GlobeRuntime {
   calloutBox: { x0: number; y0: number; x1: number; y1: number; visible: boolean }
   /** Bottom edge (CSS px) of the acquisition countdown while it shows (0 = hidden): callouts keep below it */
   readoutBottom: number
+  /**
+   * A finger pressing toward a dropped pin (PinMarker, touch / pen): where (CSS px in the canvas) and since when, for the
+   * press ring the overlay draws; `at` is -1 when no press is running. `dropped` is set the moment the pin drops.
+   */
+  pinPress: { x: number; y: number; at: number; dropped: boolean }
 }
 
 export interface PaintUniforms {
@@ -219,6 +224,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     anchorListeners: new Set(),
     calloutBox: { x0: 0, y0: 0, x1: 0, y1: 0, visible: false },
     readoutBottom: 0,
+    pinPress: { x: 0, y: 0, at: -1, dropped: false },
   }
 }
 

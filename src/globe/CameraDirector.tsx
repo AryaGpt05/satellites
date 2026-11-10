@@ -663,7 +663,8 @@ export function CameraDirector() {
         rotateAbout(s.pose.fwd, s.pose.d, a * damp(dt, 0.4), s.pose.fwd)
         // Drift, resuming after the user lets go.
         const idleFor = now - input.lastInputAt
-        const want = !rt.reducedMotion && !input.dragging && idleFor > RESUME_AFTER_MS && s.bootDolly !== 'armed' ? 1 : 0
+        // A dropped pin holds the planet still: it must not drift away from its card while someone reads it.
+        const want = !rt.reducedMotion && !input.dragging && idleFor > RESUME_AFTER_MS && s.bootDolly !== 'armed' && !store.pin ? 1 : 0
         s.drift = clamp(s.drift + (want ? dt / RAMP_S : -dt / 0.3), 0, 1)
         if (s.drift > 0) {
           const ease = s.drift * s.drift * (3 - 2 * s.drift)

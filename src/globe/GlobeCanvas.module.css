@@ -8,6 +8,8 @@
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  /* A finger held on the globe drops a pin (PinMarker): no iOS callout or magnifier over it. */
+  -webkit-touch-callout: none;
 }
 .root canvas {
   display: block;

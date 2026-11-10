@@ -31,6 +31,7 @@ import {
 import { buildSpacecraftGeometry } from './spacecraft'
 import { Imagery } from './Imagery'
 import { PassOverlay } from './PassOverlay'
+import { PinMarker } from './PinMarker'
 import { PlaceMarker } from './PlaceMarker'
 import { usePost } from './Post'
 import { GL_DEBUG, glFixedDpr, glProbe, glx } from './debugGl'
@@ -83,6 +84,7 @@ export function GlobeScene({ runtime }: { runtime: GlobeRuntime }) {
       {textures.state === 'ready' && !glx('noimagery') && <Imagery />}
       {catalog.state === 'ready' && !glx('nosats') && <SatelliteField data={catalog.data} />}
       <PlaceMarker />
+      <PinMarker />
       {catalog.state === 'ready' && <PassOverlay />}
       <ReadySignal ready={textures.state !== 'loading'} />
       <AnchorFlush />

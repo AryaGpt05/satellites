@@ -29,6 +29,7 @@ import { useApp } from '@/state/store'
 import { ELEMENT_STRIDE, FLAG_FEATURED, getSatInfo, keplerJ2World, propagate, type CatalogBuffers } from './data'
 import { createSatellitesMaterial } from './materials'
 import { nearestWithin, projectPoints } from './picking'
+import { HOLD_MS } from './pin'
 import { FRAME, useRuntime } from './runtime'
 import { SatGlyph, useSatAnchor, type MarkTone, type SatTrackFn } from './SatMarker'
 
@@ -103,7 +104,7 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
     }
   }, [elements])
 
-  const pointer = useRef({ x: 0, y: 0, inside: false, moved: false, touch: false, buttons: 0, tapAt: -1, downX: 0, downY: 0 })
+  const pointer = useRef({ x: 0, y: 0, inside: false, moved: false, touch: false, buttons: 0, tapAt: -1, downX: 0, downY: 0, downAt: 0 })
   const ownHover = useRef<number | undefined>(undefined)
 
   useEffect(() => {
@@ -126,11 +127,14 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
     const onDown = (e: PointerEvent) => {
       pointer.current.downX = e.clientX
       pointer.current.downY = e.clientY
+      pointer.current.downAt = performance.now()
     }
     const onUp = (e: PointerEvent) => {
       // A tap (no drag) on touch screens selects the nearest satellite for the callout.
       if (e.pointerType === 'mouse') return
       if (Math.hypot(e.clientX - pointer.current.downX, e.clientY - pointer.current.downY) > 8) return
+      // A press held long enough to drop a pin (PinMarker) is not also a satellite pick.
+      if (performance.now() - pointer.current.downAt >= HOLD_MS) return
       const r = rect()
       pointer.current.x = e.clientX - r.left
       pointer.current.y = e.clientY - r.top

@@ -23,6 +23,15 @@ export interface UiInsets {
 }
 
 /** Camera flight status. Times are performance.now() ms. Written by the globe's CameraDirector only. */
+/** A pin on the globe (see AppState.pin). */
+export interface DroppedPin {
+  id: number
+  lat: number
+  lon: number
+  /** 'chip': the landing's "Drop a pin" chip put it at the middle of the globe (its card says how to move it) */
+  via?: 'globe' | 'chip'
+}
+
 export interface CameraFlight {
   id: number
   flying: boolean
@@ -74,6 +83,15 @@ export interface AppState {
   /** The day map is sharper than the boot level (see header). Written once by the globe; survives reset(). */
   dayMapSharp: boolean
   catalogReady: boolean
+  /**
+   * A pin dropped on the globe (PinMarker): where "Search here" would search. `id` changes with every drop, so a pin
+   * dropped on the same spot again still replays its drop.
+   */
+  pin?: DroppedPin
+  /** The globe can take a dropped pin (WebGL scene mounted): the landing mentions it only then. */
+  pinReady: boolean
+  /** Bumped by the landing's "Drop a pin" chip: the globe drops a pin at the middle of the planet's disc. */
+  pinAtCentre: number
 
   // actions
   setPhase: (p: Phase, error?: string) => void
@@ -97,6 +115,9 @@ export interface AppState {
   setGlobeReady: (v: boolean) => void
   setDayMapSharp: (v: boolean) => void
   setCatalogReady: (v: boolean) => void
+  setPin: (p?: DroppedPin) => void
+  setPinReady: (v: boolean) => void
+  dropPinAtCentre: () => void
   reset: () => void
 }
 
@@ -114,6 +135,8 @@ export const useApp = create<AppState>((set) => ({
   globeReady: false,
   dayMapSharp: false,
   catalogReady: false,
+  pinReady: false,
+  pinAtCentre: 0,
 
   setPhase: (phase, error) => set({ phase, error }),
   setPlace: (place) => set({ place }),
@@ -139,6 +162,9 @@ export const useApp = create<AppState>((set) => ({
   setGlobeReady: (globeReady) => set({ globeReady }),
   setDayMapSharp: (dayMapSharp) => set({ dayMapSharp }),
   setCatalogReady: (catalogReady) => set({ catalogReady }),
+  setPin: (pin) => set({ pin }),
+  setPinReady: (pinReady) => set({ pinReady }),
+  dropPinAtCentre: () => set((st) => ({ pinAtCentre: st.pinAtCentre + 1 })),
   reset: () =>
     set({
       phase: 'idle',
@@ -151,6 +177,7 @@ export const useApp = create<AppState>((set) => ({
       timeMode: 'live',
       simTime: Date.now(),
       camera: { kind: 'overview' },
+      pin: undefined,
     }),
 }))
 
