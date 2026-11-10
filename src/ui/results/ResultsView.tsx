@@ -90,6 +90,8 @@ const sheetMemo: Partial<Record<'overview' | 'photo' | 'plan', { key: string; vh
  * A pass view's flight snap before any was measured: the grip, the one-line pass header with its reserved replay
  * strip, and the footer (236 px at every phone width measured, 375 to 430), plus the bottom safe area.
  */
+/** Phones: the overview's globe snap never goes below this visible height (px): the grip and the search bar. */
+const MIN_GLOBE_SNAP_PX = 150
 const FLIGHT_EST_PX = 236
 let safeBottomPx = 0
 /** The bottom safe-area inset, read once off the critical path (an idle probe after the panel mounts). */
@@ -146,6 +148,14 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const [inviteClosed, setInviteClosed] = useState(false)
   const [snap, setSnap] = useState(0)
   const overviewSnap = useRef(0)
+  /**
+   * Phones, the overview: pulled down to its globe snap, below the peek (only the header shows, the globe has the
+   * screen). Kept apart from `snap` so the overview's other snaps keep their indices (0 peek, 1 mid, 2 top) for every
+   * caller; the globe snap is the overview list's first entry, and `snap` is shifted past it while this is false.
+   */
+  const [collapsed, setCollapsed] = useState(false)
+  /** The snap list on screen is the overview's (with its globe snap first): onSnapChange maps indices back. */
+  const overviewListRef = useRef(false)
   // When computing started (T+ readout): reset in the render that shows a new place, or a re-run of the same one
   // (LAP-02: a passive effect reset it after the first paint, so a New search first showed the last search's
   // elapsed time, 'T+50.93 S', for a few frames).
@@ -305,6 +315,9 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   // The snaps (and index) the sheet was last given: a view whose content is not measured yet holds the sheet there.
   const lastShown = useRef<{ snaps: number[]; index: number } | null>(null)
   let heldIndex: number | undefined
+  /** heldIndex is an index into the list on screen already (held from lastShown), not a logical overview snap. */
+  let heldPhysical = false
+  let overviewList = false
   // PH-03: the sheet moves in the same beat as the content swap. While the outgoing view fades out (and until the
   // incoming one is measured) it goes to the incoming view's snaps when they are known: the computing readout's last
   // measure, this report's overview as last measured, a pass view as last measured (the first time, its flight snap
@@ -314,6 +327,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const snaps = (() => {
     if (predicted) {
       heldIndex = predicted.index
+      overviewList = viewKey === 'overview'
       return predicted.snaps
     }
     if (shownKey === 'computing') {
@@ -329,6 +343,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     // per action).
     if (geo.key !== shownKey && lastShown.current) {
       heldIndex = lastShown.current.index
+      heldPhysical = true
       return lastShown.current.snaps
     }
     const pad = geo.pad
@@ -338,7 +353,11 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       // 232 px band (HUD + globe) stays above the sheet (U-6: the caption was cut in half there); the mid snap
       // stays above the peek.
       const p0 = Math.min(peek, Math.max(vh * (MID - 0.02), vh - 232))
-      const list = [p0, Math.max(vh * MID, p0 + 60), TOP]
+      // The globe snap: the header alone (the place, the window and the search bar), the globe above it on most of the
+      // screen. Pulled down to from the peek; results never open on it.
+      const globe = Math.max(MIN_GLOBE_SNAP_PX, Math.min(geo.top + 4, p0 - 80))
+      const list = [globe, p0, Math.max(vh * MID, p0 + 60), TOP]
+      overviewList = true
       if (mobile && shownReportKey) sheetMemo.overview = { key: shownReportKey, vh, snaps: list }
       return list
     }
@@ -356,7 +375,9 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
     return list
   })()
 
-  const sheetSnap = heldIndex ?? snap
+  const logicalSnap = heldIndex ?? snap
+  const sheetSnap = overviewList && !heldPhysical ? (collapsed && heldIndex === undefined ? 0 : logicalSnap + 1) : logicalSnap
+  overviewListRef.current = overviewList
   lastShown.current = { snaps, index: Math.min(sheetSnap, snaps.length - 1) }
 
   // Phase / view changes pick the snap. A new search drops to the computing snap at once (R2R8: one glide down);
@@ -448,11 +469,23 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
 
   const onSnapChange = useCallback(
     (i: number) => {
+      if (overviewListRef.current) {
+        // The overview's list starts with its globe snap: the others are `snap` + 1.
+        setCollapsed(i === 0)
+        if (i === 0) return
+        setSnap(i - 1)
+        if (viewKey === 'overview') overviewSnap.current = i - 1
+        return
+      }
       setSnap(i)
       if (viewKey === 'overview') overviewSnap.current = i
     },
     [viewKey],
   )
+  // The globe snap is a place the user pulled the overview to: any other view, a new place or a search leaves it.
+  useEffect(() => {
+    setCollapsed(false)
+  }, [viewKey, placeKey, searching])
 
   // Inline search on phones: the sheet rises while typing.
   useEffect(() => {
