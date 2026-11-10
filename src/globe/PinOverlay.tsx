@@ -29,7 +29,7 @@ import type { GlobeRuntime } from './runtime'
 import s from './PinOverlay.module.css'
 
 /** Gap between the pin's centre and its card (CSS px): just outside the ring and its ticks. */
-const CARD_GAP = 30
+const CARD_GAP = 34
 /** How long "Search here" waits for a name still on its way before searching the coordinates. */
 const PIN_NAME_WAIT_MS = 600
 const edgeFor = (stacked: boolean) => (stacked ? 22 : 28)

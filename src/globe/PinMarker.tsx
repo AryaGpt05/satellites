@@ -81,17 +81,22 @@ function usePinGestures() {
   useEffect(() => {
     const el = gl.domElement
     const pointers = new Set<number>()
-    let press: (PressStart & { id: number }) | null = null
+    /** The press under way; `lx`, `ly` where the finger is now (it may wobble a few px while it holds) */
+    let press: (PressStart & { id: number; lx: number; ly: number }) | null = null
     let timer = 0
     const endPress = () => {
       window.clearTimeout(timer)
       press = null
       rt.pinPress.at = -1
     }
-    const ndcOf = (clientX: number, clientY: number) => {
-      const r = el.getBoundingClientRect()
-      return r.width && r.height ? { x: ((clientX - r.left) / r.width) * 2 - 1, y: -((clientY - r.top) / r.height) * 2 + 1 } : null
-    }
+    // The canvas' box, kept current by a ResizeObserver (the hover check runs on every mouse move: no layout read there).
+    let rect = el.getBoundingClientRect()
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => (rect = el.getBoundingClientRect()))
+    ro?.observe(el)
+    const onResize = () => (rect = el.getBoundingClientRect())
+    window.addEventListener('resize', onResize)
+    const ndcOf = (clientX: number, clientY: number) =>
+      rect.width && rect.height ? { x: ((clientX - rect.left) / rect.width) * 2 - 1, y: -((clientY - rect.top) / rect.height) * 2 + 1 } : null
     /** Drop (or move) the pin under client point (x, y); true if it landed on the planet. */
     const dropAt = (clientX: number, clientY: number): boolean => {
       const n = ndcOf(clientX, clientY)
@@ -126,18 +131,19 @@ function usePinGestures() {
         pointerType: e.pointerType,
         button: e.button,
         modifier: e.shiftKey || e.ctrlKey || e.metaKey || e.altKey,
+        lx: e.clientX,
+        ly: e.clientY,
       }
       rt.pinPress.dropped = false
       if (e.pointerType === 'mouse') return
-      const r = el.getBoundingClientRect()
-      rt.pinPress.x = e.clientX - r.left
-      rt.pinPress.y = e.clientY - r.top
+      rt.pinPress.x = e.clientX - rect.left
+      rt.pinPress.y = e.clientY - rect.top
       rt.pinPress.at = press.at
-      rt.pinPress.dropped = false
       const p = press
       timer = window.setTimeout(() => {
         if (press !== p || !canPin(useApp.getState())) return
-        if (dropAt(p.x, p.y)) {
+        // Under the finger as it is now: a wobble within the slop pans the globe a little too.
+        if (dropAt(p.lx, p.ly)) {
           rt.pinPress.dropped = true
           navigator.vibrate?.(8)
         }
@@ -146,7 +152,10 @@ function usePinGestures() {
       }, HOLD_MS)
     }
     const onMove = (e: PointerEvent) => {
-      if (press && press.id === e.pointerId && press.pointerType !== 'mouse' && !holdStill(press, e.clientX, e.clientY)) endPress()
+      if (!press || press.id !== e.pointerId || press.pointerType === 'mouse') return
+      if (!holdStill(press, e.clientX, e.clientY)) return endPress()
+      press.lx = e.clientX
+      press.ly = e.clientY
     }
     const onUp = (e: PointerEvent) => {
       pointers.delete(e.pointerId)
@@ -171,6 +180,8 @@ function usePinGestures() {
     return () => {
       endPress()
       offChip()
+      ro?.disconnect()
+      window.removeEventListener('resize', onResize)
       el.style.cursor = ''
       el.removeEventListener('pointerdown', onDown)
       el.removeEventListener('pointermove', onMove)
