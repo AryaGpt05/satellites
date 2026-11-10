@@ -117,9 +117,12 @@ function openAbout() {
  * results panel (opening About re-rendered the panel: ~1.2 s on a 4× throttled phone before its dialog could
  * commit, with the globe already paused).
  */
-const GlobeSlot = memo(function GlobeSlot({ View }: { View: ComponentType<{ className?: string }> }) {
-  return <View className={s.scene} />
+type GlobeView = ComponentType<{ className?: string; onPinSearch?: (place: Place) => void }>
+const GlobeSlot = memo(function GlobeSlot({ View }: { View: GlobeView }) {
+  return <View className={s.scene} onPinSearch={searchFromPin} />
 })
+/** "Search here" on a pin dropped on the globe (globe/PinOverlay.tsx). */
+const searchFromPin = (p: Place) => void runReport(p)
 const searchFromPanel = (p: Place) => void runReport(p)
 const searchFromLanding = (p: Place) => void runReport(p)
 const ResultsSlot = memo(function ResultsSlot({ View }: { View: ComponentType<ResultsViewProps> }) {
@@ -270,7 +273,7 @@ export default function Main() {
     const raf = requestAnimationFrame(() => setPanelReady(true))
     return () => cancelAnimationFrame(raf)
   }, [panel])
-  const GlobeCanvas: ComponentType<{ className?: string }> | undefined = useChunk(loadGlobe, true)?.GlobeCanvas
+  const GlobeCanvas: GlobeView | undefined = useChunk(loadGlobe, true)?.GlobeCanvas
   const ResultsView = useChunk(loadResults, panel)?.ResultsView
   const AboutPage = useChunk(loadAbout, about)?.AboutPage
 

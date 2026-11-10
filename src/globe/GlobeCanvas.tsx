@@ -12,11 +12,13 @@ import { Canvas } from '@react-three/fiber'
 import { Component, lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Color, WebGLRenderer } from 'three'
 import { STACKED_QUERY } from '@/lib/layout'
+import type { Place } from '@/types'
 import { useApp } from '@/state/store'
 import { useMediaQuery } from '@/ui/system/media'
 import { palette } from '@/ui/system/palette'
 import { activeGlSwitches, GL_DEBUG, GL_SWITCHES, glFixedDpr, glProbe, urlWithSwitches } from './debugGl'
 import { GlobeOverlay } from './GlobeOverlay'
+import { PinOverlay } from './PinOverlay'
 import { detectMobile, dprLevels, prefersReducedMotion, provisionalTier } from './quality'
 import { createRuntime } from './runtime'
 import { GlobeScene } from './Scene'
@@ -64,7 +66,7 @@ function webgl2Available(): boolean {
   }
 }
 
-export function GlobeCanvas({ className }: { className?: string }) {
+export function GlobeCanvas({ className, onPinSearch }: { className?: string; onPinSearch?: (place: Place) => void }) {
   const [supported] = useState(webgl2Available)
   const [failed, setFailed] = useState(false)
   const unavailable = !supported || failed
@@ -131,6 +133,7 @@ export function GlobeCanvas({ className }: { className?: string }) {
             <GlobeScene runtime={runtime} />
           </Canvas>
           <GlobeOverlay runtime={runtime} />
+          <PinOverlay runtime={runtime} onSearch={onPinSearch} />
           {GL_DEBUG && (
             <Suspense fallback={null}>
               <DebugGl probe={glProbe} switches={GL_SWITCHES} active={GL_ACTIVE} urlWith={urlWithSwitches} />

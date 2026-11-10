@@ -1,0 +1,217 @@
+/*
+ * The dropped pin's card and the press ring (PinOverlay.tsx). The card is the callout plate (ink-1, hairline) with the
+ * search field's orange arrow; it wipes in from the pin's side (the go button's own clip-path wipe, DESIGN §5).
+ */
+.layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
+  pointer-events: auto;
+  transition: opacity var(--d-sm) var(--ease-out);
+}
+.anchor[data-visible='0'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.caption {
+  margin: 0;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--ink-0) 72%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 350;
+  font-size: var(--fs-meta);
+  line-height: 16px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-2);
+  white-space: nowrap;
+  animation: card-in var(--d-sm) var(--ease-out) 120ms both;
+}
+.card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0 5px 12px;
+  background: var(--ink-1);
+  border: 1px solid var(--line-strong);
+  animation: card-in var(--d-sm) var(--ease-out) both;
+}
+.anchor[data-side='left'] .card {
+  animation-name: card-in-left;
+}
+@keyframes card-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes card-in-left {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* One width whatever the name: the card never resizes (nor changes side) when the name comes in. */
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 196px;
+  min-width: 0;
+}
+.coord {
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-weight: 350;
+  font-size: var(--fs-meta);
+  line-height: 14px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--bone-3);
+  white-space: nowrap;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: var(--fs-small);
+  line-height: 18px;
+  color: var(--bone);
+  transition: color var(--d-sm) var(--ease-out);
+}
+.name[data-state='naming'],
+.name[data-state='none'] {
+  color: var(--bone-3);
+}
+.sub {
+  margin-left: 3px;
+  color: var(--bone-3);
+}
+
+.go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  background: var(--signal);
+  color: var(--ink-0);
+  transition: background-color var(--d-hover) var(--ease-out);
+}
+.go:active {
+  background: var(--signal-hover);
+  transition-duration: 0ms;
+}
+.go:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 40px;
+  margin-left: -12px;
+  color: var(--bone-3);
+  transition: color var(--d-hover) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .go:hover {
+    background: var(--signal-hover);
+  }
+  .close:hover {
+    color: var(--bone);
+  }
+}
+.go:focus-visible,
+.close:focus-visible {
+  outline: 1px solid var(--bone);
+  outline-offset: 2px;
+}
+
+/* Phones: a narrower name, and touch-sized targets (the arrow is already 40 px; the × grows to 40). */
+@media (max-width: 520px) {
+  .text {
+    width: 156px;
+  }
+  .close {
+    width: 40px;
+  }
+}
+
+/* The press ring under a finger: a hairline track, and a stroke that closes around it over the hold (wide enough to
+   show around a fingertip). */
+.press {
+  position: absolute;
+  left: -38px;
+  top: -38px;
+  width: 76px;
+  height: 76px;
+  opacity: 0;
+  transition: opacity var(--d-hover) var(--ease-out);
+}
+.press[data-on='1'] {
+  opacity: 1;
+}
+.press svg {
+  display: block;
+  overflow: visible;
+}
+.pressTrack,
+.pressFill {
+  fill: none;
+  stroke-width: 1.5;
+}
+.pressTrack {
+  stroke: var(--bone-4);
+}
+.pressFill {
+  stroke: var(--bone);
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transform: rotate(-90deg);
+  transform-origin: 38px 38px;
+}
+.press[data-on='1'] .pressFill {
+  animation: press-fill var(--fill-ms, 310ms) linear forwards;
+}
+@keyframes press-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: none;
+  }
+  .press[data-on='1'] .pressFill {
+    animation-duration: 1ms;
+  }
+}

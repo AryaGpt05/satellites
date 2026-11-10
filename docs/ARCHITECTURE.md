@@ -124,10 +124,15 @@ GIBS image its `src` is a blob: URL of the bytes the pixels worker fetched and c
 answer (I-1: no full-size draw or read-back on the main thread), so a fresh `<img src={url}>` would download it again.
 
 ### globe → `src/globe/index.ts`
-`export function GlobeCanvas(props: { className?: string }): JSX.Element`: a full-bleed canvas that reads the store. It renders:
+`export function GlobeCanvas(props: { className?: string; onPinSearch?: (place: Place) => void }): JSX.Element`: a full-bleed canvas that reads the store. It renders:
 Earth (real sun), clouds, atmosphere, stars, the whole catalog as GPU points, the place reticle, and the selected pass
 (ground track, swath ribbon, satellite with callout, replay-synced), plus a camera director for `store.camera` intents.
-Store writes: `globeReady`, `hoveredNorad`, `simTime`, `cameraFlight`, `dayMapSharp`. It sets `globeReady` once first textures are on screen, and
+Dropped pins (`src/globe/pin.ts`, `PinMarker.tsx`, `PinOverlay.tsx`): a click on the planet (mouse) or a finger held still
+for 450 ms (touch, pen; a quick tap stays the satellite pick) drops a bone reticle at that spot in `store.pin`, with a card
+that names it (Photon reverse geocoding) and an orange arrow that calls `onPinSearch` with a `source: 'pin'` place. Pins
+exist in `idle`, `results` and `error`; any search starting clears them; while one is down the overview drift holds still.
+`store.dropPinAtCentre()` (the landing's touch chip) drops one at the middle of the planet's disc.
+Store writes: `globeReady`, `hoveredNorad`, `simTime`, `cameraFlight`, `dayMapSharp`, `pin`, `pinReady`. It sets `globeReady` once first textures are on screen, and
 `dayMapSharp` once, when the first day-map upgrade above the boot level (2k on the phone tier, 4k on the desktop tier) has been
 fully uploaded and swapped in, or at first light when the tier plan has no such step. `reset()` does not clear `dayMapSharp`.
 It must also accept the engine's `ElementBuffer` (loaded internally via `loadCatalog` + `buildElementBuffer`).

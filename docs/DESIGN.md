@@ -113,6 +113,7 @@ The results headline integer is static: it does not count up. It counts the dist
   - Orbits: 1px lines with alpha fading along the trail behind the satellite (no full ellipses by default).
 - **Swath:** when a pass is selected, its **swath ribbon** is drawn on the surface as a translucent signal fill (`--signal-2`) with 1px edge lines, and the swath **sweeps** over the place marker in sync with replay time.
 - **The place marker:** a signal-coloured crosshair reticle projected on the surface. It has a thin ring, four ticks, a centre dot, and a coordinate label. It locks in when the camera arrives (the ring contracts from 2× to 1× over 500ms).
+- **A dropped pin:** the same reticle in `bone`, not signal: a proposal, not a searched place. It drops by closing from 2.2× onto its crosshair (280 ms, ease-out); its card is the callout plate (ink-1, hairline) with the spot's name, its coordinates in mono, and the search field's own orange arrow. On touch, a ring fills under the held finger before it drops.
 - **Post:** very subtle film grain (≤ 3%), gentle vignette, mild bloom only on the signal colour and city lights. No chromatic aberration, no lens flare.
 
 ## 7. Voice
