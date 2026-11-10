@@ -216,13 +216,30 @@ export function SearchBox({
       'Name, address or lat, lon'
     ) : undefined
 
-  const showList = open && focused && fresh
+  // A touch tap on a suggestion is chosen when the finger lifts, not on its click: iOS Safari moves focus off the
+  // field first (pointerdown's preventDefault doesn't stop that on touch), the blur closes the list, and the click
+  // then lands on whatever is under it, so the place was never chosen (the field kept the typed text and waited for
+  // the arrow). A lift that moved (a scroll of the list) chooses nothing; the scroll cancels the pointer anyway.
+  const optTap = useRef<{ id: number; i: number; x: number; y: number } | null>(null)
+  const touchChoseAt = useRef(-Infinity)
+  /** The field lost focus during a touch on a suggestion; its blur is reported when the touch ends (releaseBlur). */
+  const blurHeld = useRef(false)
+  const releaseBlur = () => {
+    if (!blurHeld.current) return
+    blurHeld.current = false
+    if (document.activeElement === inputRef.current) return
+    setOpen(false)
+    cb.current.onFocusChange?.(false)
+  }
+  // A finger on a suggestion keeps the list up even if the field has already lost focus (see optTap).
+  const [touchingList, setTouchingList] = useState(false)
+  const showList = open && (focused || touchingList) && fresh
   const activeId = showList && active >= 0 ? `${listId}-${active}` : undefined
 
   // Report the list's visibility (with options) to the caller, which may move the field for it.
   const listOpen = showList && places.length > 0
-  const cb = useRef({ onListChange, onQueryChange, liftedBy })
-  cb.current = { onListChange, onQueryChange, liftedBy }
+  const cb = useRef({ onListChange, onQueryChange, liftedBy, onFocusChange })
+  cb.current = { onListChange, onQueryChange, liftedBy, onFocusChange }
   const reportedOpen = useRef(false)
   useLayoutEffect(() => {
     if (listOpen === reportedOpen.current) return
@@ -408,6 +425,12 @@ export function SearchBox({
         }}
         onBlur={() => {
           setFocused(false)
+          // A blur from a finger on a suggestion (iOS): the list stays up, and the caller is told only once that tap
+          // is chosen or cancelled (the phone landing moves the field back down on a blur, away from the finger).
+          if (optTap.current) {
+            blurHeld.current = true
+            return
+          }
           setOpen(false)
           onFocusChange?.(false)
         }}
@@ -430,9 +453,31 @@ export function SearchBox({
                   role="option"
                   aria-selected={i === active}
                   className={cx(s.option, i === active && s.active)}
-                  onPointerDown={(e) => e.preventDefault()}
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    optTap.current = e.pointerType === 'touch' ? { id: e.pointerId, i, x: e.clientX, y: e.clientY } : null
+                    if (optTap.current) setTouchingList(true)
+                  }}
                   onPointerMove={() => i !== active && setActive(i)}
-                  onClick={() => choose(p)}
+                  onPointerUp={(e) => {
+                    const t = optTap.current
+                    optTap.current = null
+                    setTouchingList(false)
+                    if (!t || t.id !== e.pointerId || t.i !== i || Math.hypot(e.clientX - t.x, e.clientY - t.y) > 12) return releaseBlur()
+                    touchChoseAt.current = performance.now()
+                    choose(p)
+                    releaseBlur()
+                  }}
+                  onPointerCancel={() => {
+                    optTap.current = null
+                    setTouchingList(false)
+                    releaseBlur()
+                  }}
+                  onClick={() => {
+                    // A touch tap was already chosen on its pointerup (above): this is its click.
+                    if (performance.now() - touchChoseAt.current < 1000) return
+                    choose(p)
+                  }}
                 >
                   <span className={s.optText}>
                     <span className={s.optLabel}>{p.label}</span>
