@@ -31,6 +31,7 @@ export type { ImageProbe } from './image'
 
 export { gibsWmsUrl, gibsDomainsUrl, worldviewUrl, pcItemMapUrl } from './endpoints'
 export { pcCropUrl, isTonedUrl } from './pcCrop'
+export { panSharpUrl, isPanSharpUrl } from './panUrl'
 export type { CropOpts } from './endpoints'
 
 export { fetchJson, withRetry, HttpError, TimeoutError, isAbortError } from './net'

@@ -26,7 +26,8 @@ import { isTonedUrl } from './pcCrop'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
 import { measureNoData } from './pixels'
-import { fetchCheckedImage, fetchPixels, fetchToned } from './pixelsClient'
+import { fetchCheckedImage, fetchPanSharp, fetchPixels, fetchToned } from './pixelsClient'
+import { isPanSharpUrl, parsePanSharpUrl } from './panUrl'
 
 export { decodeImagePixels, measureNoData } from './pixels'
 
@@ -106,6 +107,29 @@ async function loadToned(url: string, timeoutMs: number): Promise<HTMLImageEleme
   return loadOnce(URL.createObjectURL(blob), timeoutMs)
 }
 
+/**
+ * A Landsat 8/9 photo's pan-sharpened lightbox layer (panUrl.ts), decoded from the worker's bytes. Whatever stops it
+ * (no pan for that capture yet, the free quota spent, CDSE down, a timeout) gives the 30 m sharper layer instead, so the
+ * lightbox is never worse off than without it.
+ */
+async function loadPanSharp(url: string, timeoutMs: number): Promise<HTMLImageElement> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), PAN_TIMEOUT_MS)
+  try {
+    const r = await fetchPanSharp(url, ctl.signal)
+    if (r.blob) return await loadOnce(URL.createObjectURL(r.blob), timeoutMs)
+  } catch {
+    /* the 30 m layer below */
+  } finally {
+    clearTimeout(timer)
+  }
+  const fallback = parsePanSharpUrl(url)?.fallbackUrl
+  if (!fallback) throw new Error('Image failed to load')
+  return loadToned(fallback, timeoutMs)
+}
+/** How long the pan-sharpened layer may take before the 30 m one is fetched instead (CDSE: ~1–3 s cold). */
+const PAN_TIMEOUT_MS = 6_000
+
 function loadOnce(url: string, timeoutMs: number): Promise<HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image()
@@ -150,7 +174,13 @@ export function preloadImage(url: string, opts: { signal?: AbortSignal; timeoutM
   const timeoutMs = opts.timeoutMs ?? IMAGE_TIMEOUT_MS
   const blobs = typeof URL.createObjectURL === 'function'
   const load = () =>
-    blobs && isGibsUrl(url) ? loadGibs(url, timeoutMs) : blobs && isTonedUrl(url) ? loadToned(url, timeoutMs) : loadOnce(url, timeoutMs)
+    blobs && isGibsUrl(url)
+      ? loadGibs(url, timeoutMs)
+      : blobs && isPanSharpUrl(url)
+        ? loadPanSharp(url, timeoutMs)
+        : blobs && isTonedUrl(url)
+          ? loadToned(url, timeoutMs)
+          : loadOnce(url, timeoutMs)
   const p = memoAsync(imageCache, url, async () => {
     try {
       return await load()
