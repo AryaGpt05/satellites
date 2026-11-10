@@ -275,6 +275,7 @@ export function CameraDirector() {
     userTouched: false,
     gestureSeen: 0,
     drift: 0, // 0..1 ramp of the overview drift
+    held: false, // a pin or a tapped satellite held the drift last frame
     // Inputs of the current target spec (recompute only when one changes).
     spec: null as PoseSpec | null,
     intent: null as CameraIntent | null,
@@ -662,9 +663,13 @@ export function CameraDirector() {
         const a = signedAngle(s.pose.fwd, tmp.n, s.pose.d)
         rotateAbout(s.pose.fwd, s.pose.d, a * damp(dt, 0.4), s.pose.fwd)
         // Drift, resuming after the user lets go.
+        // A dropped pin, or a satellite picked by a tap, holds the planet still (it must not drift away from its card or
+        // callout while someone reads it). Clicking off it lets the drift ease back in at once, not 5 s later.
+        const held = !!store.pin || rt.tapPicked
+        if (s.held && !held) input.lastInputAt = Math.min(input.lastInputAt, now - RESUME_AFTER_MS)
+        s.held = held
         const idleFor = now - input.lastInputAt
-        // A dropped pin holds the planet still: it must not drift away from its card while someone reads it.
-        const want = !rt.reducedMotion && !input.dragging && idleFor > RESUME_AFTER_MS && s.bootDolly !== 'armed' && !store.pin ? 1 : 0
+        const want = !rt.reducedMotion && !input.dragging && idleFor > RESUME_AFTER_MS && s.bootDolly !== 'armed' && !held ? 1 : 0
         s.drift = clamp(s.drift + (want ? dt / RAMP_S : -dt / 0.3), 0, 1)
         if (s.drift > 0) {
           const ease = s.drift * s.drift * (3 - 2 * s.drift)

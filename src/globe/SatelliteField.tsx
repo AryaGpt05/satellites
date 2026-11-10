@@ -252,7 +252,11 @@ export function SatelliteField({ data }: { data: CatalogBuffers }) {
         ownHover.current = undefined
         st.setHoveredNorad(undefined)
       }
+      // A tapped satellite holds the drift still until it is tapped off (a mouse hover never does).
+      rt.tapPicked = tapped && norad !== undefined
     }
+    // …or until its callout goes some other way (a new search, the hover taken over by the panel).
+    if (rt.tapPicked && (ownHover.current === undefined || st.hoveredNorad !== ownHover.current)) rt.tapPicked = false
   }, FRAME.scene)
 
   const hovered = useApp((s) => s.hoveredNorad)

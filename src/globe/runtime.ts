@@ -140,6 +140,8 @@ export interface GlobeRuntime {
    * press ring the overlay draws; `at` is -1 when no press is running. `dropped` is set the moment the pin drops.
    */
   pinPress: { x: number; y: number; at: number; dropped: boolean }
+  /** A satellite picked by a tap (touch) is showing its callout: the overview drift holds still under it (SatelliteField). */
+  tapPicked: boolean
 }
 
 export interface PaintUniforms {
@@ -225,6 +227,7 @@ export function createRuntime(tier: QualityTier, reducedMotion: boolean, now: nu
     calloutBox: { x0: 0, y0: 0, x1: 0, y1: 0, visible: false },
     readoutBottom: 0,
     pinPress: { x: 0, y: 0, at: -1, dropped: false },
+    tapPicked: false,
   }
 }
 
