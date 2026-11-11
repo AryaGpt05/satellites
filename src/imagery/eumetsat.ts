@@ -131,11 +131,18 @@ export function eumetsatFrameCandidates(info: EumetsatFrameLayer, place: LatLon,
   return min === undefined ? window : window.filter((t) => sunElevationDeg(place.lat, place.lon, t) >= min)
 }
 
-/** True if a daylight product could have a frame for the place in the search window: no request is made otherwise. */
-function sunWasUp(info: EumetsatFrameLayer, place: LatLon, now: number): boolean {
+/** The newest frame is never older than this (measured: 22–37 minutes). */
+const NEWEST_FRAME_MAX_AGE_MS = 60 * 60_000
+
+/**
+ * True if a daylight product could have a frame for the place among the `maxSteps` newest: the sun stood high enough
+ * at some point they can cover. No request is made otherwise.
+ */
+function sunWasUp(info: EumetsatFrameLayer, place: LatLon, now: number, maxSteps: number): boolean {
   const min = info.minSunDeg
   if (min === undefined) return true
-  for (let t = now; t >= now - LIST_WINDOW_MS; t -= 10 * 60_000) if (sunElevationDeg(place.lat, place.lon, t) >= min) return true
+  const oldest = now - NEWEST_FRAME_MAX_AGE_MS - maxSteps * info.stepMin * 60_000
+  for (let t = now; t >= oldest; t -= 5 * 60_000) if (sunElevationDeg(place.lat, place.lon, t) >= min) return true
   return false
 }
 
@@ -151,7 +158,7 @@ export async function latestEumetsatFrame(
   opts: CropOpts,
   { signal, now = Date.now(), maxSteps = 4 }: { signal?: AbortSignal; now?: number; maxSteps?: number } = {},
 ): Promise<{ url: string; time: number } | null> {
-  if (!sunWasUp(info, place, now)) return null
+  if (!sunWasUp(info, place, now, maxSteps)) return null
   let listed: number[]
   try {
     listed = await eumetsatFrames(info, { signal, now })
