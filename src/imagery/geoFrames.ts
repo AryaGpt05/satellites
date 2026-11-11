@@ -56,12 +56,12 @@ export const GEO_FRAMES: Readonly<Record<GeoFrameSource, GeoFrameSpec>> = {
       { via: 'gibs', layer: HIMAWARI_INFRARED, band: 'infrared', gridKm: 2 },
     ],
   },
-  'meteosat-0deg': { sensor: 'FCI', layers: [{ via: 'eumetsat', layer: { layer: 'mtg_fd:rgb_geocolour' }, band: 'colour', gridKm: 2 }] },
+  'meteosat-0deg': { sensor: 'FCI', layers: [{ via: 'eumetsat', layer: { layer: 'mtg_fd:rgb_geocolour', stepMin: 10 }, band: 'colour', gridKm: 2 }] },
   'meteosat-iodc': {
     sensor: 'SEVIRI',
     layers: [
-      { via: 'eumetsat', layer: { layer: 'msg_iodc:rgb_naturalenhncd', minSunDeg: DAYLIGHT_MIN_SUN_DEG }, band: 'colour', gridKm: 5 },
-      { via: 'eumetsat', layer: { layer: 'msg_iodc:ir108' }, band: 'infrared', gridKm: 5 },
+      { via: 'eumetsat', layer: { layer: 'msg_iodc:rgb_naturalenhncd', stepMin: 15, minSunDeg: DAYLIGHT_MIN_SUN_DEG }, band: 'colour', gridKm: 5 },
+      { via: 'eumetsat', layer: { layer: 'msg_iodc:ir108', stepMin: 15 }, band: 'infrared', gridKm: 5 },
     ],
   },
 }

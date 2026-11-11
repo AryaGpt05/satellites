@@ -13,6 +13,10 @@
  *  - Meteosat-9's natural-colour product is masked wherever the sun stands under about 3°. An 800 km square is whole
  *    once the sun is 6° up at its centre (`minSunDeg`).
  *  - A frame's GetMap answer carries `max-age=604800`: its URL (an exact TIME) is downloaded once per browser.
+ *  - The capabilities document can fail for a couple of minutes at a time: one 403 from the origin was seen held by
+ *    the service's own cache past its 2 minutes (05:54–05:57Z, as a new frame was published). The tile service's
+ *    DescribeDomains (250 bytes, not cached, CORS `*`) names the same newest frame as "start--end", so it is asked
+ *    when the first list fails; frames are then counted back from the end by the layer's cadence.
  *
  * The pictures are EUMETSAT "Advanced Image Products", which its Data Policy (25 November 2025) lists as Core data:
  * free and unrestricted, with the attribution of article 6.3 (About page, THIRD_PARTY_NOTICES.md). Nothing here goes
@@ -29,6 +33,8 @@ import { isAbortError, raceAbort, throwIfAborted, withRetry } from './net'
 export interface EumetsatFrameLayer {
   /** "workspace:name", e.g. "mtg_fd:rgb_geocolour" */
   layer: string
+  /** Minutes between frames */
+  stepMin: number
   /** A daylight product: frames with the sun lower than this at the place are masked, so they are skipped */
   minSunDeg?: number
 }
@@ -55,6 +61,11 @@ export function eumetsatCapabilitiesUrl(layer: string): string {
   return `${EUMETSAT_GEOSERVER}/${encodeURIComponent(workspace)}/${encodeURIComponent(name ?? '')}/ows?service=WMS&version=1.3.0&request=GetCapabilities`
 }
 
+/** The tile service's time domain for a layer: the fallback frame list (see the header). */
+export function eumetsatDomainUrl(layer: string): string {
+  return `${EUMETSAT_GEOSERVER}/gwc/service/wmts?service=WMTS&version=1.0.0&request=DescribeDomains&layer=${encodeURIComponent(layer)}&tileMatrixSet=${encodeURIComponent('EPSG:4326')}&domains=time`
+}
+
 /** How far back the frame list goes: far enough for a few steps back from the newest frame. */
 const LIST_WINDOW_MS = 3 * 3_600_000
 /** How long a frame list is trusted (the service caches the document for 2 minutes itself). */
@@ -66,24 +77,42 @@ export function parseTimeDimension(xml: string, from: number, to: number): numbe
   return domain ? parseTimeDomain(domain, from, to).reverse() : []
 }
 
+/** A DescribeDomains answer ("start--end"), as frame instants `stepMs` apart counted back from the end, in [from, to], newest first. */
+export function parseDomainRange(xml: string, stepMs: number, from: number, to: number): number[] {
+  const end = Date.parse(/<Domain>[^<]*--([^<]+)<\/Domain>/.exec(xml)?.[1] ?? '')
+  const out: number[] = []
+  if (!Number.isFinite(end) || !(stepMs > 0)) return out
+  for (let t = end; t >= from && out.length < 64; t -= stepMs) if (t <= to) out.push(t)
+  return out
+}
+
 const lists = /* @__PURE__ */ new Map<string, { at: number; frames: Promise<number[]> }>()
 
+/** One frame list. Never tied to a caller's signal: the answer is shared. */
+async function fetchFrames(url: string, retries: number, parse: (xml: string) => number[], layer: string): Promise<number[]> {
+  return withRetry(
+    async (s) => {
+      const res = await fetch(url, { signal: s })
+      const found = res.ok ? parse(await res.text()) : []
+      if (!found.length) throw new Error(`EUMETSAT lists no frames for ${layer}`)
+      return found
+    },
+    { timeoutMs: 6_000, retries, label: url },
+  )
+}
+
 /**
- * The frames EUMETView lists for a layer over the last 3 hours, newest first. One small XML request per layer,
- * shared by concurrent callers and kept for 5 minutes. Rejects on network failure and on abort.
+ * The frames EUMETView lists for a layer over the last 3 hours, newest first. One small XML request per layer
+ * (a second, to the tile service, when the first fails), shared by concurrent callers and kept for 5 minutes.
+ * Rejects on network failure and on abort.
  */
-export function eumetsatFrames(layer: string, { signal, now = Date.now() }: { signal?: AbortSignal; now?: number } = {}): Promise<number[]> {
+export function eumetsatFrames(info: Pick<EumetsatFrameLayer, 'layer' | 'stepMin'>, { signal, now = Date.now() }: { signal?: AbortSignal; now?: number } = {}): Promise<number[]> {
+  const { layer } = info
   let entry = lists.get(layer)
   if (!entry || Math.abs(now - entry.at) >= LIST_TTL_MS) {
-    const url = eumetsatCapabilitiesUrl(layer)
-    const frames = withRetry(
-      async (s) => {
-        const res = await fetch(url, { signal: s })
-        const found = parseTimeDimension(await res.text(), now - LIST_WINDOW_MS, now)
-        if (!res.ok || !found.length) throw new Error(`EUMETSAT lists no frames for ${layer}`)
-        return found
-      },
-      { timeoutMs: 6_000, retries: 1, label: url },
+    const from = now - LIST_WINDOW_MS
+    const frames = fetchFrames(eumetsatCapabilitiesUrl(layer), 0, (xml) => parseTimeDimension(xml, from, now), layer).catch(() =>
+      fetchFrames(eumetsatDomainUrl(layer), 1, (xml) => parseDomainRange(xml, info.stepMin * 60_000, from, now), layer),
     )
     const mine = (entry = { at: now, frames })
     lists.set(layer, mine)
@@ -125,7 +154,7 @@ export async function latestEumetsatFrame(
   if (!sunWasUp(info, place, now)) return null
   let listed: number[]
   try {
-    listed = await eumetsatFrames(info.layer, { signal, now })
+    listed = await eumetsatFrames(info, { signal, now })
   } catch (err) {
     if (isAbortError(err) || signal?.aborted) throw err
     return null // no list, no frame: a guessed TIME would be answered with its nearest frame, at an unknown age
