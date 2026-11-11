@@ -82,6 +82,7 @@ export function countryName(cc: string | undefined): string {
 export const SOURCE_NAMES: Record<string, string> = {
   search: 'Typed search',
   example: 'Example chip',
+  surprise: 'Surprise me',
   near_me: 'Near me',
   pin: 'Dropped pin',
   deep_link: 'Deep link',

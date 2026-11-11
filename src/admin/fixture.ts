@@ -89,7 +89,7 @@ export function mockStats(range: Range, now = Date.now()): AdminStats {
     top: {
       'search.label': places,
       'search.country': Object.entries(countries).sort((a, b) => b[1] - a[1]),
-      'search.source': [['search', k(310)], ['example', k(122)], ['share_link', k(64)], ['near_me', k(41)], ['deep_link', k(23)], ['retry', k(4)]],
+      'search.source': [['search', k(310)], ['example', k(96)], ['share_link', k(64)], ['near_me', k(41)], ['surprise', k(26)], ['deep_link', k(23)], ['pin', k(19)], ['retry', k(4)]],
       'search.cell': cells,
       'session.device': [['desktop', k(298)], ['phone', k(251)], ['tablet', k(19)]],
       'session.country': [['ca', k(150)], ['us', k(131)], ['gb', k(66)], ['de', k(31)], ['in', k(28)], ['jp', k(19)], ['au', k(15)], ['fr', k(12)]],
@@ -107,7 +107,7 @@ export function mockStats(range: Range, now = Date.now()): AdminStats {
       label,
       country,
       cell,
-      source: (['search', 'example', 'share_link', 'near_me', 'deep_link'] as const)[i % 5],
+      source: (['search', 'example', 'share_link', 'near_me', 'surprise', 'deep_link', 'pin'] as const)[i % 7],
       device: (['desktop', 'phone', 'desktop', 'tablet'] as const)[i % 4],
     })),
     recentErrors: [

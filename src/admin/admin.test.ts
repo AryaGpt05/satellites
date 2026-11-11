@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { searchSource } from '@/app/telemetry'
+import type { Place } from '@/types'
 import { isTimeout, parseStats, RANGES } from './api'
 import { mockStats } from './fixture'
-import { fmtBucket, fmtPct, niceMax } from './format'
+import { fmtBucket, fmtPct, niceMax, SOURCE_NAMES } from './format'
 
 describe('admin_stats parsing', () => {
   it('accepts the fixture for every range', () => {
@@ -20,6 +22,17 @@ describe('admin_stats parsing', () => {
     expect(s.top['a.b']).toEqual([['x', 1]])
     expect(s.results).toEqual({ n: 0, p50Ms: null, p90Ms: null, partial: 0, archiveFailed: 0 })
     expect(s.series).toEqual([])
+  })
+})
+
+describe('search sources', () => {
+  it('every way into a search has its own name on the admin page', () => {
+    // Typed as a Record so a new Place source fails to compile until it is listed here.
+    const sources: Record<Place['source'], true> = { search: true, geolocation: true, url: true, demo: true, surprise: true, pin: true }
+    const reported = Object.keys(sources).map((s) => searchSource({ place: { label: 'x', lat: 0, lon: 0, source: s as Place['source'] } }))
+    for (const r of reported) expect(SOURCE_NAMES[r]).toBeTruthy()
+    expect(new Set(reported).size).toBe(reported.length)
+    expect(SOURCE_NAMES.surprise).toBe('Surprise me')
   })
 })
 
