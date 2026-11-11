@@ -77,3 +77,33 @@ export function greyInfrared(rgba: Uint8ClampedArray | Uint8Array): void {
     rgba[i] = rgba[i + 1] = rgba[i + 2] = v
   }
 }
+
+// ───────────────────────────── Himawari's visible band ─────────────────────────────
+
+/**
+ * True for a GIBS image of Himawari's red visible band (its daylight frame). The layer is the band's reflectance drawn
+ * linearly, so a sunlit scene sits in the bottom fifth of the range (measured 2026-11-11 over Shanghai at 13:00 local:
+ * mean 12 %, 99th percentile 43 %): close to black in the panel, and on the globe much of it fell under the level
+ * that reads as "no data".
+ */
+export const isLinearVisibleUrl = (url: string) => url.startsWith('https://gibs.earthdata.nasa.gov/wms/') && /[?&]LAYERS=Himawari_AHI_Band3_Red_Visible[^&]*(&|$)/.test(url)
+
+const SQRT_LUT = /* @__PURE__ */ Uint8Array.from({ length: 256 }, (_, v) => Math.round(255 * Math.sqrt(v / 255)))
+
+/**
+ * The square-root curve weather services show visible imagery with: one fixed curve for every pixel of every frame
+ * (nothing measured from the picture, nothing added), in place (RGBA; alpha untouched). 12 % reads as 35 %, cloud
+ * stays the brightest thing in the frame, and black stays black.
+ */
+export function brightenVisible(rgba: Uint8ClampedArray | Uint8Array): void {
+  for (let i = 0; i < rgba.length; i += 4) {
+    rgba[i] = SQRT_LUT[rgba[i]]
+    rgba[i + 1] = SQRT_LUT[rgba[i + 1]]
+    rgba[i + 2] = SQRT_LUT[rgba[i + 2]]
+  }
+}
+
+/** The redraw a weather frame needs before it is shown, if any (the app's loader and the card's renderer both ask). */
+export function frameRedrawFor(url: string): ((rgba: Uint8ClampedArray | Uint8Array) => void) | undefined {
+  return isEnhancedInfraredUrl(url) ? greyInfrared : isLinearVisibleUrl(url) ? brightenVisible : undefined
+}

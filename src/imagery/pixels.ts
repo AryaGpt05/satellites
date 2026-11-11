@@ -11,7 +11,8 @@
  * without ever drawing the full image on the main thread (createImageBitmap(HTMLImageElement) there cost 2–27 ms
  * per GIBS image on a phone).
  *
- * A NASA infrared frame is redrawn in grey on the way (./infrared.ts), so no view ever holds its rainbow palette.
+ * A NASA infrared frame is redrawn in grey on the way, and Himawari's visible band brightened (./infrared.ts), so no
+ * view ever holds the raw layer.
  *
  * `fetchTonedHere` does the same for every Sentinel-2 / Landsat photo (owner rules a, b, d): fetch the encoded
  * render (api/_lib/tone.ts), decode it, apply the photo's one global curve + light sharpening, encode it again
@@ -24,7 +25,7 @@
  * measured on the image itself; no mask, no curve to share).
  */
 import { PHOTO_PX, canShareCurve, isMagnifiedView, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams, type TonePlan } from '../../api/_lib/tone'
-import { greyInfrared, isEnhancedInfraredUrl } from './infrared'
+import { frameRedrawFor } from './infrared'
 import { HttpError } from './net'
 import { panSharpen } from './panSharpen'
 import { panApiPath, parsePanSharpUrl } from './panUrl'
@@ -145,8 +146,10 @@ export async function fetchCheckedImageHere(url: string, signal?: AbortSignal): 
     await res.body?.cancel().catch(() => undefined)
     return { status: res.status, contentType }
   }
-  // NASA's colour-coded infrared layer is redrawn on one grey scale before anything shows it (./infrared.ts).
-  const blob = isEnhancedInfraredUrl(url) ? await greyInfraredBlob(await res.blob()) : await res.blob()
+  // Two NASA layers are redrawn before anything shows them (./infrared.ts): the colour-coded infrared on one grey
+  // scale, Himawari's linear visible band on a square-root curve.
+  const redraw = frameRedrawFor(url)
+  const blob = redraw ? await redrawnBlob(await res.blob(), redraw) : await res.blob()
   let noData: number | undefined
   try {
     noData = measureNoData((await decodeImagePixels(blob, CHECK_PX)).data).noDataFraction
@@ -275,8 +278,8 @@ function encode(c: Canvas2D, type: string): Promise<Blob> {
   return new Promise((resolve, reject) => el.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), type, JPEG_QUALITY))
 }
 
-/** An enhanced-infrared image, redrawn in grey (./infrared.ts) and encoded again. Rejects where no canvas can do it. */
-async function greyInfraredBlob(src: Blob): Promise<Blob> {
+/** A weather frame redrawn (./infrared.ts) and encoded again. Rejects where no canvas can do it. */
+async function redrawnBlob(src: Blob, redraw: (rgba: Uint8ClampedArray) => void): Promise<Blob> {
   const bmp = await createImageBitmap(src, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
   const { width, height } = bmp
   const c = canvas2d(width, height)
@@ -287,7 +290,7 @@ async function greyInfraredBlob(src: Blob): Promise<Blob> {
   c.ctx.drawImage(bmp, 0, 0)
   bmp.close()
   const img = c.ctx.getImageData(0, 0, width, height)
-  greyInfrared(img.data)
+  redraw(img.data)
   c.ctx.putImageData(img, 0, 0)
   return encode(c, 'image/jpeg')
 }

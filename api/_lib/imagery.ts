@@ -11,7 +11,7 @@ import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js'
 import type { ShareCapture } from './share.js'
 import { maskFromResponse, pcCropUrlAt, toneCrop, tonePlanForUrl, type ToneMask } from './tone.js'
 import { isRadarUrl, radarCropUrlAt, radarPolOfItemId, toneRadar } from './radar.js'
-import { greyInfrared, isEnhancedInfraredUrl } from './infrared.js'
+import { frameRedrawFor } from './infrared.js'
 import { GEO_HALF_KM, isGeoCollection } from './cardSpec.js'
 
 const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
@@ -203,7 +203,8 @@ export interface CropPicture {
  */
 export async function fetchCropPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
   if (isRadarUrl(url)) return fetchRadarPicture(url, timeoutMs)
-  if (isEnhancedInfraredUrl(url)) return fetchInfraredPicture(url, timeoutMs)
+  const redraw = frameRedrawFor(url)
+  if (redraw) return fetchRedrawnPicture(url, timeoutMs, redraw)
   const plan = tonePlanForUrl(url)
   if (!plan) {
     const dataUri = await fetchImageDataUri(url, timeoutMs)
@@ -248,13 +249,13 @@ async function fetchRadarPicture(url: string, timeoutMs: number): Promise<CropPi
   }
 }
 
-/** NASA's colour-coded infrared frame, redrawn in grey as the app shows it (./infrared.ts), as a JPEG data URI. */
-async function fetchInfraredPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
+/** A weather frame the app redraws before showing (./infrared.ts), redrawn the same way, as a JPEG data URI. */
+async function fetchRedrawnPicture(url: string, timeoutMs: number, redraw: (rgba: Uint8Array) => void): Promise<CropPicture | null> {
   const img = await fetchBytes(url, timeoutMs, ['image/jpeg', 'image/jpg'])
   if (!img || img.byteLength < 1024 || img.byteLength > 8_000_000) return null
   try {
     const raw = decodeJpeg(img, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256 })
-    greyInfrared(raw.data)
+    redraw(raw.data)
     const out = encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 92)
     return { dataUri: `data:image/jpeg;base64,${Buffer.from(out.data).toString('base64')}`, complete: true }
   } catch {

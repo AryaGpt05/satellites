@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { gibsWmsUrl } from './endpoints'
-import { greyInfrared, isEnhancedInfraredUrl } from './infrared'
+import { brightenVisible, frameRedrawFor, greyInfrared, isEnhancedInfraredUrl, isLinearVisibleUrl } from './infrared'
 
 const px = (...rgb: number[][]) => new Uint8ClampedArray(rgb.flatMap(([r, g, b]) => [r, g, b, 255]))
 const grey = (...rgb: number[][]) => {
@@ -47,5 +47,39 @@ describe('which images are redrawn', () => {
     expect(isEnhancedInfraredUrl(gibsWmsUrl('Himawari_AHI_Band3_Red_Visible_1km', at, place, { halfSizeKm: 400, px: 176 }))).toBe(false)
     expect(isEnhancedInfraredUrl(gibsWmsUrl('GOES-East_ABI_GeoColor', at, place, { halfSizeKm: 400, px: 176 }))).toBe(false)
     expect(isEnhancedInfraredUrl('https://example.test/?LAYERS=Himawari_AHI_Band13_Clean_Infrared')).toBe(false)
+  })
+})
+
+describe("Himawari's visible band, brightened", () => {
+  const place = { lat: 31.23, lon: 121.474 }
+  const at = '2026-11-11T05:00:00Z'
+  const spec = { halfSizeKm: 400, px: 176 }
+  const visible = gibsWmsUrl('Himawari_AHI_Band3_Red_Visible_1km', at, place, spec)
+
+  it('one fixed square-root curve: black stays black, white stays white, a sunlit scene comes up, alpha is untouched', () => {
+    const a = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255, 30, 30, 30, 200, 64, 64, 64, 255])
+    brightenVisible(a)
+    expect(Array.from(a)).toEqual([0, 0, 0, 255, 255, 255, 255, 255, 87, 87, 87, 200, 128, 128, 128, 255])
+  })
+
+  it('keeps the order of every level (nothing is clipped or inverted)', () => {
+    const a = new Uint8ClampedArray(256 * 4)
+    for (let v = 0; v < 256; v++) a[v * 4] = a[v * 4 + 1] = a[v * 4 + 2] = v
+    brightenVisible(a)
+    for (let v = 1; v < 256; v++) expect(a[v * 4]).toBeGreaterThanOrEqual(a[(v - 1) * 4])
+    expect(a[255 * 4]).toBe(255)
+  })
+
+  it("only NASA's Himawari visible layer: the GOES and Meteosat composites are already display-ready", () => {
+    expect(isLinearVisibleUrl(visible)).toBe(true)
+    expect(isLinearVisibleUrl(gibsWmsUrl('Himawari_AHI_Band13_Clean_Infrared', at, place, spec))).toBe(false)
+    expect(isLinearVisibleUrl(gibsWmsUrl('GOES-East_ABI_GeoColor', at, place, spec))).toBe(false)
+    expect(isLinearVisibleUrl('https://example.test/?LAYERS=Himawari_AHI_Band3_Red_Visible_1km')).toBe(false)
+  })
+
+  it('each frame gets its own redraw, or none', () => {
+    expect(frameRedrawFor(visible)).toBe(brightenVisible)
+    expect(frameRedrawFor(gibsWmsUrl('Himawari_AHI_Band13_Clean_Infrared', at, place, spec))).toBe(greyInfrared)
+    expect(frameRedrawFor(gibsWmsUrl('GOES-West_ABI_GeoColor', at, place, spec))).toBeUndefined()
   })
 })
