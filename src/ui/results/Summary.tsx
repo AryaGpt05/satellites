@@ -86,10 +86,10 @@ const weekWord = (model: ResultsModel) => (isOldWindow(model) ? 'that week' : 't
  * why (the sun, the archives' lag, the geostationary imager that sees it anyway). An archive outage says so,
  * with Try again.
  *
- * `onShare`: Share rides at the end of this line (the week's summary: the headline's own numbers and the closest
- * look). It is where the finding is read, on every layout, and takes no row of its own: on a phone the line and the
- * word share one baseline. Not offered when nothing watched the place, or while the archives are down (Try again is
- * the action then).
+ * `onShare`: Share rides at the end of this line (the week's summary: the headline's own numbers and the gallery's
+ * first image). It is where the finding is read, on every layout, and takes no row of its own: a hairline button at
+ * the summary's right edge, level with the line. Not offered when nothing watched the place, or while the archives
+ * are down (Try again is the action then).
  */
 export function MoreLine({
   model,

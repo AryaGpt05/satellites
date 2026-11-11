@@ -411,13 +411,15 @@
 .searchBar:active {
   background: var(--ink-2);
 }
-/* Laptops, results: the search bar is the whole top (owner), as tall as the two computing rows it replaces (row 1 and
-   the place row: 48 px), so the panel below never moves when the results land. */
-.searchBarDesk {
+/* Results: the search bar is the whole top (owner), as tall as the two computing rows it replaces (row 1 and the place
+   row: 48 px), so nothing below moves when the results land. */
+.overviewHeadBar .searchBar {
   height: 48px;
   margin-top: 0;
+}
+/* Laptops: the panel header's own rule runs right under it: one line, not two. */
+.searchBarDesk {
   gap: 12px;
-  /* The panel header's own rule runs right under it: one line, not two. */
   border-bottom: 0;
 }
 .searchBarDesk .searchBarPlace {
@@ -522,8 +524,9 @@
 .placeRow .tzText {
   flex: 0 1000 auto;
 }
+/* Phones: the summary under the search bar, with room above it (it is the finding, not a caption to the field). */
 .mHead {
-  margin-top: 6px;
+  margin-top: 18px;
 }
 
 /* R16: inline search in the header */
@@ -852,24 +855,29 @@
    margin (.moreInRow drops it), and the word never wraps or shrinks; the sentence wraps beside it if it must. */
 .moreRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-top: 10px;
 }
 .mMoreRow {
-  margin-top: 5px;
+  margin-top: 8px;
 }
 .moreRow > .moreInRow {
   margin: 0;
   min-width: 0;
 }
+/* A hairline button (as the gallery's filter and the search bar's Change are drawn), level with the line it ends: an
+   intended action at the summary's right edge, not a stray word. */
 .weekShare {
   position: relative;
   flex: none;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
   font-family: var(--font-mono);
   font-stretch: 87.5%;
   font-size: var(--fs-label);
@@ -879,26 +887,25 @@
   -webkit-tap-highlight-color: transparent;
   transition: color var(--d-hover) var(--ease-out);
 }
-.weekShare svg {
-  align-self: center;
-}
-/* The tap target (44 px tall on touch) without growing the row. */
+/* The tap target (44 px tall on touch) without growing the row: from inside the 1 px border, 28 + 16 = 44. */
 .weekShare::after {
   content: '';
   position: absolute;
-  inset: -8px -8px;
+  inset: -1px;
 }
 @media (pointer: coarse) {
   .weekShare::after {
-    inset: -16px -12px;
+    inset: -8px -4px;
   }
 }
 .weekShare:active {
   color: var(--bone);
+  background: var(--ink-2);
 }
 @media (hover: hover) and (pointer: fine) {
   .weekShare:hover {
     color: var(--bone);
+    border-color: var(--bone-3);
   }
 }
 /* (after the base rules, so they apply) Laptops up to 860 px tall: a slightly smaller headline (R2R1). */
@@ -1138,23 +1145,25 @@
 }
 
 /* ── phone header + body ──────────────────────────────────────── */
+/* The headline spans the sheet's width (29 px on a 393 px phone, 25 px on the smallest), so it reads as the finding
+   rather than a short line hugging the left edge. */
 .mHeadline {
   margin: 0;
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 540;
-  font-size: 25px;
+  font-size: clamp(25px, 7.4vw, 30px);
   line-height: 1;
   letter-spacing: var(--track-display);
   color: var(--bone-2);
   text-wrap: balance;
 }
 .mMore {
-  margin: 5px 0 0;
+  margin: 8px 0 0;
   font-family: var(--font-sans);
   font-stretch: 75%;
   font-weight: 500;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.1;
   letter-spacing: -0.005em;
   color: var(--bone-3);
