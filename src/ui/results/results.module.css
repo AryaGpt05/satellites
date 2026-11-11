@@ -411,6 +411,29 @@
 .searchBar:active {
   background: var(--ink-2);
 }
+/* Laptops, results: the search bar is the whole top (owner), as tall as the two computing rows it replaces (row 1 and
+   the place row: 48 px), so the panel below never moves when the results land. */
+.searchBarDesk {
+  height: 48px;
+  margin-top: 0;
+  gap: 12px;
+  /* The panel header's own rule runs right under it: one line, not two. */
+  border-bottom: 0;
+}
+.searchBarDesk .searchBarPlace {
+  font-size: var(--fs-body);
+}
+@media (hover: hover) and (pointer: fine) {
+  .searchBarDesk:hover .searchBarAction {
+    color: var(--bone);
+  }
+  .searchBarDesk:hover .searchBarGlyph {
+    color: var(--bone);
+  }
+}
+.headTopOff {
+  display: none;
+}
 .searchBar:focus-visible {
   outline-offset: 2px;
 }

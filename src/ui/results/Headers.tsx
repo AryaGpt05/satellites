@@ -1,12 +1,14 @@
 /**
  * Panel headers.
  *
- * OverviewHeader: one header from computing through results (decision #10). Two mono rows on
- * desktop (≈ 76 px), so the best-look picture fits above the fold:
+ * OverviewHeader: one header from computing through results (decision #10).
  *
- *   COMPUTING · T+1.84 S                           CANCEL [ESC]       ← computing
- *   7 DAYS · 1 → 8 NOV  (● VERIFYING WEATHER MOSAICS)  NEW SEARCH [ESC] ← results
- *   WATERLOO · 43.4723°N 80.5449°W · AMERICA/TORONTO                   ← the same node throughout
+ *   COMPUTING · T+1.84 S                           CANCEL [ESC]       ← computing: two mono rows
+ *   WATERLOO · 43.4723°N 80.5449°W · AMERICA/TORONTO
+ *
+ *   [⌕ Waterloo                                        CHANGE]        ← results, laptops: the search bar alone (owner:
+ *                                                                        no dates, coordinates or zone), as tall as
+ *                                                                        the two rows it replaces, so nothing moves
  *
  * Phones add the headline and its second line under row 1 (the peek shows them with the hero), and
  * drop the place row once results land (the headline names the place).
@@ -76,15 +78,18 @@ export function OverviewHeader(props: OverviewHeaderProps) {
   const { place, model, computing, mobile, enter, searching } = props
   const tz = model?.tz ?? (place ? timeZoneAt(place.lat, place.lon) : undefined)
   const partial = !computing && !!model && countPending(model.report)
-  const showPlaceRow = !!place && (!mobile || computing) && !searching
+  // Laptops, results: the search bar is the whole top (owner). Computing and the open search keep their rows.
+  const deskBar = !mobile && !computing && !searching && !!place && !!model
+  const showPlaceRow = !!place && (!mobile || computing) && !searching && !deskBar
 
   return (
-    <div className={s.overviewHead}>
-      <div className={s.headTop}>
+    <div className={cx(s.overviewHead, deskBar && s.overviewHeadBar)}>
+      {deskBar && place ? <SearchBar place={place} desk onOpen={props.onOpenSearch ?? props.onBack} /> : null}
+      <div className={cx(s.headTop, deskBar && s.headTopOff)}>
         <span className={s.headLeft}>
           {computing ? (
             <ComputeClock t0={props.t0} />
-          ) : (
+          ) : searching && !mobile ? null /* laptops: the open search keeps only its Close (no dates: owner) */ : (
             <>
               <span className={cx(s.headSwap, partial && s.headSwapOff)} aria-hidden={partial}>
                 {model ? windowText(model) : null}
@@ -190,13 +195,14 @@ function HeadAction({
 }
 
 /**
- * Phones: the way to a new search, as the first thing in the sheet. It looks like the landing's search field (the
- * same height, glyph and mono line) holding the current place, with "Change" at its end; a tap anywhere opens the
- * inline search with the field focused.
+ * The way to a new search, as the first thing in the panel: it looks like the landing's search field (the same glyph
+ * and mono line, a hairline under it) holding the current place, with "Change" at its end; a tap anywhere opens the
+ * inline search with the field focused. Phones: under row 1. Laptops (`desk`): the whole top, as tall as the two
+ * computing rows it replaces.
  */
-function SearchBar({ place, onOpen }: { place: Place; onOpen: () => void }) {
+function SearchBar({ place, desk = false, onOpen }: { place: Place; desk?: boolean; onOpen: () => void }) {
   return (
-    <button type="button" className={s.searchBar} onClick={onOpen} aria-label={`Search another place (now ${place.label})`}>
+    <button type="button" className={cx(s.searchBar, desk && s.searchBarDesk)} onClick={onOpen} aria-label={`Search another place (now ${place.label})`}>
       <span className={s.searchBarGlyph} aria-hidden>
         <Glyph name="search" size={16} />
       </span>
