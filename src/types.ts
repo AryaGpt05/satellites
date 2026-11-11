@@ -240,6 +240,8 @@ export interface GeoWatcher {
   imagesInWindow: number
   /** Where this watcher's newest frame can be had, if a public service carries it (GOES, Himawari, Meteosat) */
   frames?: GeoFrameSource
+  /** A service carries its frames, but the place is at the rim of its disc, where the picture is cut off: none is shown */
+  rim?: boolean
 }
 
 export interface Report {

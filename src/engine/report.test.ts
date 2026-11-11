@@ -663,6 +663,20 @@ describe('computeReport', () => {
     console.log('Tokyo geo:', t.geo.map((g) => `${g.name} ${g.subLon.toFixed(1)}° el ${g.elevationDeg.toFixed(1)}°`).join(', '))
   })
 
+  it('offers a geostationary frame only where the place is well inside the disc', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const frames = (r: { geo: { name: string; frames?: string; rim?: boolean }[] }) => Object.fromEntries(r.geo.map((g) => [g.name, g.rim ? 'rim' : (g.frames ?? 'none')]))
+    const paris = frames(await computeReport({ lat: 48.8566, lon: 2.3522, label: 'Paris', source: 'demo' }, { now }))
+    expect(paris['Meteosat-12']).toBe('meteosat-0deg')
+    expect(paris['Meteosat-9']).toBe('meteosat-iodc')
+    expect(paris['Elektro-L 3']).toBe('none') // no public service carries it
+    // 74°N in the Norwegian Sea: Meteosat-12 stands 7° up, and its picture ends about 5° short of the horizon.
+    const north = frames(await computeReport({ lat: 74, lon: 5, label: 'Norwegian Sea', source: 'demo' }, { now }))
+    expect(north['Meteosat-12']).toBe('rim')
+    for (const v of Object.values(north)) expect(['rim', 'none']).toContain(v)
+  })
+
   it('rejects with AbortError when aborted', async () => {
     imagery.searchCapturesDetailed.mockImplementation(() => new Promise(() => undefined))
     imagery.weatherCaptures.mockResolvedValue([])

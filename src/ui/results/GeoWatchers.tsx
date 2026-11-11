@@ -3,7 +3,8 @@
  * so they are a band, not events (DESIGN §2). Where a public map service carries the satellite (GOES and
  * Himawari on NASA GIBS, the Meteosats on EUMETSAT), the row gets a small live frame: the newest one that
  * service actually has pixels for at the place (src/imagery/geoFrames.ts). A frame taken in infrared says so
- * on the picture, in ice (the night-capable hue, DESIGN §2): it is cloud tops, not the ground.
+ * on the picture, in ice (the night-capable hue, DESIGN §2): it is cloud tops, not the ground. A place at the
+ * rim of a satellite's disc gets no frame from it (engine/geostationary.ts): half of it would be empty.
  */
 import { useEffect, useState } from 'react'
 import { isEumetsatSource, latestGeoFrame, type GeoFrameBand } from '@/imagery'
@@ -32,7 +33,7 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
   const source = watcher.frames
   const { halfSizeKm, px } = spec
   const key = `${source}|${place.lat},${place.lon}|${halfSizeKm}|${px}`
-  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (source ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
+  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (source ? { kind: 'loading' } : { kind: 'none', reason: watcher.rim ? 'Edge of its view' : 'No public frame' }))
   useEffect(() => {
     if (!source) return
     const hit = probed.get(key)
