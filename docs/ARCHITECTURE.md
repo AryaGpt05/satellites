@@ -183,7 +183,7 @@ of whatever the last commit mounted (114 ms at 4× CPU on a phone). `useViewport
 `safeAreaTop()` / `safeAreaSides()` are cached, updated once per frame on window and visual-viewport resizes.
 
 ### ui-results → `src/ui/results/index.ts`, `src/ui/share/index.ts`
-`<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>`.
+`<ComputingReadout/>` (phase `computing`; reads `store.progress`), `<ResultsView/>` (phase `results`; reads `store.report`; drives `selectPass`, `camera`, `timeMode`/`simTime` for replay), `<ShareSheet pass={Pass} report={Report} onClose/>` (`kind="summary"` with no pass: the week; `from`: which Share opened it, recorded with its events). Share is offered at the end of the headline's second line (the week), in the photo viewer and in the pass view; the sheet is mounted on `<body>` so it paints over the viewer.
 
 `prewarmResultsModel(report: Report): void`, exported from `src/ui/results/index.ts`: builds and caches the
 `ResultsModel` for that `Report` object. The controller calls it in idle time, and only through a dynamic

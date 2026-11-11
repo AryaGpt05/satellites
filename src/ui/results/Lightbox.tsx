@@ -50,6 +50,8 @@ const CLOSE_MS = 280
 const FADE_MS = 160
 const NAV_MS = 260
 const GAP = 24
+/** Laptops: the photo side from which the metadata strip fits both Replay and the word Share. */
+const SHARE_WORD_MIN_SIDE = 660
 
 interface Layout {
   side: number
@@ -82,11 +84,21 @@ function computeLayout(mobile: boolean): Layout {
  */
 const SHORT_VIEWER_QUERY = '(max-height: 520px)'
 
-export function Lightbox({ model, mobile, onReplay }: { model: ResultsModel; mobile: boolean; onReplay?: (p: Pass) => void }) {
+export interface LightboxProps {
+  model: ResultsModel
+  mobile: boolean
+  onReplay?: (p: Pass) => void
+  /** Share the photo on view (its pass): the sheet opens over the viewer, which stays where it was. */
+  onShare?: (p: Pass) => void
+  /** A layer above the viewer is open (the share sheet): the viewer's keys are that layer's meanwhile. */
+  covered?: boolean
+}
+
+export function Lightbox({ model, mobile, onReplay, onShare, covered = false }: LightboxProps) {
   const lb = useGallery((g) => g.lightbox)
   const short = useMediaQuery(SHORT_VIEWER_QUERY)
   if (!lb) return null
-  return createPortal(<Viewer key={lb.id} id={lb.id} model={model} mobile={mobile || short} startKey={lb.key} from={lb.from} onReplay={onReplay} />, document.body)
+  return createPortal(<Viewer key={lb.id} id={lb.id} model={model} mobile={mobile || short} startKey={lb.key} from={lb.from} onReplay={onReplay} onShare={onShare} covered={covered} />, document.body)
 }
 
 interface ViewerProps {
@@ -97,9 +109,13 @@ interface ViewerProps {
   startKey: string
   from: HTMLElement | null
   onReplay?: (p: Pass) => void
+  onShare?: (p: Pass) => void
+  covered: boolean
 }
 
-function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
+function Viewer({ id, model, mobile, startKey, from, onReplay, onShare, covered }: ViewerProps) {
+  const coveredRef = useRef(covered)
+  coveredRef.current = covered
   const filter = useGallery((g) => g.filter)
   // The gallery's order (R-M1: the cover the hero painted first stays first).
   const items = useMemo(() => {
@@ -361,7 +377,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
     rootRef.current?.focus({ preventScroll: true })
     const onKey = (e: KeyboardEvent) => {
       // About open over the viewer: its keys are About's (an Esc closes About alone).
-      if (useApp.getState().aboutOpen) return
+      // Likewise the share sheet over the viewer (it registered its own capture listener after this one).
+      if (useApp.getState().aboutOpen || coveredRef.current) return
       const A = actions.current
       const k = e.key
       let handled = true
@@ -585,6 +602,8 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
   const boxStyle: CSSProperties = { left: layout.left, top: layout.top, width: side, height: side }
   // Shown larger than the card in device pixels already at 1×: every photo viewed gets its sharper layer.
   const hiAt1x = hiResHelps(side, window.devicePixelRatio || 1)
+  // A laptop photo under this side has no room for 'Share' beside Replay without cutting the metadata's second row.
+  const shareGlyphOnly = !mobile && side < SHARE_WORD_MIN_SIDE
   const setChrome = (i: number) => (el: HTMLDivElement | null) => {
     if (el) chromeRef.current[i] = el
   }
@@ -686,20 +705,32 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
 
       <div ref={setChrome(1)} className={s.meta} style={{ top: layout.top + side + 12, left: mobile ? undefined : layout.left, width: mobile ? undefined : side }}>
         <MetaStrip photo={photo} model={model} mobile={mobile} pan={panKeys.has(photo.key)} />
-        {photo.pass && onReplay ? (
-          <Button
-            size="sm"
-            onClick={() => {
-              const pass = photo.pass!
-              useGallery.getState().closeLightbox()
-              onReplay(pass)
-            }}
-            aria-label="Replay this pass on the globe"
-            className={s.replay}
-          >
-            <Glyph name="play" size={11} />
-            Replay
-          </Button>
+        {/* Replay and Share, where the thumb is on a phone (stacked, so the facts beside them keep their column);
+            side by side on a laptop, where Share is its glyph alone under a photo too narrow for both words. */}
+        {photo.pass && (onReplay || onShare) ? (
+          <div className={s.acts}>
+            {onReplay ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  const pass = photo.pass!
+                  useGallery.getState().closeLightbox()
+                  onReplay(pass)
+                }}
+                aria-label="Replay this pass on the globe"
+                className={s.replay}
+              >
+                <Glyph name="play" size={11} />
+                Replay
+              </Button>
+            ) : null}
+            {onShare ? (
+              <Button size="sm" onClick={() => onShare(photo.pass!)} aria-label="Share this photo" title="Share this photo" className={cx(s.replay, shareGlyphOnly && s.actIcon)}>
+                <Glyph name="share" size={shareGlyphOnly ? 13 : 11} />
+                {shareGlyphOnly ? null : 'Share'}
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

@@ -374,8 +374,24 @@
   font-size: var(--fs-micro, 9.5px);
   letter-spacing: 0.04em;
 }
+.acts {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+.mobile .acts {
+  flex-direction: column;
+  align-items: stretch;
+  /* 32 px buttons 12 px apart: each takes a 44 px tap (the ::after below) that never overlaps the other's */
+  gap: 12px;
+}
 .replay {
   flex: none;
+}
+.acts .actIcon {
+  width: 32px;
+  padding-left: 0;
+  padding-right: 0;
 }
 /* Phones: one fact group per line (MetaStrip's phone form); a line too long for its column ends in an ellipsis. */
 .metaLine {
@@ -481,7 +497,7 @@
   }
 }
 
-/* Touch (U-6): "Replay this pass" in the metadata strip takes a 44 px tap without a taller strip. */
+/* Touch (U-6): Replay and Share in the metadata strip take a 44 px tap without a taller strip. */
 @media (pointer: coarse) {
   /* above the metadata text beside it, so its extension is never covered (PH-08: it hit-tested at 42 px) */
   .replay {
@@ -495,5 +511,8 @@
     right: -4px;
     top: -8px;
     bottom: -8px;
+  }  .mobile .acts .replay::after {
+    top: -6px;
+    bottom: -6px;
   }
 }

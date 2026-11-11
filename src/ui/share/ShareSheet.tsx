@@ -36,7 +36,7 @@ import { ensureTz, timeZoneAt, tzReady } from '@/imagery'
 import { cityLevelLabel } from '@/lib/backend'
 import { DUR, EASE } from '@/lib/ease'
 import { useApp } from '@/state/store'
-import { track } from '@/lib/telemetry'
+import { track, type ShareFrom } from '@/lib/telemetry'
 import type { Pass, Report } from '@/types'
 import { Button, Glyph, Rule, Sheet, cx, useExitClone, useIsMobile, useMediaQuery } from '@/ui/system'
 import { isClouded } from '../results/lib/bestLook'
@@ -65,6 +65,8 @@ export interface ShareSheetProps {
   clouded?: boolean
   /** Scene cloud cover, %, as the results panel shows it (the card reads the capture's own value). */
   cloudPct?: number
+  /** Which Share opened the sheet: recorded with its events, so each entry point can be measured (migration 0013). */
+  from?: ShareFrom
 }
 
 type LinkState = { kind: 'idle' } | { kind: 'pending' } | { kind: 'ready'; url: string; short: boolean }
@@ -251,7 +253,7 @@ function useOverlayAttr(on: boolean) {
   }, [on])
 }
 
-export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: ShareSheetProps) {
+export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass', from }: ShareSheetProps) {
   const place = report.place
   // The card prints the place's own zone ("EST"), so make sure the zone table is in (it normally is
   // by the time a report exists; a cold deep link may still be loading it).
@@ -276,7 +278,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   const stacked = useIsMobile()
   // Phones and portrait tablets: the sheet and its scrim cover the globe, which can rest meanwhile.
   useOverlayAttr(stacked)
-  useEffect(() => track('share_open', { kind: summary ? 'summary' : 'pass', norad: summary ? undefined : pass?.norad }), []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => track('share_open', { kind: summary ? 'summary' : 'pass', norad: summary ? undefined : pass?.norad, from }), []) // eslint-disable-line react-hooks/exhaustive-deps
   const coarse = useMediaQuery(COARSE_QUERY)
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   const nativeFirst = coarse && canNativeShare
@@ -434,7 +436,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
 
   // ── actions ─────────────────────────────────────────────────────────────────────────────
   const copy = async (tracked: unknown = true) => {
-    if (tracked !== false) track('share_action', { action: 'copy_link', norad: summary ? undefined : pass?.norad })
+    if (tracked !== false) track('share_action', { action: 'copy_link', norad: summary ? undefined : pass?.norad, from })
     const pending = ensureLink()
     let ok = false
     if (linkNow.current) ok = await writeText(linkNow.current)
@@ -459,7 +461,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   }
 
   const post = () => {
-    track('share_action', { action: 'x', norad: summary ? undefined : pass?.norad })
+    track('share_action', { action: 'x', norad: summary ? undefined : pass?.norad, from })
     if (linkNow.current) {
       window.open(xIntentUrl(text, linkNow.current), '_blank', `noopener,noreferrer,${X_POPUP}`)
       return
@@ -480,7 +482,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
   }
 
   const download = async (tracked: unknown = true) => {
-    if (tracked !== false) track('share_action', { action: 'save_png', norad: summary ? undefined : pass?.norad })
+    if (tracked !== false) track('share_action', { action: 'save_png', norad: summary ? undefined : pass?.norad, from })
     try {
       const blob = await startPng().promise
       const a = document.createElement('a')
@@ -497,7 +499,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
 
   /** Desktop: the card on the clipboard, to paste into a post as native media. */
   const copyImage = async () => {
-    track('share_action', { action: 'copy_image', norad: summary ? undefined : pass?.norad })
+    track('share_action', { action: 'copy_image', norad: summary ? undefined : pass?.norad, from })
     const j = startPng()
     try {
       // A Blob if it's ready, else the promise (Safari wants the ClipboardItem inside the gesture).
@@ -519,7 +521,7 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass' }: Sh
    */
   const nativeShare = () => {
     if (nativeMode === 'preparing') return // inert for a moment: the next tap carries the image
-    track('share_action', { action: 'native', norad: summary ? undefined : pass?.norad })
+    track('share_action', { action: 'native', norad: summary ? undefined : pass?.norad, from })
     void ensureLink() // the short link for next time (and for Copy); this share uses what's ready now
     const j = startPng()
     const data: ShareData = { text, url: linkNow.current ?? fallbackUrl }

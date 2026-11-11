@@ -56,6 +56,33 @@ export const SURPRISE_PLACES: readonly Place[] = [
   sp('Tokyo', 'Tokyo, Japan', 35.6812, 139.7671, 'jp'),
   sp('Mount Fuji', 'Shizuoka, Japan', 35.3606, 138.7274, 'jp'),
   sp('Sydney Harbour', 'Sydney, Australia', -33.8568, 151.2153, 'au'),
+  // Added after rendering each one's 12 km crop from a recent clear Sentinel-2 scene and looking at it: the subject
+  // fills the frame as a shape, colour or texture (a pit, a reef, a caldera, a dam wall, a field pattern).
+  sp('Richat Structure', 'Sahara, Mauritania', 21.1243, -11.4005, 'mr'),
+  sp('Great Blue Hole', 'Lighthouse Reef, Belize', 17.3158, -87.5347, 'bz'),
+  sp('Bora Bora', 'Society Islands, French Polynesia', -16.5004, -151.7415, 'pf'),
+  sp('Hardy Reef', 'Great Barrier Reef, Australia', -19.7667, 149.1833, 'au'),
+  sp('Malé', 'North Malé Atoll, Maldives', 4.1755, 73.5093, 'mv'),
+  sp('Dead Sea Salt Ponds', 'Southern basin, Israel and Jordan', 31.19, 35.45, 'jo'),
+  sp('Bingham Canyon Mine', 'Utah, United States', 40.523, -112.15, 'us'),
+  sp('Mount Whaleback Mine', 'Pilbara, Australia', -23.3667, 119.6667, 'au'),
+  sp('Mount Etna', 'Sicily, Italy', 37.751, 14.9934, 'it'),
+  sp('Santorini', 'Cyclades, Greece', 36.404, 25.396, 'gr'),
+  sp('Teide', 'Tenerife, Spain', 28.2723, -16.6423, 'es'),
+  sp('Kīlauea', 'Hawaii, United States', 19.4069, -155.2834, 'us'),
+  sp('Crater Lake', 'Oregon, United States', 42.9446, -122.109, 'us'),
+  sp('Glen Canyon Dam', 'Page, Arizona, United States', 36.9371, -111.4837, 'us'),
+  sp('Garden City Crop Circles', 'Kansas, United States', 37.9717, -100.8727, 'us'),
+  sp('Almería Greenhouses', 'Andalusia, Spain', 36.78, -2.72, 'es'),
+  sp('Gibraltar', 'Strait of Gibraltar', 36.1408, -5.3536, 'gi'),
+  sp('Suez Canal', 'Ismailia, Egypt', 30.5852, 32.2654, 'eg'),
+  sp('Aswan High Dam', 'Lake Nasser, Egypt', 23.97, 32.878, 'eg'),
+  sp('Wadi Rum', 'Aqaba, Jordan', 29.5764, 35.4197, 'jo'),
+  sp('Sossusvlei', 'Namib Desert, Namibia', -24.7275, 15.2954, 'na'),
+  sp('Victoria Falls', 'Zambia and Zimbabwe', -17.9243, 25.8572, 'zw'),
+  sp('Three Gorges Dam', 'Hubei, China', 30.8231, 111.0033, 'cn'),
+  sp('Shanghai', 'The Huangpu River, China', 31.2304, 121.4737, 'cn'),
+  sp('Itaipu Dam', 'Brazil and Paraguay', -25.4086, -54.5889, 'br'),
 ]
 
 /** A place from SURPRISE_PLACES, never `previous` (two presses in a row always go somewhere new). */

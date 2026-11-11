@@ -33,7 +33,7 @@
   "apply 000N". Never run `supabase/tests/0004_*` against production (its DDL deadlocks against live traffic). Never
   delete real data, and never use a service-role or secret key; only the publishable key, which is public.
 - Analytics props are allow-listed in SQL (`overflight_private.event_props`, latest definition in
-  `supabase/migrations/0011_*`). A new enum value (a search source, an action) is silently stored as null until a
+  `supabase/migrations/0013_*`). A new enum value (a search source, an action) is silently stored as null until a
   migration adds it.
 - Shares keep a capture only from an allow-list of collections in `create_share` (latest definition in
   `supabase/migrations/0012_*`, which adds Sentinel-1 radar); an unknown collection is dropped and the share made
@@ -73,6 +73,9 @@
   scene points every frame through `runtime.anchors` and `anchorListeners`, never React state. The globe chunk is
   lazy and must not import `src/app/*`: pass callbacks in through `GlobeCanvas` props.
 - Back button: layers register with `src/lib/backStack.ts`. Never call `history.pushState` directly.
+- Share has three entry points, each tagged `from` in its events: the headline's second line (the week's summary;
+  nothing is stored), the photo viewer, and the pass view (plus the laptop lead photo's icon). The sheet and the
+  photo viewer are portals on `<body>`: the app root is `position: fixed`, so nothing inside it can paint over them.
 - Global keys: Main's Esc handler respects `defaultPrevented`. An overlay that owns Esc listens in the capture phase
   and calls `preventDefault()`.
 - iOS: tapping a non-input element blurs the focused field before `click` fires. Choose touch taps on `pointerup`

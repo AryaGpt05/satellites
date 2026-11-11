@@ -68,6 +68,8 @@ interface OverviewHeaderProps {
   onCloseSearch: () => void
   onSearch?: (p: Place) => void
   onRetry?: () => void
+  /** Phones: the headline's Share (the week's summary) */
+  onShareWeek?: () => void
 }
 
 export function OverviewHeader(props: OverviewHeaderProps) {
@@ -127,7 +129,7 @@ export function OverviewHeader(props: OverviewHeaderProps) {
       ) : mobile && model && !computing ? (
         <div className={s.mHead}>
           <Headline model={model} compact enter={enter} />
-          <MoreLine model={model} compact enter={enter} onRetry={props.onRetry} />
+          <MoreLine model={model} compact enter={enter} onRetry={props.onRetry} onShare={props.onShareWeek} />
         </div>
       ) : null}
     </div>

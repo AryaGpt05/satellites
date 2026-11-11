@@ -825,6 +825,59 @@
   color: var(--bone-3);
   text-wrap: balance;
 }
+/* The second line with the week's Share at its end: one baseline, no row of its own. The row takes the line's top
+   margin (.moreInRow drops it), and the word never wraps or shrinks; the sentence wraps beside it if it must. */
+.moreRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+}
+.mMoreRow {
+  margin-top: 5px;
+}
+.moreRow > .moreInRow {
+  margin: 0;
+  min-width: 0;
+}
+.weekShare {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--signal);
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--d-hover) var(--ease-out);
+}
+.weekShare svg {
+  align-self: center;
+}
+/* The tap target (44 px tall on touch) without growing the row. */
+.weekShare::after {
+  content: '';
+  position: absolute;
+  inset: -8px -8px;
+}
+@media (pointer: coarse) {
+  .weekShare::after {
+    inset: -16px -12px;
+  }
+}
+.weekShare:active {
+  color: var(--bone);
+}
+@media (hover: hover) and (pointer: fine) {
+  .weekShare:hover {
+    color: var(--bone);
+  }
+}
 /* (after the base rules, so they apply) Laptops up to 860 px tall: a slightly smaller headline (R2R1). */
 @media (min-width: 761px) and (orientation: landscape) and (max-height: 860px), (min-width: 1101px) and (max-height: 860px) {
   .headline {

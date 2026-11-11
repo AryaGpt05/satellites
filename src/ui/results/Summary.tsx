@@ -85,10 +85,29 @@ const weekWord = (model: ResultsModel) => (isOldWindow(model) ? 'that week' : 't
  * The second line: how many images were made public (owner F; one count: radar images and the geostationary watchers' frames included). When there are none, one plain sentence says
  * why (the sun, the archives' lag). An archive outage says so,
  * with Try again.
+ *
+ * `onShare`: Share rides at the end of this line (the week's summary: the headline's own numbers and the closest
+ * look). It is where the finding is read, on every layout, and takes no row of its own: on a phone the line and the
+ * word share one baseline. Not offered when nothing watched the place, or while the archives are down (Try again is
+ * the action then).
  */
-export function MoreLine({ model, compact = false, enter = false, onRetry }: { model: ResultsModel; compact?: boolean; enter?: boolean; onRetry?: () => void }) {
+export function MoreLine({
+  model,
+  compact = false,
+  enter = false,
+  onRetry,
+  onShare,
+}: {
+  model: ResultsModel
+  compact?: boolean
+  enter?: boolean
+  onRetry?: () => void
+  onShare?: () => void
+}) {
   const { head, report } = model
-  const cls = cx(compact ? s.mMore : s.headlineMore, enter && s.enter)
+  const share = !!onShare && head.flewOver > 0
+  // With Share the row carries the entrance and the line's top margin, so the two enter (and sit) as one.
+  const cls = cx(compact ? s.mMore : s.headlineMore, share ? s.moreInRow : enter && s.enter)
   const style = enterStyle(0.5)
   if (model.archiveFailed) {
     return (
@@ -103,10 +122,21 @@ export function MoreLine({ model, compact = false, enter = false, onRetry }: { m
     )
   }
   const k = head.images
-  const line = (
-    <p className={cls} style={style}>
+  const sentence = (
+    <p className={cls} style={share ? undefined : style}>
       {k > 0 ? <PhotosCount k={k} partial={countPending(report)} /> : photosLine(0, { week: weekWord(model) })}
     </p>
+  )
+  const line = share ? (
+    <div className={cx(s.moreRow, compact && s.mMoreRow, enter && s.enter)} style={style}>
+      {sentence}
+      <button type="button" className={s.weekShare} onClick={onShare} aria-label={`Share ${weekWord(model)} at ${report.place.label}`}>
+        <Glyph name="share" size={12} />
+        Share
+      </button>
+    </div>
+  ) : (
+    sentence
   )
   if (k > 0) return line
   // No photo: one plain sentence on why (dark → the sun, and the infrared sweeps; else radar / geostationary / the reason).
