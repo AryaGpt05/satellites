@@ -40,9 +40,14 @@
  * After the final report, GIBS stragglers keep probing in the background; each one that comes back with
  * pixels patches the report through `onUpdate` (counts only ever go up). VIIRS stragglers count as imaged
  * by rule at the budget (see weather.ts), so the headline doesn't depend on how fast GIBS answered.
+ *
+ * Sentinel-1's radar images (searchRadar) are asked for alongside the archive search and NEVER waited for: they are
+ * matched into whichever report is built after they answer (one search, usually in before the Sentinel-2 / Landsat
+ * one), turning those radar passes from 'could' into 'imaged'. Late (the archive slow or down), they are left out and
+ * the radar passes stay what geometry says. They are never the lead photo, so they hold nothing else either.
  */
 import { MS_PER_DAY } from '@/lib/geo'
-import { ensureTz, searchCapturesDetailed, sentinel2PlanCovers, spotCheck } from '@/imagery'
+import { ensureTz, searchCapturesDetailed, searchRadar, sentinel2PlanCovers, spotCheck } from '@/imagery'
 import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } from '@/types'
 import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
 import { satrecFor } from './sgp4'
@@ -263,6 +268,9 @@ export function passTargets(cat: LoadedCatalog): PassTarget[] {
 
 /** An archive scene contains the place, so its pass came this close at least (half swath + scene slop). */
 const ORPHAN_MAX_GROUND_KM = 300
+/** Sentinel-1 looks to one side: its IW swath lies 345–617 km from the ground track. */
+const ORPHAN_MAX_GROUND_KM_RADAR = 650
+const isRadarCapture = (c: Capture) => c.collection === 'sentinel-1-rtc'
 
 /**
  * Scenes that matched no predicted pass (low sun, place at the scene edge): resolve the overflight
@@ -283,7 +291,8 @@ function passesForOrphanScenes(cat: LoadedCatalog, place: LatLon, scenes: Captur
     const from = c.datetime - MATCH_BEFORE_MS
     const to = c.datetime + MATCH_AFTER_MS
     const p = passNear(satrec, target, place, from, to, 'imaged')
-    if (!p || p.tClosest - from < 60_000 || to - p.tClosest < 60_000 || p.groundDistanceKm > ORPHAN_MAX_GROUND_KM) continue
+    const maxKm = isRadarCapture(c) ? ORPHAN_MAX_GROUND_KM_RADAR : ORPHAN_MAX_GROUND_KM
+    if (!p || p.tClosest - from < 60_000 || to - p.tClosest < 60_000 || p.groundDistanceKm > maxKm) continue
     const same = byId.get(p.id)
     if (same) {
       // Resolved to a pass we already have (or just added for another tile of the same overflight).
@@ -338,6 +347,15 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     })
   // It only rejects on abort, possibly while we await something else: never leave that unhandled.
   archive.catch(noop)
+  // Sentinel-1's radar images: a search of their own, matched into whichever report is built after they answer.
+  let radarScenes: Capture[] | undefined
+  withTimeout((s) => searchRadar(latLon, windowStart, windowEnd, s), ARCHIVE_TIMEOUT_MS, signal).then(
+    (caps) => {
+      radarScenes = caps
+      mark('radar')
+    },
+    () => (radarScenes = []),
+  )
   if (opts.onArchive)
     archive.then((caps) => {
       if (caps.length && !signal?.aborted) safely(opts.onArchive, [...caps])
@@ -531,6 +549,20 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   mark('archive-in')
   const orphans = attachCaptures(passes, stac)
   passes.push(...passesForOrphanScenes(cat, latLon, orphans, passes))
+  /** The radar images matched to a pass so far (once, as soon as the radar search has answered). */
+  let radar: Capture[] = []
+  let radarMatched = false
+  const matchRadar = () => {
+    if (radarMatched || radarScenes === undefined || signal?.aborted) return
+    radarMatched = true
+    const unmatched = attachCaptures(passes, radarScenes)
+    passes.push(...passesForOrphanScenes(cat, latLon, unmatched, passes))
+    const used = new Set(passes.map((p) => p.captureId))
+    radar = radarScenes.filter((c) => used.has(c.id))
+  }
+  matchRadar()
+  /** Every scene of the window the report shows: Sentinel-2 / Landsat, and the radar images matched so far. */
+  const scenes = () => [...stac, ...radar]
 
   // Spot classes for the best look, the open-ocean check and the time-zone table: all were started long
   // ago; whatever isn't in by its budget doesn't hold the report.
@@ -551,6 +583,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
 
   /** The partial report's snapshot, until the final report is built (a cover found meanwhile re-sends it). */
   let partialSnapshot: Pass[] | undefined
+  let partialScenes: Capture[] | undefined
   let partialHadCover = false
   // No clear Sentinel-2 / Landsat photo this week: the last clear look from before it (usually found by now).
   if (!archiveFailed && needsClearCover(passes, stac)) {
@@ -559,7 +592,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
         clearCover = c
         // Found after the partial report and before the final one: the partial again, with its cover, so the
         // UI can lead with the right photo whichever report it paints first.
-        if (c && partialSnapshot && !partialHadCover && !signal?.aborted) safely(opts.onPartial, build(partialSnapshot, [...stac], true, firstResultMs))
+        if (c && partialSnapshot && !partialHadCover && !signal?.aborted) safely(opts.onPartial, build(partialSnapshot, partialScenes ?? scenes(), true, firstResultMs))
         return c
       },
       (): undefined => undefined,
@@ -572,10 +605,12 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     firstResultMs = performance.now() - tStart
     finalDueAt = Math.max(tStart + budgetMs, (weather.timing().startedAt || performance.now()) + MIN_WEATHER_MS)
     mark('partial')
+    matchRadar()
     // Snapshot: the final report mutates verdicts on these passes, so hand out copies.
     partialSnapshot = passes.map(clonePass)
+    partialScenes = scenes()
     partialHadCover = !!clearCover
-    const partialReport = build(partialSnapshot, [...stac], true, firstResultMs)
+    const partialReport = build(partialSnapshot, partialScenes, true, firstResultMs)
     mark('partial-built')
     safely(opts.onPartial, partialReport)
     mark('partial-sent')
@@ -629,7 +664,9 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   if (coverP && !clearCover && !opts.onUpdate) await waitAtMost(coverP, COVER_WAIT_MS, signal)
   throwIfAborted(signal)
   partialSnapshot = undefined
-  let latest = build(passes, [...stac, ...weatherMatched], false, firstMs)
+  matchRadar()
+  const shown = scenes()
+  let latest = build(passes, [...shown, ...weatherMatched], false, firstMs)
   mark('final')
   emit('done', `${plural(latest.counts.passes, 'PASS', 'PASSES')} · ${plural(latest.counts.imaged, 'IMAGE')}`, 1)
 
@@ -643,7 +680,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
     if (coverP && latest.coverPending) {
       void coverP.then(() => {
         if (signal?.aborted) return
-        latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+        latest = build(current, [...shown, ...weatherCaps], false, firstMs)
         safely(opts.onUpdate, latest)
       })
     }
@@ -653,7 +690,7 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
         // Already counted: the image is confirmed now, so the footnote shrinks (the counts don't move).
         unconfirmed = Math.max(0, unconfirmed - 1)
         weatherNotes = gibsNotes()
-        latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+        latest = build(current, [...shown, ...weatherCaps], false, firstMs)
         safely(opts.onUpdate, latest)
         return
       }
@@ -666,13 +703,13 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       weatherCaps.push(c)
       missing = Math.max(0, missing - 1)
       weatherNotes = gibsNotes()
-      latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+      latest = build(current, [...shown, ...weatherCaps], false, firstMs)
       safely(opts.onUpdate, latest)
     }
     // The last straggler settled with nothing to add (no data, a failure, the late cut): the same report, now final.
     onLateSettled = (left) => {
       if (signal?.aborted || left > 0 || !latest.lateChecks) return
-      latest = build(current, [...stac, ...weatherCaps], false, firstMs)
+      latest = build(current, [...shown, ...weatherCaps], false, firstMs)
       safely(opts.onUpdate, latest)
     }
   }
