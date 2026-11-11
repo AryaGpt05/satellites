@@ -197,7 +197,7 @@ from the header's ResizeObserver (no forced layout): a header that grows over th
 a swapped view is placed at once.
 
 ### backend
-- `supabase/migrations/*.sql`: tables `lookups`, `shares`; RLS on, no direct anon table access; `security definer` RPCs `record_lookup`, `create_share`, `get_share`, `get_stats`.
+- `supabase/migrations/*.sql`: tables `lookups`, `shares`; RLS on, no direct anon table access; `security definer` RPCs `record_lookup`, `create_share`, `get_share`, `get_stats`. `create_share` keeps a capture only from its collection allow-list (latest: 0012, which adds `sentinel-1-rtc`; a radar share's card is the same 12.6 km crop at 20 m, toned on the server with `api/_lib/radar.ts`, the app's tone).
 - `src/lib/backend.ts`: browser client wrappers (`recordLookup`, `createShare`, `getShare`, `getStats`) using `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. These must **no-op gracefully** when env vars are missing.
 - `api/og.tsx`: 1200×630 share card (`@vercel/og`) in the Instrument style. Runtime cards are returned as `image/jpeg`
   (under 250 KB; PNG decoded with `fast-png`, encoded with `jpeg-js`, both pure JS so `vercel.json` `includeFiles` is

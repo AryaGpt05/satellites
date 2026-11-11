@@ -35,6 +35,9 @@
 - Analytics props are allow-listed in SQL (`overflight_private.event_props`, latest definition in
   `supabase/migrations/0011_*`). A new enum value (a search source, an action) is silently stored as null until a
   migration adds it.
+- Shares keep a capture only from an allow-list of collections in `create_share` (latest definition in
+  `supabase/migrations/0012_*`, which adds Sentinel-1 radar); an unknown collection is dropped and the share made
+  without its image. The collection lists in `api/_lib/share.ts` and `src/lib/backend.ts` must match it.
 - Admin stats are precomputed every 5 minutes by pg_cron (`admin_stats_cache`, migration 0009). Admin times are US
   Eastern.
 - `VITE_*` env vars are bundled into the browser. Server secrets (`CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET`) are only
