@@ -10,6 +10,7 @@ import {
   diveAt,
   geoDiveAt,
   needsNoSun,
+  decalLitFor,
   imageFocus,
   fmtCountdown,
   MIN_APPROACH_S,
@@ -127,6 +128,15 @@ describe('decal and scan geometry', () => {
     expect(needsNoSun('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/1024x1024.jpg?collection=sentinel-1-rtc&item=x')).toBe(true)
     expect(needsNoSun('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&LAYERS=VIIRS_NOAA20_CorrectedReflectance_TrueColor&TIME=2026-11-10')).toBe(false)
     expect(needsNoSun('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/1024x1024.jpg?collection=sentinel-2-l2a&item=x')).toBe(false)
+  })
+
+  it('a geostationary frame is painted whole (its dark pixels are night or sea, not no-data); radar and photos keep the black key', () => {
+    expect(decalLitFor('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&LAYERS=Himawari_AHI_Band3_Red_Visible_1km&TIME=x')).toBe(2)
+    expect(decalLitFor('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&LAYERS=GOES-West_ABI_GeoColor&TIME=x')).toBe(2)
+    expect(decalLitFor('https://view.eumetsat.int/geoserver/ows?service=WMS&layers=mtg_fd%3Argb_geocolour&time=x')).toBe(2)
+    expect(decalLitFor('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/1024x1024.jpg?collection=sentinel-1-rtc&item=x')).toBe(1)
+    expect(decalLitFor('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&LAYERS=VIIRS_NOAA20_CorrectedReflectance_TrueColor&TIME=2026-11-10')).toBe(0)
+    expect(decalLitFor('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/1024x1024.jpg?collection=sentinel-2-l2a&item=x')).toBe(0)
   })
 
   it('a geostationary scan holds behind the spacecraft, then dives in the last seconds before the line arrives', () => {

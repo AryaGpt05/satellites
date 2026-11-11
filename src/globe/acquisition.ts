@@ -123,6 +123,17 @@ export function decalSpecFor(collection: CaptureCollection, mobile: boolean): { 
 export const needsNoSun = (url: string) =>
   /[?&]collection=sentinel-1-rtc&/.test(url) || url.startsWith('https://view.eumetsat.int/geoserver/') || /[?&]LAYERS=(GOES-(East|West)_ABI_|Himawari_AHI_)/.test(url)
 
+/** A geostationary frame's URL (NASA GIBS or EUMETSAT). */
+const isGeoFrameUrl = (url: string) => url.startsWith('https://view.eumetsat.int/geoserver/') || /[?&]LAYERS=(GOES-(East|West)_ABI_|Himawari_AHI_)/.test(url)
+
+/**
+ * The shader's uDecalLit for an image: 0 a photo (lit by the day term only, black keyed out as no-data), 1 an image
+ * that needs no sun (radar: shown at night too, its black edges still keyed out), 2 a geostationary frame (shown at
+ * night too, and WHOLE: its dark pixels are a night sea or unlit ground, not missing data. Keyed out, a dark frame
+ * came out in tatters over the base map: owner, Himawari over Shanghai).
+ */
+export const decalLitFor = (url: string): 0 | 1 | 2 => (isGeoFrameUrl(url) ? 2 : needsNoSun(url) ? 1 : 0)
+
 /**
  * PC bbox crops come back as JPEG (smaller; no-data is black, keyed out in the shader), as the panel does.
  *

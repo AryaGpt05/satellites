@@ -156,7 +156,7 @@ export interface PaintUniforms {
   uDecal2Map: { value: Texture | null }
   uDecal2Uv: { value: Vector4 }
   uDecal2On: { value: number }
-  /** 1 for an image that needs no sunlight (a radar image): it shows on the night side too. Per slot. */
+  /** acquisition.decalLitFor: 1 for an image that needs no sunlight (radar), 2 for a geostationary frame (also never keyed). Per slot. */
   uDecalLit: { value: number }
   uDecal2Lit: { value: number }
   uScanT0: { value: Vector3 }

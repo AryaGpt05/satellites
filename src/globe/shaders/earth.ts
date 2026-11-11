@@ -189,7 +189,7 @@ export const earthFragment = glsl`
     vec3 night = nightBase + city * lightsOn;
     // A radar image needs no sunlight: on the night side it shows as itself, a little dimmer than by day, over the
     // city lights (it saw the ground, not the lamps). A photo is only ever lit by the day term.
-    float selfLit = decal.a * uDecalLit + decal2.a * (1.0 - decal.a) * uDecal2Lit;
+    float selfLit = decal.a * min(uDecalLit, 1.0) + decal2.a * (1.0 - decal.a) * min(uDecal2Lit, 1.0);
     night = mix(night, pow(max(photo, vec3(0.0)), vec3(1.12)) * uSunIntensity * 0.55, selfLit);
 
     vec3 col = mix(night, day, dayMix);

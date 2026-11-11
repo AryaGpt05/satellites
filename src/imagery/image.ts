@@ -26,6 +26,7 @@ import { isTonedUrl } from './pcCrop'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
 import { measureNoData } from './pixels'
+import { frameRedrawFor } from './infrared'
 import { fetchCheckedImage, fetchPanSharp, fetchPixels, fetchToned } from './pixelsClient'
 import { isPanSharpUrl, parsePanSharpUrl } from './panUrl'
 import { isRadarUrl } from './radar'
@@ -81,6 +82,25 @@ async function loadGibs(url: string, timeoutMs: number): Promise<HTMLImageElemen
   // How much of the picture has no data, for callers that hold a part-empty one back (a frame at the rim of a disc).
   img.dataset.nodata = (checked.noData ?? 0).toFixed(2)
   return img
+}
+
+/** True for a weather frame that is redrawn before it is shown (./infrared.ts): the globe asks before it paints one. */
+export const isRedrawnUrl = (url: string) => !!frameRedrawFor(url)
+
+/**
+ * A redrawn weather frame's bytes (pixels worker), for the globe: it paints the frame the panel shows, never the raw
+ * layer (NASA's infrared rainbow, or Himawari's near-black linear visible band). Rejects on HTTP or network failure.
+ */
+export async function redrawnImageBlob(url: string, timeoutMs = IMAGE_TIMEOUT_MS): Promise<Blob> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), timeoutMs)
+  try {
+    const checked = await fetchCheckedImage(url, ctl.signal)
+    if (!checked.blob) throw new HttpError(checked.status, url)
+    return checked.blob
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**

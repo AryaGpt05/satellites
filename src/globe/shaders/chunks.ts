@@ -110,7 +110,7 @@ export const PAINT = glsl`
   uniform sampler2D uDecal2Map;   // the previous image, fully developed, under the current one while it fades in
   uniform vec4 uDecal2Uv;
   uniform float uDecal2On;
-  uniform float uDecalLit;        // 1: an image that needs no sun (radar), shown on the night side too
+  uniform float uDecalLit;        // 1: an image that needs no sun (radar), shown on the night side too; 2: the same, and whole (a geostationary frame: its dark pixels are night or sea, not no-data, so nothing is keyed out)
   uniform float uDecal2Lit;
   uniform vec3 uScanT0;
   uniform float uScanS;
@@ -156,7 +156,7 @@ export const PAINT = glsl`
     // Anti-aliased hard edge (about a pixel), no-data (pure black) keyed out.
     vec2 fwp = max(abs(gx) + abs(gy), vec2(1e-6));
     float inside = patchMask(p, fwp * 1.5);
-    float key = smoothstep(0.0025, 0.012, max(c.r, max(c.g, c.b)));
+    float key = uDecalLit > 1.5 ? 1.0 : smoothstep(0.0025, 0.012, max(c.r, max(c.g, c.b)));
     // Development: behind the scan line, or forced.
     float s = asin(clamp(dot(n, uScanT0), -1.0, 1.0));
     float lead = uScanS - s;
@@ -174,7 +174,7 @@ export const PAINT = glsl`
     vec2 gy = dFdy(t);
     vec3 c = textureGrad(uDecal2Map, t, gx, gy).rgb;
     vec2 fwp = max(abs(gx) + abs(gy), vec2(1e-6));
-    float key = smoothstep(0.0025, 0.012, max(c.r, max(c.g, c.b)));
+    float key = uDecal2Lit > 1.5 ? 1.0 : smoothstep(0.0025, 0.012, max(c.r, max(c.g, c.b)));
     return vec4(c, patchMask(p, fwp * 1.5) * key * uDecal2On);
   }
 `

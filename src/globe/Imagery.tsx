@@ -25,7 +25,7 @@ import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, SRGBCo
 import { gibsWmsUrl } from '@/imagery'
 import { EARTH_RADIUS_KM } from '@/lib/geo'
 import { selectSelectedPass, useApp } from '@/state/store'
-import { captureOf, coverPass, decalSpecFor, decalUrl, needsNoSun } from './acquisition'
+import { captureOf, coverPass, decalLitFor, decalSpecFor, decalUrl } from './acquisition'
 import { kmPerTexel } from './framing'
 import { panelHalfKm, panelPhotoUrl, panelTurn, patchUv } from './panel'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
@@ -102,15 +102,15 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     // the crops' grid arithmetic (pcCrop: which URL is toned, the panel photo's turn). One retry after a short pause, as
     // decodeImageUrl and the panel's preloadImage do (PC's tiler 5xxs on a cold scene).
     const toned = () => import('@/imagery/image').then((m) => m.tonedImageBlob(url))
-    const decoded = Promise.all([import('@/imagery/pcCrop'), import('@/imagery/radar')]).then(([crops, radar]) => {
+    const retried = (load: () => Promise<Blob>) => load().catch(() => new Promise<void>((r) => setTimeout(r, 700 + Math.random() * 500)).then(load))
+    const decoded = Promise.all([import('@/imagery/pcCrop'), import('@/imagery/radar'), import('@/imagery/image')]).then(([crops, radar, images]) => {
       // Set before the image can be ready (the square is only drawn over a ready decal).
       entry.panelTurn = panelTurn(panelUrl ? crops.northInCropDeg(panelUrl()) : 0)
       // A Sentinel-1 radar crop is toned there too (its own contrast), never painted as the encoded decibels.
-      return crops.isTonedUrl(url) || radar.isRadarUrl(url)
-        ? toned()
-            .catch(() => new Promise<void>((r) => setTimeout(r, 700 + Math.random() * 500)).then(toned))
-            .then(decodeImageBlob)
-        : decodeImageUrl(url)
+      if (crops.isTonedUrl(url) || radar.isRadarUrl(url)) return retried(toned).then(decodeImageBlob)
+      // A weather frame the panel redraws (infrared in grey, Himawari's visible band brightened) is painted the same.
+      if (images.isRedrawnUrl(url)) return retried(() => images.redrawnImageBlob(url)).then(decodeImageBlob)
+      return decodeImageUrl(url)
     })
     decoded
       .then(async (img) => {
@@ -358,7 +358,7 @@ export function Imagery() {
         p.uDecal2Lit.value = p.uDecalLit.value
       }
       state.decal = target
-      p.uDecalLit.value = needsNoSun(target.url) ? 1 : 0
+      p.uDecalLit.value = decalLitFor(target.url)
       p.uDecalOn.value = 0
       p.uDecalMap.value = target.tex!
       p.uDecalUv.value.copy(target.uv)
