@@ -245,7 +245,7 @@ function ReadoutStrip({ pass: p, meta, capture, cloud }: { pass: Pass; meta: Sat
   const cells = [
     { label: 'Altitude', value: int(p.altitudeKm), unit: 'km' },
     // A geostationary imager is never overhead: how high it stands in your sky says more than its mirror's angle.
-    p.geostationary ? { label: 'In your sky', value: `${dec1(p.elevationDeg)}°`, unit: 'up' } : { label: 'Off-nadir', value: `${dec1(p.offNadirDeg)}°` },
+    p.geostationary ? { label: 'Elevation', value: `${dec1(p.elevationDeg)}°`, unit: 'up' } : { label: 'Off-nadir', value: `${dec1(p.offNadirDeg)}°` },
     res !== undefined && res >= 1000
       ? { label: 'Pixel', value: int(res / 1000), unit: 'km' }
       : { label: 'Pixel', value: res !== undefined ? (res < 1 ? dec2(res) : int(res)) : '—', unit: res !== undefined ? 'm' : undefined },
