@@ -27,7 +27,7 @@ export interface VerdictWords {
   title: string
   /** Lane label (mono caps) */
   short: string
-  /** Count unit after a number ("31 images") */
+  /** Count unit after a number ("31 passes"; every verdict counts passes, so the four tiles read alike) */
   unit: string
   /** One sentence for title= / aria-describedby / About */
   definition: string
@@ -40,7 +40,7 @@ export const VERDICT_META: Record<Verdict, VerdictWords> = {
   imaged: {
     title: 'Watched',
     short: 'Photo',
-    unit: 'images',
+    unit: 'passes',
     definition: 'A real image of this place exists in a public archive.',
     verb: 'watched',
   },
@@ -67,7 +67,7 @@ export const VERDICT_META: Record<Verdict, VerdictWords> = {
   },
 }
 
-/** Count unit, singular-aware: "1 image", "31 images", "1 pass". */
+/** Count unit, singular-aware: "1 pass", "31 passes". */
 export function verdictUnit(v: Verdict, n: number): string {
   const u = VERDICT_META[v].unit
   return n === 1 ? u.replace(/(image|pass)(e?s)$/, '$1') : u

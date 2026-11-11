@@ -3,7 +3,7 @@
  *
  *   PHOTOGRAPHED   each detailed image as its own row (they are the point), in the gallery's order
  *                  (owner B1 + D1: the closest look first, then newest first); weather mosaics summarised
- *                  per satellite ("NOAA-20 · 7 images")
+ *                  per satellite ("NOAA-20 · 7 passes")
  *   LIKELY / COULD / OVERHEAD
  *                  one row per satellite (count, latest, closest), expandable to its passes. When
  *                  the image archives failed, the daylight Sentinel-2 / Landsat satellites lead the

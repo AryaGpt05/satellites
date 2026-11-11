@@ -135,7 +135,7 @@ Source of truth: `VERDICT_META` in `src/ui/results/lib/meta.ts` (the share cards
 
 | verdict | name | count unit | lane label | verb |
 |---|---|---|---|---|
-| imaged | Watched | IMAGES | PHOTO | watched |
+| imaged | Watched | PASSES | PHOTO | watched |
 | likely | Likely watched | PASSES | LIKELY | swept over |
 | could | Could have pointed here | PASSES | COULD | passed within view |
 | overhead | Passed overhead | PASSES | OVERHEAD | passed overhead |
