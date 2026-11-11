@@ -653,3 +653,64 @@ describe('a shared Sentinel-1 radar image (migration 0012)', () => {
     expect(at(W / 2)[2]).toBeGreaterThan(at(W / 2)[0])
   })
 })
+
+describe('a shared geostationary image (migration 0014 for the Meteosats)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const AT = '2026-11-11T06:50:00Z'
+
+  it('is kept by a share and planned as the app shows it: the 800 km square, the band that was shared', () => {
+    const fci = shareFromRpc({ ...ROW, capture: { collection: 'eumetsat-meteosat-0deg', itemId: `mtg_fd:rgb_geocolour@${AT}`, provider: 'eumetsat', gsdM: 2000 } })!.capture!
+    expect(fci).toMatchObject({ collection: 'eumetsat-meteosat-0deg', provider: 'eumetsat' })
+    const plan = cropPlan(fci, 48.86, 2.35, 630)!
+    expect(plan.halfSizeKm).toBe(400)
+    expect(plan.metresPerPx).toBeCloseTo(1269.8, 1)
+    expect(plan.source).toBe('EUMETSAT METEOSAT')
+    const u = new URL(plan.url)
+    expect(u.origin + u.pathname).toBe('https://view.eumetsat.int/geoserver/ows')
+    expect(u.searchParams.get('layers')).toBe('mtg_fd:rgb_geocolour')
+    expect(u.searchParams.get('time')).toBe(AT)
+    expect(u.searchParams.get('bgcolor')).toBe('0x000000')
+    expect(u.searchParams.get('width')).toBe('630')
+    // Meteosat-9's night frame is its infrared layer, Himawari's likewise; a layer nobody listed is refused, and so
+    // is a time that is not a frame's.
+    expect(cropPlan({ collection: 'eumetsat-meteosat-iodc', itemId: `msg_iodc:ir108@${AT}` }, 28.61, 77.21, 630)!.url).toContain('layers=msg_iodc%3Air108')
+    const ir = cropPlan({ collection: 'gibs-himawari', itemId: `Himawari_AHI_Band13_Clean_Infrared@${AT}` }, 35.68, 139.65, 630)!
+    expect(ir.url).toContain('https://gibs.earthdata.nasa.gov/wms/')
+    expect(ir.url).toContain('LAYERS=Himawari_AHI_Band13_Clean_Infrared')
+    expect(cropPlan({ collection: 'eumetsat-meteosat-0deg', itemId: `msg_fes:rgb_dust@${AT}` }, 48.86, 2.35, 630)).toBeNull()
+    expect(cropPlan({ collection: 'gibs-goes-east', itemId: 'GOES-East_ABI_GeoColor@2026-11-11' }, 43.47, -80.54, 630)).toBeNull()
+  })
+
+  it('says its pixel in km on the card, names the imager and credits EUMETSAT as its policy asks', () => {
+    const spec = buildCardSpec({
+      verdict: 'imaged', satName: 'Meteosat-12', placeLabel: 'Paris', lat: 48.86, lon: 2.35, host: 'www.watched.earth', tClosest: Date.parse(AT),
+      pass: { altitudeKm: 35777, offNadirDeg: 7.6 },
+      capture: { collection: 'eumetsat-meteosat-0deg', itemId: `mtg_fd:rgb_geocolour@${AT}`, gsdM: 2000, datetime: Date.parse(AT) },
+    })
+    expect(spec.plate.kind).toBe('image')
+    if (spec.plate.kind !== 'image') return
+    expect(spec.plate.chip.segs[0].text).toBe('Meteosat-12 · FCI · 2 km')
+    expect(spec.plate.credit.segs[0].text).toBe('Contains modified EUMETSAT Meteosat data 2026')
+    expect(spec.plate.crop.halfSizeKm).toBe(400)
+    expect(JSON.stringify(spec)).toContain('"Pixel"')
+    expect(JSON.stringify(spec)).not.toContain('2000 m')
+  })
+
+  it('redraws NASA’s colour-coded infrared in grey on the server too', async () => {
+    const W = 64
+    const px = new Uint8Array(W * W * 4)
+    for (let i = 0; i < W * W; i++) px.set(i % W < W / 2 ? [120, 120, 120, 255] : [0, 255, 0, 255], i * 4) // grey ramp | a cold top in green
+    const noise = new Uint8Array(W * W * 4)
+    for (let i = 0; i < W * W; i++) noise.set([px[i * 4] ^ ((i * 7919) % 5), px[i * 4 + 1] ^ ((i * 104729) % 5), px[i * 4 + 2] ^ ((i * 31) % 5), 255], i * 4)
+    const jpg = Buffer.from(encodeJpeg({ data: noise, width: W, height: W }, 95).data)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(jpg, { headers: { 'content-type': 'image/jpeg' } })))
+    const plan = cropPlan({ collection: 'gibs-himawari', itemId: `Himawari_AHI_Band13_Clean_Infrared@${AT}` }, 35.68, 139.65, 630)!
+    const pic = (await fetchCropPicture(plan.url, 5_000))!
+    const out = decodeJpeg(Buffer.from(pic.dataUri.split(',')[1], 'base64'), { useTArray: true, formatAsRGBA: true })
+    const at = (x: number) => Array.from(out.data.slice((32 * W + x) * 4, (32 * W + x) * 4 + 3))
+    const [r, g, b] = at(W - 8)
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThan(12) // no colour left
+    expect(r).toBeGreaterThan(215) // colder than the ramp: lighter than any grey on it
+    expect(Math.abs(at(8)[0] - 120)).toBeLessThan(10)
+  })
+})

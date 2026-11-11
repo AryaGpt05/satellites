@@ -489,6 +489,16 @@ const NATIVE_GSD_M: Record<string, number> = {
   'gibs-himawari': 1000,
 }
 
+/** A geostationary imager's full-disc frame (GOES, Himawari, Meteosat): the pixel of its map grid is in km. */
+export const isGeoCollection = (collection: string) => /^(gibs-(goes-east|goes-west|himawari)|eumetsat-meteosat-)/.test(collection)
+/** The square the app shows of such a frame, and so the card: ±400 km around the place. */
+export const GEO_HALF_KM = 400
+
+/** "10 m" / "0.31 m" / "2 km": a pixel, as the chips and readouts say it. */
+function pixelText(gsd: number): string {
+  return gsd >= 1000 ? `${int(gsd / 1000)} km` : `${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`
+}
+
 export interface CardCrop {
   collection: string
   itemId?: string
@@ -505,6 +515,9 @@ export interface CardCrop {
  * (9.45 km), as the app's Landsat photo is (500 native pixels at 1000 px), so the card shows the photo's pixels.
  */
 export function cardCrop(c: Pick<CardCaptureInput, 'collection' | 'itemId' | 'gsdM'>, px = PLATE): CardCrop {
+  // A geostationary frame: the app's own 800 km square (its grid is 2–5 km, so one grid pixel per card pixel would be
+  // most of a continent); the chip names the grid, the scale bar the card's pixels.
+  if (isGeoCollection(c.collection)) return { collection: c.collection, itemId: c.itemId, halfSizeKm: GEO_HALF_KM, metresPerPx: (2 * GEO_HALF_KM * 1000) / px }
   const gsd = NATIVE_GSD_M[c.collection] ?? c.gsdM ?? 10
   const metresPerPx = c.collection === 'landsat-c2-l2' ? 15 : gsd
   return { collection: c.collection, itemId: c.itemId, halfSizeKm: Math.max(2, (metresPerPx * px) / 2000), metresPerPx }
@@ -517,6 +530,8 @@ export function sensorName(c: Pick<CardCaptureInput, 'collection' | 'platform'>)
   if (k.startsWith('gibs-viirs')) return 'VIIRS'
   if (k.startsWith('gibs-modis')) return 'MODIS'
   if (k === 'gibs-himawari') return 'AHI'
+  if (k === 'eumetsat-meteosat-0deg') return 'FCI'
+  if (k === 'eumetsat-meteosat-iodc') return 'SEVIRI'
   if (k === 'sentinel-1-rtc') return 'C-SAR'
   return 'ABI'
 }
@@ -528,6 +543,13 @@ export function creditFor(c: Pick<CardCaptureInput, 'collection' | 'datetime'>, 
     return `Contains modified Copernicus Sentinel data ${t !== undefined ? new Date(t).getUTCFullYear() : new Date().getUTCFullYear()}`
   }
   if (c.collection === 'landsat-c2-l2') return 'Landsat: USGS / NASA'
+  // The attribution EUMETSAT's data policy asks for (article 6.3).
+  if (c.collection.startsWith('eumetsat-')) {
+    const t = c.datetime ?? fallbackMs
+    return `Contains modified EUMETSAT Meteosat data ${t !== undefined ? new Date(t).getUTCFullYear() : new Date().getUTCFullYear()}`
+  }
+  if (c.collection === 'gibs-himawari') return 'Himawari: JMA, via NASA GIBS'
+  if (isGeoCollection(c.collection)) return 'GOES: NOAA / CIRA, via NASA GIBS'
   return 'NASA GIBS / EOSDIS'
 }
 
@@ -735,8 +757,9 @@ function readoutsFor(input: CardInput): Readout[] {
   const c = input.verdict === 'imaged' ? input.capture : undefined
   if (c) {
     const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection]
-    const mosaic = c.collection.startsWith('gibs-')
-    out.push({ label: mosaic ? 'Mosaic pixel' : 'Pixel', ...dash(gsd, (n) => (n < 1 ? fixed(n, 2) : int(n)), 'm') })
+    const mosaic = c.collection.startsWith('gibs-') && !isGeoCollection(c.collection)
+    if (gsd !== undefined && gsd >= 1000) out.push({ label: 'Pixel', value: int(gsd / 1000), unit: 'km' })
+    else out.push({ label: mosaic ? 'Mosaic pixel' : 'Pixel', ...dash(gsd, (n) => (n < 1 ? fixed(n, 2) : int(n)), 'm') })
   } else out.push({ label: 'Closest', ...dash(p.groundDistanceKm, int, 'km') })
   return out
 }
@@ -753,7 +776,7 @@ export function buildCardSpec(input: CardInput): CardSpec {
   if (input.verdict === 'imaged' && c && input.imageMiss !== 'permanent') {
     const crop = cardCrop(c)
     const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection] ?? crop.metresPerPx
-    const chip = plateChip(`${input.satName} · ${sensorName(c)} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
+    const chip = plateChip(`${input.satName} · ${sensorName(c)} · ${pixelText(gsd)}`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
     const credit = plateChip(creditFor(c, input.tClosest), { left: INSET, bottom: INSET }, 'bone2', CARD_FS.micro)
     const scale = scaleFor(crop.metresPerPx)
     plate = {
@@ -859,7 +882,7 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
   if (c && i.best) {
     const crop = cardCrop(c)
     const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection] ?? crop.metresPerPx
-    const chip = plateChip(`Closest look · ${i.best.satName} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
+    const chip = plateChip(`Closest look · ${i.best.satName} · ${pixelText(gsd)}`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
     const credit = plateChip(creditFor(c, i.best.tClosest), { left: INSET, bottom: INSET }, 'bone2', CARD_FS.micro)
     const scale = scaleFor(crop.metresPerPx)
     plate = { kind: 'image', crop, chip, credit, scale, overlay: imageOverlay([chip, credit], scale), fallback: emptyPlate(planNote('imaged', 'transient')) }

@@ -24,13 +24,16 @@ export const CAPTURE_COLLECTIONS = [
   'gibs-himawari',
   // Sentinel-1 radar (migration 0012 lets create_share keep it)
   'sentinel-1-rtc',
+  // The Meteosats' frames, from EUMETSAT (migration 0014 lets create_share keep them)
+  'eumetsat-meteosat-0deg',
+  'eumetsat-meteosat-iodc',
 ] as const
 export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number]
 
 export interface ShareCapture {
   collection: CaptureCollection
   itemId: string
-  provider?: 'earth-search' | 'planetary-computer' | 'gibs'
+  provider?: 'earth-search' | 'planetary-computer' | 'gibs' | 'eumetsat'
   platform?: string
   datetime?: number
   cloudCoverPct?: number
@@ -114,7 +117,7 @@ export function captureOf(v: unknown): ShareCapture | undefined {
   const collection = (CAPTURE_COLLECTIONS as readonly unknown[]).includes(v.collection) ? (v.collection as CaptureCollection) : undefined
   const itemId = typeof v.itemId === 'string' && ITEM_ID_RE.test(v.itemId) ? v.itemId : undefined
   if (!collection || !itemId) return undefined
-  const provider = v.provider === 'earth-search' || v.provider === 'planetary-computer' || v.provider === 'gibs' ? v.provider : undefined
+  const provider = v.provider === 'earth-search' || v.provider === 'planetary-computer' || v.provider === 'gibs' || v.provider === 'eumetsat' ? v.provider : undefined
   return {
     collection,
     itemId,

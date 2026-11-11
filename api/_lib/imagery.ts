@@ -11,8 +11,11 @@ import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js'
 import type { ShareCapture } from './share.js'
 import { maskFromResponse, pcCropUrlAt, toneCrop, tonePlanForUrl, type ToneMask } from './tone.js'
 import { isRadarUrl, radarCropUrlAt, radarPolOfItemId, toneRadar } from './radar.js'
+import { greyInfrared, isEnhancedInfraredUrl } from './infrared.js'
+import { GEO_HALF_KM, isGeoCollection } from './cardSpec.js'
 
 const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
+const EUMETSAT_WMS = 'https://view.eumetsat.int/geoserver/ows'
 const EARTH_RADIUS_KM = 6371
 const DEG = Math.PI / 180
 
@@ -26,6 +29,19 @@ const GIBS_LAYER: Partial<Record<ShareCapture['collection'], string>> = {
   'gibs-goes-east': 'GOES-East_ABI_GeoColor',
   'gibs-goes-west': 'GOES-West_ABI_GeoColor',
   'gibs-himawari': 'Himawari_AHI_Band3_Red_Visible_1km',
+}
+
+/**
+ * The map layers a geostationary frame may come from, by collection (src/imagery/geoFrames.ts GEO_FRAMES: the
+ * daylight product and, where there is one, the infrared band shown at night). The item id names the layer, so a
+ * shared frame is the band that was shared; anything else is refused.
+ */
+const GEO_LAYERS: Partial<Record<ShareCapture['collection'], readonly string[]>> = {
+  'gibs-goes-east': ['GOES-East_ABI_GeoColor'],
+  'gibs-goes-west': ['GOES-West_ABI_GeoColor'],
+  'gibs-himawari': ['Himawari_AHI_Band3_Red_Visible_1km', 'Himawari_AHI_Band13_Clean_Infrared'],
+  'eumetsat-meteosat-0deg': ['mtg_fd:rgb_geocolour'],
+  'eumetsat-meteosat-iodc': ['msg_iodc:rgb_naturalenhncd', 'msg_iodc:ir108'],
 }
 
 /** Native ground sample distance by collection, metres (used when the capture omits it). */
@@ -42,6 +58,9 @@ const NATIVE_GSD_M: Record<ShareCapture['collection'], number> = {
   'gibs-himawari': 1000,
   // Sentinel-1 radar: its resolution (20 × 22 m), the app's 20 m a pixel
   'sentinel-1-rtc': 20,
+  // The Meteosats on EUMETSAT's map grid (measured: 1.6 km and 4.6 km)
+  'eumetsat-meteosat-0deg': 2000,
+  'eumetsat-meteosat-iodc': 5000,
 }
 
 /** Square [minLon, minLat, maxLon, maxLat] of half-size km around a point (as src/lib/geo.ts). */
@@ -99,6 +118,22 @@ export function cropPlan(capture: ShareCapture, lat: number, lon: number, px: nu
     if (!pol) return null
     // 630 px of 20 m (12.6 km): the app's card is cut at the same scale from its 20 m picture.
     return { url: radarCropUrlAt(capture.itemId, pol, lat, lon, halfSizeKm, px, 'jpg'), halfSizeKm, metresPerPx, source: 'SENTINEL-1 RADAR' }
+  }
+
+  // A geostationary frame: "<layer>@<ISO time>", the app's own 800 km square (cardSpec cardCrop), from NASA GIBS or
+  // EUMETSAT's map service. Both cut in lon/lat; EUMETSAT is asked for black where it has no data, as the app asks.
+  if (isGeoCollection(capture.collection)) {
+    const [geoLayer, at] = capture.itemId.split('@')
+    if (!GEO_LAYERS[capture.collection]?.includes(geoLayer) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at ?? '')) return null
+    const [gw, gs, ge, gn] = bboxAround(lat, lon, GEO_HALF_KM)
+    const lat5g = (v: number) => Math.max(-90, Math.min(90, v)).toFixed(5)
+    const box = `${lat5g(gs)},${gw.toFixed(5)},${lat5g(gn)},${ge.toFixed(5)}`
+    const url = capture.collection.startsWith('eumetsat-')
+      ? `${EUMETSAT_WMS}?service=WMS&version=1.3.0&request=GetMap&layers=${encodeURIComponent(geoLayer)}&styles=&format=image%2Fjpeg&crs=EPSG:4326` +
+        `&bbox=${box}&width=${px}&height=${px}&bgcolor=0x000000&time=${encodeURIComponent(at)}`
+      : `${GIBS_WMS}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${encodeURIComponent(geoLayer)}&STYLES=` +
+        `&FORMAT=image%2Fjpeg&CRS=EPSG:4326&BBOX=${box}&WIDTH=${px}&HEIGHT=${px}&TIME=${encodeURIComponent(at)}`
+    return { url, halfSizeKm: GEO_HALF_KM, metresPerPx: (2 * GEO_HALF_KM * 1000) / px, source: capture.collection.startsWith('eumetsat-') ? 'EUMETSAT METEOSAT' : geoLayer.split('_').slice(0, 2).join(' ').toUpperCase() }
   }
 
   // GIBS: itemId is "<layer>@<YYYY-MM-DD or ISO time>".
@@ -168,6 +203,7 @@ export interface CropPicture {
  */
 export async function fetchCropPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
   if (isRadarUrl(url)) return fetchRadarPicture(url, timeoutMs)
+  if (isEnhancedInfraredUrl(url)) return fetchInfraredPicture(url, timeoutMs)
   const plan = tonePlanForUrl(url)
   if (!plan) {
     const dataUri = await fetchImageDataUri(url, timeoutMs)
@@ -206,6 +242,20 @@ async function fetchRadarPicture(url: string, timeoutMs: number): Promise<CropPi
     const raw = decodeJpeg(img, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256 })
     if (!toneRadar(raw.data, raw.width, raw.height)) return null
     const out = encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 95)
+    return { dataUri: `data:image/jpeg;base64,${Buffer.from(out.data).toString('base64')}`, complete: true }
+  } catch {
+    return null
+  }
+}
+
+/** NASA's colour-coded infrared frame, redrawn in grey as the app shows it (./infrared.ts), as a JPEG data URI. */
+async function fetchInfraredPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
+  const img = await fetchBytes(url, timeoutMs, ['image/jpeg', 'image/jpg'])
+  if (!img || img.byteLength < 1024 || img.byteLength > 8_000_000) return null
+  try {
+    const raw = decodeJpeg(img, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256 })
+    greyInfrared(raw.data)
+    const out = encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 92)
     return { dataUri: `data:image/jpeg;base64,${Buffer.from(out.data).toString('base64')}`, complete: true }
   } catch {
     return null

@@ -198,6 +198,8 @@ const COLLECTIONS: readonly CaptureCollection[] = [
   'gibs-goes-west',
   'gibs-himawari',
   'sentinel-1-rtc',
+  'eumetsat-meteosat-0deg',
+  'eumetsat-meteosat-iodc',
 ]
 
 /** "Waterloo" stays; "123 King St" or "43.4723°N 80.5449°W" fall back to the city in the sublabel. */
@@ -328,7 +330,7 @@ function captureOf(v: unknown): ShareCapture | undefined {
   return {
     collection: v.collection as CaptureCollection,
     itemId: v.itemId,
-    provider: v.provider === 'earth-search' || v.provider === 'planetary-computer' || v.provider === 'gibs' ? v.provider : undefined,
+    provider: v.provider === 'earth-search' || v.provider === 'planetary-computer' || v.provider === 'gibs' || v.provider === 'eumetsat' ? v.provider : undefined,
     platform: optStr(v.platform, 40),
     datetime: optNum(v.datetime),
     cloudCoverPct: numIn(v.cloudCoverPct, 0, 100),
