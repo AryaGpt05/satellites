@@ -397,6 +397,15 @@
   opacity: 0.4;
   cursor: default;
 }
+/* "Surprise me": the one chip in signal (a hairline and its words), so the invitation reads at a glance. */
+.chipSurprise {
+  color: var(--signal);
+  border-color: var(--signal-2);
+}
+.chipSurprise:active {
+  color: var(--signal-hover);
+  background: var(--signal-3);
+}
 .exHint {
   min-width: 0;
   overflow: hidden;
@@ -487,6 +496,11 @@
     color: var(--bone);
     border-color: var(--bone-3);
     background: var(--ink-2);
+  }
+  .chipSurprise:hover {
+    color: var(--signal-hover);
+    border-color: var(--signal);
+    background: var(--signal-3);
   }
   .credit:hover {
     color: var(--signal);
@@ -1020,3 +1034,14 @@
   border-left: 1px solid var(--line-strong);
 }
 
+
+/* Phones (the chips are one swipeable row): "Surprise me" comes right after "Or try", in view without a swipe; wide
+   layouts keep it after the examples. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (max-height: 540px) {
+  .chipLead {
+    order: -2;
+  }
+  .surpriseItem {
+    order: -1;
+  }
+}

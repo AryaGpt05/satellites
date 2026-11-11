@@ -646,10 +646,10 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
           </li>
         ))}
         {/* A famous place picked at random (places.ts SURPRISE_PLACES), never the one it picked last. */}
-        <li>
+        <li className={s.surpriseItem}>
           <button
             type="button"
-            className={s.chip}
+            className={cx(s.chip, s.chipSurprise)}
             disabled={disabled}
             onClick={() => {
               lastSurprise = surprisePlace(lastSurprise)
