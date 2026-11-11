@@ -20,42 +20,41 @@ export const EXAMPLE_PLACES: readonly ExamplePlace[] = [
 const sp = (label: string, sublabel: string, lat: number, lon: number, countryCode: string): Place => ({ label, sublabel, lat, lon, countryCode, source: 'demo' })
 
 /**
- * "Surprise me": famous places that make a good picture from orbit (big, distinctive, mostly in dry or often-clear
- * skies), on every continent. Not a random point: seven tenths of one would be open ocean.
+ * "Surprise me": famous places you can make out from orbit at the photos' 10–30 m a pixel, in a 10–15 km frame: big
+ * landforms, craters and volcanoes, coastlines and harbours, and city layouts (no single statue or building: at 10 m a
+ * monument is a few pixels). Mostly in dry or often-clear skies, on every continent. Not a random point: seven tenths
+ * of one would be open ocean.
  */
 export const SURPRISE_PLACES: readonly Place[] = [
   sp('Uluru', 'Northern Territory, Australia', -25.3444, 131.0369, 'au'),
   sp('Palm Jumeirah', 'Dubai, United Arab Emirates', 25.1124, 55.139, 'ae'),
-  sp('Eiffel Tower', 'Paris, France', 48.8584, 2.2945, 'fr'),
-  sp('Statue of Liberty', 'New York, United States', 40.6892, -74.0445, 'us'),
+  sp('The World Islands', 'Dubai, United Arab Emirates', 25.2232, 55.165, 'ae'),
   sp('Grand Canyon', 'Arizona, United States', 36.0544, -112.1401, 'us'),
-  sp('Machu Picchu', 'Cusco, Peru', -13.1631, -72.545, 'pe'),
-  sp('Taj Mahal', 'Agra, India', 27.1751, 78.0421, 'in'),
-  sp('Colosseum', 'Rome, Italy', 41.8902, 12.4922, 'it'),
-  sp('Great Wall at Badaling', 'Beijing, China', 40.3587, 116.0204, 'cn'),
-  sp('Sydney Opera House', 'Sydney, Australia', -33.8568, 151.2153, 'au'),
-  sp('Golden Gate Bridge', 'San Francisco, United States', 37.8199, -122.4783, 'us'),
-  sp('Mount Fuji', 'Shizuoka, Japan', 35.3606, 138.7274, 'jp'),
-  sp('Burj Khalifa', 'Dubai, United Arab Emirates', 25.1972, 55.2744, 'ae'),
-  sp('Petra', "Ma'an, Jordan", 30.3285, 35.4444, 'jo'),
-  sp('Christ the Redeemer', 'Rio de Janeiro, Brazil', -22.9519, -43.2105, 'br'),
-  sp('Stonehenge', 'Wiltshire, United Kingdom', 51.1789, -1.8262, 'gb'),
-  sp('Angkor Wat', 'Siem Reap, Cambodia', 13.4125, 103.867, 'kh'),
-  sp('Chichén Itzá', 'Yucatán, Mexico', 20.6843, -88.5678, 'mx'),
-  sp('Niagara Falls', 'Ontario, Canada', 43.0779, -79.0754, 'ca'),
-  sp('Mount Everest', 'Nepal and China', 27.9881, 86.925, 'np'),
-  sp('Eye of the Sahara', 'Richat Structure, Mauritania', 21.124, -11.4017, 'mr'),
-  sp('Kennedy Space Center', 'Florida, United States', 28.6084, -80.6043, 'us'),
-  sp('Baikonur Cosmodrome', 'Kazakhstan', 45.92, 63.342, 'kz'),
-  sp('The Pentagon', 'Virginia, United States', 38.8719, -77.0563, 'us'),
-  sp('Venice', 'Veneto, Italy', 45.4341, 12.3388, 'it'),
+  sp('Meteor Crater', 'Arizona, United States', 35.0274, -111.0225, 'us'),
+  sp('Lower Manhattan', 'New York, United States', 40.7075, -74.0113, 'us'),
   sp('Las Vegas Strip', 'Nevada, United States', 36.1147, -115.1728, 'us'),
-  sp('Hoover Dam', 'Nevada and Arizona, United States', 36.016, -114.7377, 'us'),
-  sp('Vatican City', 'Rome', 41.9022, 12.4539, 'va'),
-  sp('Kilimanjaro', 'Kilimanjaro, Tanzania', -3.0674, 37.3556, 'tz'),
-  sp('Hollywood Sign', 'Los Angeles, United States', 34.1341, -118.3215, 'us'),
-  sp('Sagrada Família', 'Barcelona, Spain', 41.4036, 2.1744, 'es'),
+  sp('Hoover Dam and Lake Mead', 'Nevada and Arizona, United States', 36.016, -114.7377, 'us'),
+  sp('Golden Gate', 'San Francisco, United States', 37.8199, -122.4783, 'us'),
+  sp('Kennedy Space Center', 'Florida, United States', 28.6084, -80.6043, 'us'),
+  sp('Washington, D.C.', 'The National Mall, United States', 38.8893, -77.0353, 'us'),
+  sp('Mount St. Helens', 'Washington, United States', 46.1914, -122.1956, 'us'),
+  sp('Niagara Falls', 'Ontario, Canada', 43.0779, -79.0754, 'ca'),
+  sp('Panama Canal', 'Gatun Locks, Panama', 9.2726, -79.9218, 'pa'),
+  sp('Rio de Janeiro', 'Sugarloaf and Copacabana, Brazil', -22.9486, -43.1566, 'br'),
+  sp('Paris', 'Île-de-France, France', 48.8566, 2.3522, 'fr'),
+  sp('Venice', 'Veneto, Italy', 45.4341, 12.3388, 'it'),
+  sp('Mount Vesuvius', 'Naples, Italy', 40.8214, 14.4265, 'it'),
+  sp('Istanbul', 'The Bosphorus, Türkiye', 41.0186, 28.9784, 'tr'),
+  sp('Chernobyl', 'Kyiv Oblast, Ukraine', 51.389, 30.099, 'ua'),
   sp('Table Mountain', 'Cape Town, South Africa', -33.9628, 18.4098, 'za'),
+  sp('Kilimanjaro', 'Kilimanjaro, Tanzania', -3.0674, 37.3556, 'tz'),
+  sp('Mount Everest', 'Nepal and China', 27.9881, 86.925, 'np'),
+  sp('Angkor Wat', 'Siem Reap, Cambodia', 13.4125, 103.867, 'kh'),
+  sp('Singapore', 'Marina Bay, Singapore', 1.2834, 103.8607, 'sg'),
+  sp('Hong Kong', 'Victoria Harbour, Hong Kong', 22.293, 114.1694, 'hk'),
+  sp('Tokyo', 'Tokyo, Japan', 35.6812, 139.7671, 'jp'),
+  sp('Mount Fuji', 'Shizuoka, Japan', 35.3606, 138.7274, 'jp'),
+  sp('Sydney Harbour', 'Sydney, Australia', -33.8568, 151.2153, 'au'),
 ]
 
 /** A place from SURPRISE_PLACES, never `previous` (two presses in a row always go somewhere new). */
