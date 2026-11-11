@@ -144,7 +144,8 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
   const satellites = weekSatellites(report, satMeta)
   const spec = cardSpec(pass, { ...report, place: { ...place, label } }, meta, tz, host, { clouded, satellites })
   return {
-    title: 'Share this pass',
+    // A geostationary image is a scan, not a pass.
+    title: pass.geostationary ? 'Share this image' : 'Share this pass',
     spec,
     text: postText({
       verdict: pass.verdict,
@@ -625,19 +626,19 @@ export function ShareSheet({ pass, report, onClose, clouded, kind = 'pass', from
           ))}
         </span>
       </p>
-      <div className={s.foot}>
-        <p className={s.privacy}>
-          Sharing reveals the area shown in the image. The link and the card use a point rounded to about 1 km, not the exact spot you searched.
-          {input ? ' Nothing is saved until you share.' : ' Nothing is stored: the link carries the numbers.'}
-          {png === 'err' ? ' The card could not be rendered here; the link still works.' : ''}
-        </p>
-        {!nativeFirst && copyImageOk ? (
-          <button type="button" className={s.textAction} onClick={download}>
-            <Glyph name="download" size={12} />
-            {pngLabel}
-          </button>
-        ) : null}
-      </div>
+      {/* The foot holds what is left to say or do: a card that could not be rendered, a download where there is no
+          share button for the image. Nothing else (owner: no privacy paragraph here; README "Data" says it). */}
+      {png === 'err' || (!nativeFirst && copyImageOk) ? (
+        <div className={s.foot}>
+          {png === 'err' ? <p className={s.privacy}>The card could not be rendered here; the link still works.</p> : null}
+          {!nativeFirst && copyImageOk ? (
+            <button type="button" className={s.textAction} onClick={download}>
+              <Glyph name="download" size={12} />
+              {pngLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 

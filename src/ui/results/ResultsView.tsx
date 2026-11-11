@@ -983,6 +983,9 @@ function useListReady(model: ResultsModel): boolean {
   return ready
 }
 
+/** What Share shares: a pass, or (a geostationary scan, which is no pass) its image. */
+const shareNoun = (p: Pass) => (p.geostationary ? 'image' : 'pass')
+
 // ── pass footer ───────────────────────────────────────────────────────────────────────────
 
 function DetailFooter({
@@ -1019,7 +1022,7 @@ function DetailFooter({
     </Button>
   )
   const shareIcon = (
-    <Button onClick={() => onShare(pass)} aria-label="Share this pass" title="Share this pass" className={s.iconBtn}>
+    <Button onClick={() => onShare(pass)} aria-label={`Share this ${shareNoun(pass)}`} title={`Share this ${shareNoun(pass)}`} className={s.iconBtn}>
       <Glyph name="share" size={13} />
     </Button>
   )
@@ -1049,13 +1052,13 @@ function DetailFooter({
           {shareIcon}
         </>
       ) : (
-        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label="Share this pass">
+        <Button variant="primary" onClick={() => onShare(pass)} className={s.primary} aria-label={`Share this ${shareNoun(pass)}`}>
           <Glyph name="share" size={14} />
           {/* "Share this pass" where it fits; "Share" on narrow phones (≤ 400 px: it was cut to "SHARE THIS PAS"). */}
           {compact ? 'Share' : (
             // One inline run: as separate flex items "Share" and " this pass" got the button's gap between them.
             <span>
-              Share<span className={s.ctaTail}> this pass</span>
+              Share<span className={s.ctaTail}> this {shareNoun(pass)}</span>
             </span>
           )}
         </Button>
