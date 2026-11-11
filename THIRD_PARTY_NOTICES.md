@@ -39,7 +39,10 @@ Attribution: *Earth textures © [Solar System Scope](https://www.solarsystemscop
 
 At run time the app also displays (it does not store in this repo) Sentinel-2 (Copernicus, as above), Landsat
 (courtesy of the U.S. Geological Survey; public domain) and NASA GIBS / EOSDIS imagery (VIIRS, MODIS; NASA data is
-not copyrighted, credit requested) and GOES GeoColor (NOAA / CIRA). Credit for each appears in the app and README.
+not copyrighted, credit requested), GOES GeoColor (NOAA / CIRA) and Meteosat frames from EUMETSAT's map service
+(EUMETView). Those frames are "Advanced Image Products", which EUMETSAT's Data Policy (as amended 25 November 2025)
+lists as Core data, free and unrestricted, with the attribution of its article 6.3: "Contains modified EUMETSAT
+Meteosat data" and the year. Credit for each appears in the app and README.
 
 ## Data
 

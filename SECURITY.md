@@ -18,4 +18,4 @@ In scope: this repository's code, including the Vercel functions in `api/`, the 
 `supabase/`, the GitHub Actions workflow, and the web app.
 
 Out of scope: third-party services the app reads from (CelesTrak, Planetary Computer, Earth Search, NASA GIBS,
-Photon), and denial of service by sheer request volume.
+EUMETSAT's map service, Photon), and denial of service by sheer request volume.

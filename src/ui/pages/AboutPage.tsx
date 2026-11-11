@@ -398,6 +398,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                 <Credit who="Sentinel-2">Contains modified Copernicus Sentinel data {years}, processed by ESA.</Credit>
                 <Credit who="Landsat 8 / 9">Landsat imagery courtesy of the U.S. Geological Survey and NASA.</Credit>
                 <Credit who="NASA GIBS">Imagery from NASA’s GIBS, part of EOSDIS. GOES via NOAA and CIRA, Himawari via JMA.</Credit>
+                <Credit who="Meteosat">Contains modified EUMETSAT Meteosat data {new Date().getUTCFullYear()}, from EUMETSAT’s map service.</Credit>
                 <Credit who="Archives">Microsoft Planetary Computer and Element 84 Earth Search; Landsat’s 15 m band from the Copernicus Data Space Ecosystem.</Credit>
                 <Credit who="Orbits">Element sets from CelesTrak. SGP4 by satellite.js.</Credit>
                 <Credit who="Place names">Photon by komoot. Map data © OpenStreetMap contributors (ODbL).</Credit>

@@ -91,6 +91,12 @@ says *watched*, never *photographed*.
   removed. Opened full size, a Landsat 8 or 9 photo is sharpened with the same capture's 15 m panchromatic band (real
   detail the satellite recorded, from Landsat Level-1), and its labels then say 15 m.
 
+- The geostationary weather satellites that watch a place all week are listed with their newest frame where a public
+  map service carries it: GOES and Himawari from NASA, the two Meteosats from EUMETSAT. At night Himawari and
+  Meteosat-9 are shown in infrared, labelled *IR*: cloud tops by temperature, colder is lighter. NASA draws its
+  coldest cloud tops in a colour code; Watched puts them back on the grey scale, in the same order. A place at the
+  rim of a satellite's view gets no frame from it.
+
 Everything uncertain is labelled as such in the app.
 
 ## How it works
@@ -168,7 +174,8 @@ never reads the IP. The app never sends street-level place names. Vercel and Sup
 in their own request logs, like any host.
 
 Other services see the place too. [Photon](https://photon.komoot.io) sees what you type, or your coordinates if you
-use your location. Planetary Computer and NASA GIBS see the point and the area around it, to send the photos.
+use your location. Planetary Computer and NASA GIBS see the point and the area around it, to send the photos, and so
+does EUMETSAT where a Meteosat watches the place.
 Element 84 sees it only when Planetary Computer is down. Vercel Web Analytics receives the page address, which for a
 place link includes its coordinates and name.
 
@@ -287,6 +294,7 @@ docs/                 DESIGN.md, ARCHITECTURE.md, SELF-HOSTING.md
 | Sentinel&#8209;2 | Contains modified Copernicus Sentinel data, followed by the year each photo was taken. |
 | Landsat | Landsat imagery courtesy of the U.S. Geological Survey and NASA. |
 | NASA&nbsp;GIBS | Imagery from NASA's GIBS, part of EOSDIS. GOES via NOAA and CIRA, Himawari via JMA. |
+| Meteosat | Contains modified EUMETSAT Meteosat data, followed by the year, from [EUMETSAT's map service](https://view.eumetsat.int). |
 | Archives | [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com) and [Element 84 Earth Search](https://element84.com/earth-search/); Landsat's 15 m band from the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu). |
 | Places | [Photon](https://photon.komoot.io) by komoot. Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL). |
 | Textures | [Solar System Scope](https://www.solarsystemscope.com/textures/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), from NASA Blue Marble and Black Marble, partly by way of the three.js examples. Resized, re-encoded and repacked for this project. |
