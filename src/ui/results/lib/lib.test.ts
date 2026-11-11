@@ -476,7 +476,7 @@ describe('copy: degenerate geometry reads like a person wrote it', () => {
 
 describe('best look (decision #1)', () => {
   const cap = (id: string, over: Partial<Capture> = {}): Capture => ({ ...s2, id, itemId: id, ...over })
-  const geo = [{ norad: 60133, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008, gibs: { collection: 'gibs-goes-east' as const, layer: 'L' } }]
+  const geo = [{ norad: 60133, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008, frames: 'goes-east' as const }]
   const report = (captures: Capture[], passes: Pass[], g = geo) => ({ captures, passes, geo: g })
 
   it('a clear spot beats a cloudier spot even with less scene cloud', () => {

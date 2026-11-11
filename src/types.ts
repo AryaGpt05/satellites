@@ -95,6 +95,8 @@ export interface SatProfile {
   stac?: { collection: 'sentinel-2-l2a' | 'landsat-c2-l2'; platform: string }
   /** If set, actual imagery is available from NASA GIBS */
   gibs?: { collection: CaptureCollection; layer: string; kind: 'daily' | 'subdaily' }
+  /** For geostationary: where its newest frame can be had (src/imagery/geoFrames.ts) */
+  frames?: GeoFrameSource
   /** For geostationary: false if the satellite is in standby/storage (not imaging) */
   operational?: boolean
   /** One sentence, plain, precise. No hype. */
@@ -179,6 +181,12 @@ export type CaptureCollection =
   | 'gibs-goes-west'
   | 'gibs-himawari'
 
+/**
+ * Where a geostationary watcher's newest frame comes from (src/imagery/geoFrames.ts: NASA GIBS or EUMETSAT). A frame
+ * is not a capture: no pass took it, it is never counted as a photo and never shared.
+ */
+export type GeoFrameSource = 'goes-east' | 'goes-west' | 'himawari' | 'meteosat-0deg' | 'meteosat-iodc'
+
 /** Classification of the pixel at the searched place in a capture ('cirrus' = thin cirrus, Sentinel-2 SCL class 10). */
 export type SpotCloud = 'clear' | 'cirrus' | 'cloud' | 'shadow' | 'unknown'
 
@@ -230,8 +238,8 @@ export interface GeoWatcher {
   cadenceMin: number
   /** Number of full-disk images that included the place in the report window */
   imagesInWindow: number
-  /** Real imagery for this watcher, if GIBS serves it (GOES-East/West, Himawari) */
-  gibs?: { collection: CaptureCollection; layer: string }
+  /** Where this watcher's newest frame can be had, if a public service carries it (GOES, Himawari, Meteosat) */
+  frames?: GeoFrameSource
 }
 
 export interface Report {

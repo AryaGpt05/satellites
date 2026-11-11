@@ -652,7 +652,7 @@ describe('computeReport', () => {
     expect(g19.subLon).toBeGreaterThan(-80)
     expect(g19.subLon).toBeLessThan(-70)
     expect(g19.imagesInWindow).toBe(1008)
-    expect(g19.gibs?.collection).toBe('gibs-goes-east')
+    expect(g19.frames).toBe('goes-east')
 
     const t = await computeReport(tokyo, { now })
     const tn = t.geo.map((g) => g.name)

@@ -35,7 +35,7 @@ export function geoWatchers(cat: LoadedCatalog, place: LatLon, windowStart: numb
       elevationDeg: el,
       cadenceMin: p.cadenceMin,
       imagesInWindow: Math.floor((windowEnd - windowStart) / (p.cadenceMin * 60_000)),
-      gibs: p.gibs ? { collection: p.gibs.collection, layer: p.gibs.layer } : undefined,
+      frames: p.frames,
     })
   }
   return out.sort((a, b) => b.elevationDeg - a.elevationDeg)

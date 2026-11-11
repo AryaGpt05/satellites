@@ -188,6 +188,7 @@ export const PROFILES: readonly SatProfile[] = [
     operational: true,
     cadenceMin: 10,
     gibs: { collection: 'gibs-goes-east', layer: 'GOES-East_ABI_GeoColor', kind: 'subdaily' },
+    frames: 'goes-east',
     blurb: 'GOES-East: images the full disk of the Americas every 10 minutes.',
   },
   {
@@ -199,6 +200,7 @@ export const PROFILES: readonly SatProfile[] = [
     operational: true,
     cadenceMin: 10,
     gibs: { collection: 'gibs-goes-west', layer: 'GOES-West_ABI_GeoColor', kind: 'subdaily' },
+    frames: 'goes-west',
     blurb: 'GOES-West: images the full disk of the Pacific and the Americas every 10 minutes.',
   },
   {
@@ -228,6 +230,7 @@ export const PROFILES: readonly SatProfile[] = [
     operational: true,
     cadenceMin: 10,
     gibs: { collection: 'gibs-himawari', layer: 'Himawari_AHI_Band3_Red_Visible_1km', kind: 'subdaily' },
+    frames: 'himawari',
     blurb: 'Japan’s weather satellite: images the full disk of Asia and the Pacific every 10 minutes.',
   },
   {
@@ -247,6 +250,7 @@ export const PROFILES: readonly SatProfile[] = [
     resolutionM: 500,
     operational: true,
     cadenceMin: 10,
+    frames: 'meteosat-0deg',
     blurb: 'The first third-generation Meteosat (MTG-I1): images Europe and Africa every 10 minutes.',
   },
   {
@@ -257,6 +261,7 @@ export const PROFILES: readonly SatProfile[] = [
     resolutionM: 1000,
     operational: true,
     cadenceMin: 15,
+    frames: 'meteosat-iodc',
     blurb: 'Covers the Indian Ocean region, imaging the full disk every 15 minutes.',
   },
   {

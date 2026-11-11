@@ -26,8 +26,11 @@
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
+/* As wide as the frame, whatever the line under it says ("31 min ago" runs a little into the gap), so every row's
+   text starts on one edge whether or not it has a picture. */
 .frameCol {
   flex: none;
+  width: 72px;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -80,6 +83,20 @@
   background:
     linear-gradient(var(--signal), var(--signal)) center / 1px 100% no-repeat,
     linear-gradient(var(--signal), var(--signal)) center / 100% 1px no-repeat;
+}
+/* An infrared frame says so on the picture, in the night-capable hue (DESIGN §2); the row keeps its height. */
+.band {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  padding: 2px 4px;
+  background: color-mix(in srgb, var(--ink-0) 78%, transparent);
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: var(--track-label);
+  line-height: 1.2;
+  color: var(--ice);
 }
 .frameTime {
   display: flex;
@@ -146,4 +163,14 @@
 }
 .countNum {
   color: var(--bone);
+}
+/* The attribution EUMETSAT's data policy asks for, where its frames show: a footnote, like the page's other caveats. */
+.credit {
+  margin: -6px 0 0;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-micro, 9.5px);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bone-3);
 }

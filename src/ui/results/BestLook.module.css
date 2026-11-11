@@ -183,6 +183,10 @@
     opacity: 0;
   }
 }
+/* "Infrared" in the caption: the night-capable hue (DESIGN §2). */
+.geoBand {
+  color: var(--ice);
+}
 .geoNote {
   font-family: var(--font-mono);
   font-stretch: 87.5%;

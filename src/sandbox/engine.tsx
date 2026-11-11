@@ -315,7 +315,7 @@ function GeoTable({ report }: { report: EngineReport }) {
                 <span className="u">MIN</span>
               </td>
               <td className="num">{fmtInt(g.imagesInWindow)}</td>
-              <td className="dim">{g.gibs ? g.gibs.layer : '—'}</td>
+              <td className="dim">{g.frames ?? '—'}</td>
             </tr>
           ))}
         </tbody>
