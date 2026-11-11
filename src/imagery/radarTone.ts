@@ -9,8 +9,9 @@
  * a uniform scene (open sea) stays calm instead of being stretched into speckle. A slight gamma (1.15) keeps the
  * dark ground dark.
  *
- * The ramp is the site's own: ink in the shadows, ice (the design's one colour for radar) faintly in the mid-tones,
- * a cool off-white at the top, never pure white or black. Radar has no colour; the tint only says "this is not a
+ * The ramp is the site's own: ink in the shadows (ink-2, not darker: calm water stays a deep slate, never the black
+ * that means no data, which the globe's decal keys out), ice (the design's one colour for radar) faintly in the
+ * mid-tones, a cool off-white at the top, never pure white. Radar has no colour; the tint only says "this is not a
  * photograph", and the brightness is the backscatter, as measured. No data stays (0, 0, 0), as in every photo.
  */
 import { palette } from '@/ui/system/palette'
@@ -31,7 +32,7 @@ const grey = (v: number): Rgb => [v * 255, v * 255, v * 255]
 
 /** The ramp's stops: ink, a mid-grey a quarter of the way to ice, an off-white an eighth of the way. */
 const STOPS: [number, Rgb][] = [
-  [0, rgbOf(palette.ink1)],
+  [0, rgbOf(palette.ink2)],
   [0.6, mix(grey(0.53), rgbOf(palette.ice), 0.25)],
   [1, mix(grey(0.93), rgbOf(palette.ice), 0.12)],
 ]

@@ -71,7 +71,7 @@ describe('radar tone', () => {
     const a = img(vals)
     expect(toneRadar(a, 1000, 1)).toBe(1)
     for (let i = 1; i < 1000; i++) expect(lum(a, i)).toBeGreaterThanOrEqual(lum(a, i - 1))
-    expect(lum(a, 0)).toBeLessThan(60)
+    expect(lum(a, 0)).toBeLessThan(80)
     expect(lum(a, 999)).toBeGreaterThan(600)
     // Never pure white; a faint ice cast (blue ≥ red) in the mid-tones.
     expect(a[999 * 4]).toBeLessThan(250)

@@ -111,6 +111,7 @@ describe('decal and scan geometry', () => {
     expect(decalSpecFor('sentinel-2-l2a', false)).toEqual({ halfSizeKm: 40, px: 1024 })
     expect(decalSpecFor('landsat-c2-l2', true)).toEqual({ halfSizeKm: 45, px: 768 })
     expect(decalSpecFor('gibs-viirs-noaa20', false)?.halfSizeKm).toBe(300)
+    expect(decalSpecFor('sentinel-1-rtc', false)).toEqual({ halfSizeKm: 40, px: 1024 })
     expect(decalSpecFor('gibs-goes-east', false)).toBeNull()
   })
 

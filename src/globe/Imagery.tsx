@@ -102,10 +102,11 @@ function createStore(gl: WebGLRenderer, rt: GlobeRuntime) {
     // the crops' grid arithmetic (pcCrop: which URL is toned, the panel photo's turn). One retry after a short pause, as
     // decodeImageUrl and the panel's preloadImage do (PC's tiler 5xxs on a cold scene).
     const toned = () => import('@/imagery/image').then((m) => m.tonedImageBlob(url))
-    const decoded = import('@/imagery/pcCrop').then((crops) => {
+    const decoded = Promise.all([import('@/imagery/pcCrop'), import('@/imagery/radar')]).then(([crops, radar]) => {
       // Set before the image can be ready (the square is only drawn over a ready decal).
       entry.panelTurn = panelTurn(panelUrl ? crops.northInCropDeg(panelUrl()) : 0)
-      return crops.isTonedUrl(url)
+      // A Sentinel-1 radar crop is toned there too (its own contrast), never painted as the encoded decibels.
+      return crops.isTonedUrl(url) || radar.isRadarUrl(url)
         ? toned()
             .catch(() => new Promise<void>((r) => setTimeout(r, 700 + Math.random() * 500)).then(toned))
             .then(decodeImageBlob)

@@ -9,12 +9,13 @@ import { bboxAround } from '@/lib/geo'
 import type { Capture, CaptureCollection } from '@/types'
 
 /**
- * Half extent of the panel's photo (results lib/captures cropSpec: Sentinel-2 ±5 km, Landsat ±7.5 km, daily mosaics
- * ±120 km), marked on the painted image as a hairline square.
+ * Half extent of the panel's photo (results lib/captures cropSpec: Sentinel-2 ±5 km, Landsat ±7.5 km, Sentinel-1 radar
+ * ±10 km, daily mosaics ±120 km), marked on the painted image as a hairline square.
  */
 export function panelHalfKm(c: CaptureCollection): number {
   if (c === 'sentinel-2-l2a') return 5
   if (c === 'landsat-c2-l2') return 7.5
+  if (c === 'sentinel-1-rtc') return 10
   return 120
 }
 
