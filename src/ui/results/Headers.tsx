@@ -359,7 +359,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
             <Mark name={glyphForPass(pass.verdict, meta.category)} size={14} color={markColorVar(pass.verdict, meta.category)} />
             <h1 className={s.passName}>{meta.name}</h1>
             <span className={s.passWhen}>
-              {t.day} · {t.time} {t.zone}
+              {t.day} · {pass.geostationary ? '≈ ' : ''}{t.time} {t.zone}
             </span>
           </div>
           {photo ? null : stepper}
@@ -399,7 +399,7 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
           <Mark name={glyphForPass(pass.verdict, meta.category)} size={14} color={markColorVar(pass.verdict, meta.category)} />
           <h1 className={s.passName}>{meta.name}</h1>
           <span className={s.passWhen}>
-            {t.day} · {t.time} {t.zone}
+            {t.day} · {pass.geostationary ? '≈ ' : ''}{t.time} {t.zone}
           </span>
         </div>
       ) : (
@@ -410,7 +410,8 @@ export function DetailHeader({ model, pass, mobile, onSelect, strip, photo, shar
           </div>
           <div className={s.placeSub}>
             <b>
-              {t.day} · {t.timeS} {t.zone}
+              {/* A geostationary scan's crossing is known to about a minute (engine geostationary.ts). */}
+              {t.day} · {pass.geostationary ? `≈ ${t.time}` : t.timeS} {t.zone}
             </b>
             {meta.operator ? <span>{meta.operator}</span> : null}
           </div>
