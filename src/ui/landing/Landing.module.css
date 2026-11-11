@@ -343,7 +343,6 @@
 }
 .examplesHead,
 .exHint,
-.stats,
 .chipLead {
   font-family: var(--font-mono);
   font-stretch: 87.5%;
@@ -424,8 +423,7 @@
   color: var(--bone-4);
 }
 
-/* Under the chips: the maker's credit left, the live stats right (the row is always there, so the
-   stats arriving never move the column). The stats only show where the row has room for both. */
+/* Under the chips: the maker's credit. */
 .foot {
   container-type: inline-size;
   display: flex;
@@ -466,18 +464,6 @@
     top: -6px;
     bottom: -23px;
   }
-}
-.stats {
-  margin: 0;
-  text-align: right;
-}
-@container (max-width: 519px) {
-  .stats {
-    display: none;
-  }
-}
-.statNum {
-  color: var(--bone-2);
 }
 
 /* "Use my location" in full on wide screens; the short form on phones */
@@ -547,12 +533,6 @@
 @media (min-width: 761px) and (orientation: landscape) and (max-height: 760px), (min-width: 1101px) and (max-height: 760px) {
   .headline {
     font-size: min(var(--fs-display), 10.6vh);
-  }
-}
-@media (min-width: 761px) and (orientation: landscape) and (max-height: 800px), (min-width: 1101px) and (max-height: 800px) {
-  /* the stats footnote is a nicety: below 800 px it would crowd the bottom corner readouts */
-  .stats {
-    display: none;
   }
 }
 @media (min-width: 761px) and (orientation: landscape) and (max-height: 900px), (min-width: 1101px) and (max-height: 900px) {
@@ -681,7 +661,6 @@
   }
   /* Content budget (≤ 47% of the height): the window is in the sub copy; the stats are a nicety. */
   .kicker,
-  .stats,
   .examplesHead,
   .exHint {
     display: none;
@@ -906,7 +885,6 @@
   }
   .kicker,
   .sub,
-  .stats,
   .examplesHead,
   .exHint {
     display: none;

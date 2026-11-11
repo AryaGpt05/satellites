@@ -30,7 +30,6 @@ import { useApp, type Phase } from '@/state/store'
 import type { Place } from '@/types'
 import {
   Glyph,
-  Num,
   Reveal,
   ScrambleOnce,
   cx,
@@ -48,7 +47,6 @@ import { useSecondClock, useSecondDerived } from '@/ui/hud/clock'
 import { balancePad } from './balance'
 import { EXAMPLE_PLACES, type ExamplePlace } from './places'
 import { SearchBox } from './SearchBox'
-import { useLookupStats } from './stats'
 import { useLocate, type LocateState } from './useLocate'
 import { WINDOW_DAYS, windowLabel } from './windowLabel'
 import s from './Landing.module.css'
@@ -397,7 +395,6 @@ function LandingImpl({ onSubmit: onSubmitProp, enterDelay = 0 }: LandingProps) {
             <a className={s.credit} href={CREDIT_URL} target="_blank" rel="noreferrer">
               Built by {CREDIT_HANDLE}
             </a>
-            <StatsLine hidden={locate.state.kind !== 'idle'} />
           </div>
         </div>
       </section>
@@ -650,16 +647,3 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
   )
 }
 
-function StatsLine({ hidden }: { hidden?: boolean }) {
-  const stats = useLookupStats()
-  if (!stats) return null
-  return (
-    <p className={s.stats} hidden={hidden}>
-      {/* counts settle from 90% (never caught at 0 in a screen recording) */}
-      <Num value={stats.total} from={Math.round(stats.total * 0.9)} className={s.statNum} />{' '}
-      {stats.total === 1 ? 'place' : 'places'} checked
-      <span className={s.exSep}>·</span>
-      <Num value={stats.last24h} from={Math.round(stats.last24h * 0.9)} delay={120} className={s.statNum} /> in 24&nbsp;h
-    </p>
-  )
-}

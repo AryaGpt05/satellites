@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { balancePad } from './balance'
 import { canSubmitQuery, clampActive, enterTarget, isTypingTarget, stepActive } from './listNav'
 import { EXAMPLE_PLACES } from './places'
-import { validStats } from './stats'
 import { windowLabel } from './windowLabel'
 
 describe('combobox keyboard model', () => {
@@ -67,24 +66,6 @@ describe('window label', () => {
   it('uses the UTC day, whatever the hour', () => {
     expect(windowLabel(Date.UTC(2026, 10, 8, 23, 59))).toBe('1 → 8 NOV 2026 UTC')
     expect(windowLabel(Date.UTC(2026, 10, 9, 0, 0))).toBe('2 → 9 NOV 2026 UTC')
-  })
-})
-
-describe('lookup stats guard', () => {
-  it('accepts only real, consistent counts', () => {
-    expect(validStats({ total: 1204, last24h: 87 })).toBe(true)
-    expect(validStats(null)).toBe(false)
-    expect(validStats({ total: 0, last24h: 0 })).toBe(false)
-    expect(validStats({ total: 10_000, last24h: 20_000 })).toBe(false)
-    expect(validStats({ total: 10, last24h: 11 })).toBe(false)
-    expect(validStats({ total: NaN, last24h: 1 })).toBe(false)
-    expect(validStats({ total: '12', last24h: 1 })).toBe(false)
-  })
-  it('hides counts too small to read as proof', () => {
-    expect(validStats({ total: 4, last24h: 4 })).toBe(false)
-    expect(validStats({ total: 999, last24h: 120 })).toBe(false)
-    expect(validStats({ total: 5000, last24h: 49 })).toBe(false)
-    expect(validStats({ total: 1000, last24h: 50 })).toBe(true)
   })
 })
 
