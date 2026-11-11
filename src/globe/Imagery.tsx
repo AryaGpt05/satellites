@@ -50,6 +50,9 @@ const FRESH_MIN_KM = 3
 /** The context patch keeps the global map's tone at this scale (km) and adds its own detail below it. */
 const TONE_KM = 60
 
+/** A Sentinel-1 radar crop (imagery/radar.ts): it needs no sunlight, so the globe shows it on the night side too. */
+const needsNoSun = (url: string) => /[?&]collection=sentinel-1-rtc&/.test(url)
+
 interface Entry {
   url: string
   /** loading → decoded (strips cut, off the main thread) → uploading (strip by strip) → ready */
@@ -355,8 +358,10 @@ export function Imagery() {
         p.uDecal2Map.value = state.decal.tex!
         p.uDecal2Uv.value.copy(state.decal.uv)
         p.uDecal2On.value = p.uDecalOn.value * (1 - 0) // keeps its current weight
+        p.uDecal2Lit.value = p.uDecalLit.value
       }
       state.decal = target
+      p.uDecalLit.value = needsNoSun(target.url) ? 1 : 0
       p.uDecalOn.value = 0
       p.uDecalMap.value = target.tex!
       p.uDecalUv.value.copy(target.uv)

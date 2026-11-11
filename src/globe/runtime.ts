@@ -156,6 +156,9 @@ export interface PaintUniforms {
   uDecal2Map: { value: Texture | null }
   uDecal2Uv: { value: Vector4 }
   uDecal2On: { value: number }
+  /** 1 for an image that needs no sunlight (a radar image): it shows on the night side too. Per slot. */
+  uDecalLit: { value: number }
+  uDecal2Lit: { value: number }
   uScanT0: { value: Vector3 }
   uScanS: { value: number }
   uFull: { value: number }
@@ -179,6 +182,8 @@ export function createPaintUniforms(): PaintUniforms {
     uDecal2Map: { value: null },
     uDecal2Uv: { value: new Vector4(0.5, 0.5, 0.01, 0.01) },
     uDecal2On: { value: 0 },
+    uDecalLit: { value: 0 },
+    uDecal2Lit: { value: 0 },
     uScanT0: { value: new Vector3(0, 1, 0) },
     uScanS: { value: 0 },
     uFull: { value: 1 },

@@ -110,6 +110,8 @@ export const PAINT = glsl`
   uniform sampler2D uDecal2Map;   // the previous image, fully developed, under the current one while it fades in
   uniform vec4 uDecal2Uv;
   uniform float uDecal2On;
+  uniform float uDecalLit;        // 1: an image that needs no sun (radar), shown on the night side too
+  uniform float uDecal2Lit;
   uniform vec3 uScanT0;
   uniform float uScanS;
   uniform float uFull;
