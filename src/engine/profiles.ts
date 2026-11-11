@@ -622,6 +622,7 @@ export const PROFILES: readonly SatProfile[] = [
     resolutionM: 5,
     maxOffNadirDeg: 40,
     blurb: 'Copernicus C-band radar: a 250 km swath at 5 × 20 m, through cloud, day or night.',
+    openArchive: true,
   },
   {
     namePattern: '^ICEYE-',

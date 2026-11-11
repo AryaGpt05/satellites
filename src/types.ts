@@ -93,6 +93,8 @@ export interface SatProfile {
   daylightOnly?: boolean
   /** If set, actual imagery is searchable via STAC */
   stac?: { collection: 'sentinel-2-l2a' | 'landsat-c2-l2'; platform: string }
+  /** Its images are public and searched for at the place (Sentinel-1's radar): no image found means none published */
+  openArchive?: boolean
   /** If set, actual imagery is available from NASA GIBS */
   gibs?: { collection: CaptureCollection; layer: string; kind: 'daily' | 'subdaily' }
   /** For geostationary: false if the satellite is in standby/storage (not imaging) */

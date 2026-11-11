@@ -49,7 +49,8 @@ export function byClarity(a: { pass: Pass; capture?: Capture }, b: { pass: Pass;
 export function pickBestLook(report: Pick<Report, 'passes' | 'captures' | 'geo'>): BestLook | null {
   const { photos } = orderPhotos({ passes: report.passes, captures: report.captures })
   const cover = windowCover(photos)
-  if (cover?.photo.pass) return { kind: cover.photo.kind, pass: cover.photo.pass, capture: cover.photo.capture }
+  // The window's cover is a detailed photo or a mosaic, never a radar image (photos.ts windowCover).
+  if (cover?.photo.pass && cover.photo.kind !== 'radar') return { kind: cover.photo.kind, pass: cover.photo.pass, capture: cover.photo.capture }
   const watcher = report.geo.find((g) => !!g.gibs)
   if (watcher) return { kind: 'geo', watcher }
   return null
