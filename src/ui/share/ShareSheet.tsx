@@ -40,7 +40,7 @@ import { track, type ShareFrom } from '@/lib/telemetry'
 import type { Pass, Report } from '@/types'
 import { Button, Glyph, Rule, Sheet, cx, useExitClone, useIsMobile, useMediaQuery } from '@/ui/system'
 import { isClouded } from '../results/lib/bestLook'
-import { captureFor, slug } from '../results/lib/captures'
+import { pixelLabel, captureFor, slug } from '../results/lib/captures'
 import { satMeta } from '../results/sats'
 import { fmtLocalDay, fmtLocalTime } from '../results/lib/time'
 import { createShareSafe, peekShare, type CreateShareInput } from './backend'
@@ -154,7 +154,7 @@ function passModel(pass: Pass, report: Report, tz: string, host: string, clouded
       altitudeKm: pass.altitudeKm,
       localDay: fmtLocalDay(pass.tClosest, tz),
       localTime: fmtLocalTime(pass.tClosest, tz),
-      resolution: capture ? `${Math.round(capture.gsdM)} m` : undefined,
+      resolution: capture ? pixelLabel(capture) : undefined,
       // The same words as the card (cloudWords): the card is clouded exactly when these are defined.
       cloud: capture && spec.sub !== undefined ? { pct: capture.cloudCoverPct, spot: capture.spot } : undefined,
     }),
