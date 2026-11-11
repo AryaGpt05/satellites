@@ -60,6 +60,8 @@ export interface GibsFrameLayer {
   layer: string
   tileMatrixSet: string
   visibleOnly?: boolean
+  /** For a visible-only band: how high the sun must stand at the place for a frame to be tried (default: above the horizon) */
+  minSunDeg?: number
 }
 
 /** Himawari's 10.4 µm window band: cloud tops by temperature, so it reads the same day and night. Measured 2026-11-11. */
@@ -324,11 +326,11 @@ export function geoFrameCandidates(collection: GibsCollection, place: LatLon, no
   return frameCandidates(GIBS_LAYERS[collection], place, now, listed, maxSteps)
 }
 
-function frameCandidates(info: Pick<GibsFrameLayer, 'visibleOnly'>, place: LatLon, now: number, listed: readonly number[] | null, maxSteps: number): number[] {
+function frameCandidates(info: Pick<GibsFrameLayer, 'visibleOnly' | 'minSunDeg'>, place: LatLon, now: number, listed: readonly number[] | null, maxSteps: number): number[] {
   const floor = now - GEO_SAFE_LAG_MS
   const times = listed && listed.length ? listed.filter((t) => t <= floor) : Array.from({ length: maxSteps }, (_, i) => geoFrameTime(now, now) - i * TEN_MIN)
   const window = times.slice(0, maxSteps)
-  return info.visibleOnly ? window.filter((t) => sunElevationDeg(place.lat, place.lon, t) > 0) : window
+  return info.visibleOnly ? window.filter((t) => sunElevationDeg(place.lat, place.lon, t) > (info.minSunDeg ?? 0)) : window
 }
 
 /**
@@ -357,6 +359,8 @@ export async function latestGibsFrame(
   opts: CropOpts,
   { signal, now = Date.now(), maxSteps = 12 }: { signal?: AbortSignal; now?: number; maxSteps?: number } = {},
 ): Promise<{ url: string; time: number } | null> {
+  // A visible-only band with the place in the dark at every frame it could list: nothing to ask for.
+  if (info.visibleOnly && frameCandidates(info, place, now, null, maxSteps).length === 0) return null
   let listed: number[] | null = null
   try {
     listed = await gibsFrames(info, { signal, now })

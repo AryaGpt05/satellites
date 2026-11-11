@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Pass } from '@/types'
 import { gibsWmsUrl, worldviewUrl } from './endpoints'
-import { GEO_SAFE_LAG_MS, geoFrameCandidates, geoFrames, geoFrameTime, geoImageUrl, gibsTime, parseIsoDuration, parseTimeDomain, utcDate, weatherCandidates } from './gibs'
+import { GEO_SAFE_LAG_MS, GIBS_LAYERS, geoFrameCandidates, geoFrames, geoFrameTime, geoImageUrl, gibsTime, latestGibsFrame, parseIsoDuration, parseTimeDomain, utcDate, weatherCandidates } from './gibs'
 import { measureNoData } from './image'
 
 const WATERLOO = { lat: 43.4723, lon: -80.5449 }
@@ -176,6 +176,19 @@ describe('published time domains', () => {
     expect(geoFrameCandidates('gibs-himawari', WATERLOO, now, null, 3)).toEqual([])
     // Tokyo at 14:00 JST: daylight, all kept.
     expect(geoFrameCandidates('gibs-himawari', TOKYO, now, null, 3)).toHaveLength(3)
+  })
+
+  it('asks for nothing when a visible-only band has the place in the dark, or the sun too low for the caller', async () => {
+    const f = vi.fn()
+    vi.stubGlobal('fetch', f)
+    const opts = { halfSizeKm: 400, px: 176 }
+    // Waterloo around midnight.
+    await expect(latestGibsFrame(GIBS_LAYERS['gibs-himawari'], WATERLOO, opts, { now: T('2026-11-08T06:05:00Z') })).resolves.toBeNull()
+    // Tokyo, the three frames 70–90 minutes before 08:40Z: the last half hour before sunset (07:40Z), the sun under 6°.
+    const dusk = T('2026-11-08T08:40:00Z')
+    expect(geoFrameCandidates('gibs-himawari', TOKYO, dusk, null, 3).length).toBeGreaterThan(0)
+    await expect(latestGibsFrame({ ...GIBS_LAYERS['gibs-himawari'], minSunDeg: 6 }, TOKYO, opts, { now: dusk, maxSteps: 3 })).resolves.toBeNull()
+    expect(f).not.toHaveBeenCalled()
   })
 })
 
