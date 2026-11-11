@@ -33,6 +33,8 @@ export type EventType =
   | 'vitals'
 
 export type ShareAction = 'x' | 'copy_link' | 'copy_image' | 'save_png' | 'native'
+/** Where a share sheet was opened from: the headline's Share, the lead photo's caption, the photo viewer, the pass view. */
+export type ShareFrom = 'headline' | 'hero' | 'viewer' | 'pass'
 export type Props = Record<string, string | number | boolean | undefined>
 
 interface Queued {
