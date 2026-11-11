@@ -5,7 +5,7 @@
  *   phones   full-width cards with the next one peeking ~12 % at the right; native horizontal scroll with
  *            CSS scroll-snap (x mandatory), momentum, overscroll contained (the sheet and page never move).
  *   laptops  one card at the column's width, ‹ › buttons, ← → keys, trackpad horizontal scroll.
- *   both     a filter (All · Detailed · Weather), a counter ("3 / 27"), a slim progress rail, and an expand
+ *   both     a filter (All · Detailed · Weather · Radar, the kinds the week has), a counter ("3 / 27"), a slim progress rail, and an expand
  *            control (F) that opens the lightbox.
  *
  * Order: lib/photos.ts (the closest clear look, then newest first). Swiping in the pass view selects the
@@ -377,7 +377,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
 
   if (!n) return null
   for (let i = Math.max(0, idx - MOUNT_NEAR); i <= Math.min(n - 1, idx + MOUNT_NEAR); i++) mountedSlides.current.add(items[i].key)
-  const showFilter = counts.detailed > 0 && counts.weather > 0
+  // Only when there is a choice: two kinds of picture or more.
+  const showFilter = [counts.detailed, counts.weather, counts.radar].filter((n) => n > 0).length > 1
   const hero = !detail
 
   return (
@@ -462,12 +463,13 @@ function nearestListed(prev: Photo[], items: Photo[], key: string | undefined): 
   return 0
 }
 
-/** All · Detailed · Weather: a hairline segmented control (owner B2). */
+/** All · Detailed · Weather · Radar: a hairline segmented control (owner B2). Radar only when the week has some. */
 function FilterControl({ filter, counts }: { filter: PhotoFilter; counts: Record<PhotoFilter, number> }) {
   const opts: { f: PhotoFilter; label: string; title: string }[] = [
     { f: 'all', label: 'All', title: 'Every photo, newest first after the closest look' },
     { f: 'detailed', label: 'Detailed', title: 'Sentinel-2 and Landsat, 10–30 m per pixel' },
     { f: 'weather', label: 'Weather', title: 'Daily weather mosaics, 250 m per pixel and coarser' },
+    ...(counts.radar ? [{ f: 'radar' as const, label: 'Radar', title: 'Sentinel-1 radar images, 20 m per pixel: through cloud, day or night' }] : []),
   ]
   return (
     <span className={s.filter} role="group" aria-label="Show photos">
@@ -622,7 +624,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
           gateOnVisible={mobile}
           onExpand={(el) => onExpand(photo, el)}
           className={detail ? s.square : s.heroFrame}
-          tag={!detail && (cover === 'closest' || cover === 'lastClear') ? { text: lead! } : undefined}
+          tag={!detail && (cover === 'closest' || cover === 'lastClear') ? { text: lead! } : photo.kind === 'radar' ? { text: 'Radar', ice: true } : undefined}
           note={
             detail
               ? undefined
@@ -658,12 +660,13 @@ function shortStatus(p: Photo): string | undefined {
 /** Laptops' summary card, second line: a clouded picture says so on the picture itself (a chip), not here. */
 function heroStatus(p: Photo): string | undefined {
   if (p.kind === 'mosaic') return 'Daily mosaic'
+  if (p.kind === 'radar') return 'Through cloud, day or night'
   return p.clouded ? undefined : shortStatus(p)
 }
 
-/** The pass view's plate: a mosaic's product line already says "Daily mosaic". */
+/** The pass view's plate: a mosaic's or a radar image's product line already says what it is. */
 function detailStatus(p: Photo): string | undefined {
-  return p.kind === 'mosaic' ? undefined : shortStatus(p)
+  return p.kind === 'mosaic' || p.kind === 'radar' ? undefined : shortStatus(p)
 }
 
 /** A clouded picture's chip: "Clouded over · 86%" / "Cloud at your spot". */
@@ -675,7 +678,7 @@ function cloudedWords(p: Photo, cover: boolean): string {
 
 /** Copyright / credit line required by each archive. */
 export function credit(c: Photo['capture']): string {
-  if (c.collection === 'sentinel-2-l2a') return `Contains modified Copernicus Sentinel data ${new Date(c.datetime || Date.now()).getUTCFullYear()}`
+  if (c.collection === 'sentinel-2-l2a' || c.collection === 'sentinel-1-rtc') return `Contains modified Copernicus Sentinel data ${new Date(c.datetime || Date.now()).getUTCFullYear()}`
   if (c.collection === 'landsat-c2-l2') return 'Landsat: USGS / NASA'
   return 'NASA GIBS / EOSDIS'
 }

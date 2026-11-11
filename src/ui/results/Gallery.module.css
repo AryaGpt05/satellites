@@ -495,6 +495,10 @@
   text-overflow: ellipsis;
   pointer-events: none;
 }
+/* A radar image's tag: the design's one colour for radar (DESIGN §2). */
+.ice {
+  color: var(--ice);
+}
 .br {
   bottom: 8px;
   right: 8px;
