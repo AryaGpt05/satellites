@@ -169,6 +169,8 @@ describe('derived events', () => {
     const p = (source: Place['source']) => ({ label: 'x', lat: 0, lon: 0, source }) as Place
     expect(searchSource({ place: p('search') })).toBe('search')
     expect(searchSource({ place: p('demo') })).toBe('example')
+    expect(searchSource({ place: p('surprise') })).toBe('surprise')
+    expect(searchSource({ place: p('pin') })).toBe('pin')
     expect(searchSource({ place: p('geolocation') })).toBe('near_me')
     expect(searchSource({ place: p('url') })).toBe('deep_link')
     expect(searchSource({ place: p('url'), shared: { id: 'abcdefgh', placeLabel: 'x', lat: 0, lon: 0 } })).toBe('share_link')

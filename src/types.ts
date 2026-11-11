@@ -19,8 +19,8 @@ export interface Place extends LatLon {
   sublabel?: string
   /** ISO 3166-1 alpha-2, lowercase, if known */
   countryCode?: string
-  /** Where this place came from */
-  source: 'search' | 'geolocation' | 'url' | 'demo' | 'pin'
+  /** Where this place came from ('demo': an example chip; 'surprise': the "Surprise me" chip's random pick) */
+  source: 'search' | 'geolocation' | 'url' | 'demo' | 'surprise' | 'pin'
   /** The label names a street, a building or an address (set by the geocoder): usage stats save its city instead */
   streetLevel?: boolean
 }

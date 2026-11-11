@@ -17,7 +17,8 @@ export const EXAMPLE_PLACES: readonly ExamplePlace[] = [
   { chip: 'Giza', label: 'Pyramids of Giza', sublabel: 'Giza, Egypt', lat: 29.9792, lon: 31.1342, countryCode: 'eg', source: 'demo' },
 ]
 
-const sp = (label: string, sublabel: string, lat: number, lon: number, countryCode: string): Place => ({ label, sublabel, lat, lon, countryCode, source: 'demo' })
+/** A "Surprise me" place: source 'surprise', so usage stats tell it apart from the example chips. */
+const sp = (label: string, sublabel: string, lat: number, lon: number, countryCode: string): Place => ({ label, sublabel, lat, lon, countryCode, source: 'surprise' })
 
 /**
  * "Surprise me": famous places you can make out from orbit at the photos' 10–30 m a pixel, in a 10–15 km frame: big

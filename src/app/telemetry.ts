@@ -32,11 +32,13 @@ export function reportCounts(r: Pick<Report, 'passes' | 'archiveFailed' | 'parti
   return { sats: sats.size, photos: photos.size, passes: r.passes.length, partial: !!r.partial, archive_failed: !!r.archiveFailed }
 }
 
-/** search source: typed suggestion / example chip / near me / deep link / share link. */
+/** search source: typed suggestion / example chip / Surprise me / dropped pin / near me / deep link / share link. */
 export function searchSource(st: Pick<AppState, 'place' | 'shared'>): string {
   switch (st.place?.source) {
     case 'demo':
       return 'example'
+    case 'surprise':
+      return 'surprise'
     case 'pin':
       return 'pin'
     case 'geolocation':

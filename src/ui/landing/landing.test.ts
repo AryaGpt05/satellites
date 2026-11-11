@@ -51,7 +51,8 @@ describe('surprise me', () => {
     for (const p of SURPRISE_PLACES) {
       expect(Math.abs(p.lat)).toBeLessThanOrEqual(70)
       expect(Math.abs(p.lon)).toBeLessThanOrEqual(180)
-      expect(p.source).toBe('demo')
+      // Its own source, so a Surprise me search isn't counted as an example chip.
+      expect(p.source).toBe('surprise')
       expect(p.countryCode).toMatch(/^[a-z]{2}$/)
       // Not one of the chips: the surprise is somewhere they don't already show.
       expect(EXAMPLE_PLACES.some((e) => e.label === p.label)).toBe(false)
