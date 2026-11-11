@@ -13,6 +13,9 @@ export const ES_STAC_SEARCH = 'https://earth-search.aws.element84.com/v1/search'
 export const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
 export const GIBS_WMTS = 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0'
 export const WORLDVIEW = 'https://worldview.earthdata.nasa.gov/'
+/** EUMETSAT's public map service (EUMETView), a GeoServer: Meteosat frames (./eumetsat.ts). */
+export const EUMETSAT_GEOSERVER = 'https://view.eumetsat.int/geoserver'
+export const EUMETSAT_WMS = `${EUMETSAT_GEOSERVER}/ows`
 export const PHOTON = 'https://photon.komoot.io'
 
 export type StacCollection = 'sentinel-2-l2a' | 'landsat-c2-l2'

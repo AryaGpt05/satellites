@@ -31,7 +31,7 @@ const PURE_UI_MODULES = /src[\\/]ui[\\/]system[\\/](Sheet|sheetMath)\.tsx?$/
  * the grid arithmetic under it, api/_lib/toneRender.ts + utm.ts) builds the photos' URLs: the search's, never the
  * first screen's.
  */
-const PURE_IMAGERY_MODULES = /src[\\/]imagery[\\/](image|pixels|pixelsClient|gibs|stac|cloud|pcCrop)\.ts$|api[\\/]_lib[\\/](toneRender|utm)\.ts$/
+const PURE_IMAGERY_MODULES = /src[\\/]imagery[\\/](image|pixels|pixelsClient|gibs|eumetsat|geoFrames|infrared|stac|cloud|pcCrop)\.ts$|api[\\/]_lib[\\/](toneRender|utm)\.ts$/
 
 /** lib/geo's Vector3 helpers (three's math classes): the globe's, never the first screen's (see src/lib/geo.ts). */
 const PURE_LIB_MODULES = /src[\\/]lib[\\/]geo3\.ts$/

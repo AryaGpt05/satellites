@@ -21,7 +21,7 @@
  * reveal) or uploaded as WebGL textures. Consumers rendering `<img>` should set the same
  * `crossOrigin` so the browser reuses the decoded image instead of fetching it again.
  */
-import { GIBS_WMS } from './endpoints'
+import { EUMETSAT_WMS, GIBS_WMS } from './endpoints'
 import { isTonedUrl } from './pcCrop'
 import { Lru, memoAsync } from './lru'
 import { HttpError, raceAbort, sleep, withRetry } from './net'
@@ -40,21 +40,25 @@ const imageCache = /* @__PURE__ */ new Lru<string, Promise<HTMLImageElement>>(96
  * a loaded image for its URL for the life of the document, `no-store` or not (measured: a second
  * `new Image()` or `<img>` with the same URL made no request), so a retry would only see the same
  * black pixels. Callers should move on (e.g. to an older frame), as `latestGeoImage` does.
+ * EUMETSAT's map service is asked to speak the same dialect (./eumetsat.ts: off the disc, or a
+ * daylight product at night), so its frames are checked the same way.
  */
 export class EmptyImageError extends Error {
   constructor(url: string) {
-    super(`NASA GIBS returned an empty frame for ${url.slice(0, 120)}…`)
+    super(`${isGibsUrl(url) ? 'NASA GIBS' : 'EUMETSAT'} returned an empty frame for ${url.slice(0, 120)}…`)
     this.name = 'EmptyImageError'
   }
 }
 
-/** Share of no-data pixels at which a GIBS image counts as empty (a real frame is never this black). */
+/** Share of no-data pixels at which a weather image counts as empty (a real frame is never this black). */
 const EMPTY_NO_DATA = 0.98
 
 const isGibsUrl = (url: string) => url.startsWith(GIBS_WMS)
+/** Weather imagery (NASA GIBS, EUMETSAT): shown from bytes the pixels worker has checked for "no data". */
+const isCheckedUrl = (url: string) => isGibsUrl(url) || url.startsWith(EUMETSAT_WMS)
 
 /**
- * A NASA GIBS photo for display (I-1): fetched and checked for "no data" in the pixels worker (its 32 px decode),
+ * A NASA GIBS photo or a EUMETSAT frame for display (I-1): fetched and checked for "no data" in the pixels worker (its 32 px decode),
  * then shown from the very bytes that were checked (a blob: URL, decoded off the main thread by `img.decode()`).
  * The object URL is never revoked: the decoded element and its clones (one per view, results/images.ts) load
  * from it for the whole session.
@@ -179,7 +183,7 @@ export function preloadImage(url: string, opts: { signal?: AbortSignal; timeoutM
   const timeoutMs = opts.timeoutMs ?? IMAGE_TIMEOUT_MS
   const blobs = typeof URL.createObjectURL === 'function'
   const load = () =>
-    blobs && isGibsUrl(url)
+    blobs && isCheckedUrl(url)
       ? loadGibs(url, timeoutMs)
       : blobs && isPanSharpUrl(url)
         ? loadPanSharp(url, timeoutMs)
