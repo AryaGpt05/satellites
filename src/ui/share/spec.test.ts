@@ -181,3 +181,11 @@ describe('share card spec', () => {
     }
   })
 })
+
+describe('share card: a Sentinel-1 radar image', () => {
+  it('names the radar instrument and credits Copernicus, as the results do', async () => {
+    const { creditFor, sensorName } = await import('../../../api/_lib/cardSpec')
+    expect(sensorName({ collection: 'sentinel-1-rtc', platform: 'sentinel-1d' })).toBe('C-SAR')
+    expect(creditFor({ collection: 'sentinel-1-rtc', datetime: Date.UTC(2026, 10, 10) })).toBe('Contains modified Copernicus Sentinel data 2026')
+  })
+})

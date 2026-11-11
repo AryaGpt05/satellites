@@ -517,12 +517,13 @@ export function sensorName(c: Pick<CardCaptureInput, 'collection' | 'platform'>)
   if (k.startsWith('gibs-viirs')) return 'VIIRS'
   if (k.startsWith('gibs-modis')) return 'MODIS'
   if (k === 'gibs-himawari') return 'AHI'
+  if (k === 'sentinel-1-rtc') return 'C-SAR'
   return 'ABI'
 }
 
 /** Attribution the archive asks for when its imagery is redistributed (the card is redistribution). */
 export function creditFor(c: Pick<CardCaptureInput, 'collection' | 'datetime'>, fallbackMs?: number): string {
-  if (c.collection === 'sentinel-2-l2a') {
+  if (c.collection === 'sentinel-2-l2a' || c.collection === 'sentinel-1-rtc') {
     const t = c.datetime ?? fallbackMs
     return `Contains modified Copernicus Sentinel data ${t !== undefined ? new Date(t).getUTCFullYear() : new Date().getUTCFullYear()}`
   }
