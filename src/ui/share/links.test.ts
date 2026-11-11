@@ -112,18 +112,18 @@ describe('share links', () => {
 
   it('writes the summary post in the results headline’s words (R3-13)', () => {
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 256, photos: 31 })).toBe(
-      '256 satellites watched Waterloo this week. 31 photos were made public.\n\nSomething watched you this week too.\nvia @armaangupt0',
+      '256 satellites watched Waterloo this week. 31 images were made public.\n\nSomething watched you this week too.\nvia @armaangupt0',
     )
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 1, photos: 1 })).toMatch(/^1 satellite watched Waterloo this week\. 1 photo was made public\.\n/)
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 12, photos: 0 })).toMatch(/^12 satellites watched Waterloo this week\. No photos were made public\.\n/)
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 12, photos: 4, partial: true })).toMatch(/^12 satellites watched Waterloo this week\. At least 4 photos were made public\.\n/)
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 1, photos: 1 })).toMatch(/^1 satellite watched Waterloo this week\. 1 image was made public\.\n/)
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 12, photos: 0 })).toMatch(/^12 satellites watched Waterloo this week\. No images were made public\.\n/)
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 12, photos: 4, partial: true })).toMatch(/^12 satellites watched Waterloo this week\. At least 4 images were made public\.\n/)
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 12, photos: 0, archiveDown: true })).toMatch(
-      /^12 satellites watched Waterloo this week\. The image archives didn’t answer, so we can’t count the public photos right now\.\n/,
+      /^12 satellites watched Waterloo this week\. The image archives didn’t answer, so we can’t count the public images right now\.\n/,
     )
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 0, photos: 0 })).toBe(
-      'No satellite we track watched Waterloo this week. No photos were made public.\n\nWhat passed over you this week?\nvia @armaangupt0',
+      'No satellite we track watched Waterloo this week. No images were made public.\n\nWhat passed over you this week?\nvia @armaangupt0',
     )
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 1234, photos: 5678 })).toMatch(/^1,234 satellites watched Waterloo this week\. 5,678 photos were made public\./)
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 1234, photos: 5678 })).toMatch(/^1,234 satellites watched Waterloo this week\. 5,678 images were made public\./)
   })
 
   it('carries N, K and the photo state in the summary link', () => {

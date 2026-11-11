@@ -5,7 +5,7 @@
  * aria labels and tests.
  */
 import type { Capture, GeoWatcher, Pass, Report } from '@/types'
-import { isDailyMosaic, sensorName } from './captures'
+import { isDailyMosaic, isRadar, sensorName } from './captures'
 import { VERDICT_META, type MetaFn, type SatMeta } from './meta'
 import { fmtLocalTime, zoneAbbr } from './time'
 
@@ -84,12 +84,14 @@ export interface Headline {
   infraredSweeps: number
   /** Distinct other satellites that passed within view (likely / could / overhead) */
   more: number
-  /** Total real images: the photos made public (what "K photos were made public" counts) */
+  /** Total real images made public (what "K images were made public" counts): photos, mosaics and radar images alike */
   images: number
   /** Of which per-scene detailed images (Sentinel-2, Landsat) */
   detailed: number
   /** Of which coarse daily weather mosaics */
   mosaics: number
+  /** Of which Sentinel-1 radar images */
+  radarImages: number
   /** Plain reason when nothing photographed the place */
   zeroReason?: string
   zeroKind?: ZeroKind
@@ -122,6 +124,7 @@ export function headline(
   const radarSats = new Map<number, number>()
   let detailed = 0
   let mosaics = 0
+  let radarImages = 0
   let infraredSweeps = 0
   const byId = new Map(report.captures.map((c) => [c.id, c]))
   for (const p of report.passes) {
@@ -133,7 +136,8 @@ export function headline(
       if (c && isDailyMosaic(c)) {
         mosaics++
         mosaicSats.add(p.norad)
-      } else {
+      } else if (c && isRadar(c)) radarImages++
+      else {
         detailed++
         detailedSats.add(p.norad)
       }
@@ -150,9 +154,10 @@ export function headline(
     mosaicSats: mosaicSats.size,
     infraredSweeps,
     more: viewSats.size,
-    images: detailed + mosaics,
+    images: detailed + mosaics + radarImages,
     detailed,
     mosaics,
+    radarImages,
   }
   if (radarSats.size) {
     const ranked = [...radarSats.entries()].sort((a, b) => b[1] - a[1])
@@ -198,18 +203,21 @@ export function darkSentences(h: Pick<Headline, 'sunNeverRose' | 'infraredSweeps
   return out
 }
 
-/** "31 photos were made public." / "At least 4 photos…" / "1 photo was made public." / "No photos were made public this week." */
+/**
+ * "31 images were made public." / "At least 4 images…" / "1 image was made public." / "No images were made public this
+ * week." One count (owner): photos, weather mosaics and Sentinel-1's radar images alike; the footnote breaks it down.
+ */
 export function photosLine(k: number, opts: { partial?: boolean; week?: 'this week' | 'that week' } = {}): string {
-  if (k <= 0) return `No photos were made public ${opts.week ?? 'this week'}.`
+  if (k <= 0) return `No images were made public ${opts.week ?? 'this week'}.`
   const lead = opts.partial ? 'At least ' : ''
-  return k === 1 ? `${lead}1 photo was made public.` : `${lead}${int(k)} photos were made public.`
+  return k === 1 ? `${lead}1 image was made public.` : `${lead}${int(k)} images were made public.`
 }
 
 /** "256 satellites watched" / "1 satellite watched" (owner F, latest: the headline verb is "watched") */
 export const watchedPhrase = (n: number) => `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} watched`
 
 /** The archive outage, as the second line says it. */
-export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public photos right now.'
+export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public images right now.'
 
 export function radarSentence(r: NonNullable<Headline['radar']>): Sentence {
   const others = r.sats - r.names.length
@@ -292,6 +300,15 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
           num(int(capture.gsdM), 'm'),
           ' per pixel.',
         ])
+      } else if (capture && isRadar(capture)) {
+        out.push([`${name} crossed `, ...where(p), ' at ', localClock(p.tClosest, tz), ...moving])
+        out.push([
+          'Its radar, looking ',
+          num(dec1(p.offNadirDeg), '°'),
+          ` to the side, imaged ${placeLabel} at `,
+          num(int(capture.gsdM), 'm'),
+          p.sunElevationDeg < -6 ? ' per pixel, in the dark.' : ' per pixel.',
+        ])
       } else {
         out.push([`${name} crossed `, ...where(p), ' at ', localClock(p.tClosest, tz), ...moving])
         out.push(looking(p.offNadirDeg))
@@ -334,7 +351,9 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
         out.push([
           'Radar sees through cloud and darkness. ',
           ...(nadir ? [] : ['Pointing ', num(dec1(p.offNadirDeg), '°'), ' to the side, ']),
-          `${nadir ? 'It' : 'it'} could have mapped ${placeLabel}. We can’t know whether it did.`,
+          `${nadir ? 'It' : 'it'} could have mapped ${placeLabel}.`,
+          // Sentinel-1 publishes every image it takes; a private operator does not say.
+          meta.profile?.openArchive ? ` We found no published image of it from this pass.` : ' We can’t know whether it did.',
         ])
       } else {
         out.push([

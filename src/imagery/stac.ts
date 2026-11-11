@@ -1,5 +1,6 @@
 /**
- * Real Sentinel-2 and Landsat scenes over a place, from public STAC archives.
+ * Real Sentinel-2 and Landsat scenes over a place, from public STAC archives, and Sentinel-1's radar images
+ * (searchRadar: Planetary Computer only, a search of its own that never holds the photos' one).
  *
  * Primary: Microsoft Planetary Computer (search + server-side rendered crops).
  * Fallback (Sentinel-2 only): Element 84 Earth Search, used when PC search is down. Earth Search
@@ -17,6 +18,7 @@ import { ES_STAC_SEARCH, PC_STAC_SEARCH, type CropOpts, type StacCollection } fr
 import { pcCropUrl } from './pcCrop'
 import { fetchJson, HttpError, isAbortError, throwIfAborted } from './net'
 import { CROP_HALF_KM, s2EpsgFromItemId, sceneEpsgFromStac, sceneOnPlaceGrid } from '../../api/_lib/toneRender'
+import { RADAR_COLLECTION, RADAR_GSD_M, RADAR_HALF_KM, radarCropUrl, type RadarPol } from './radar'
 
 // ── STAC wire types (only what we read) ────────────────────────────────────────────────────
 
@@ -57,6 +59,9 @@ export const PLATFORM_NORAD: Readonly<Record<string, number>> = {
   'sentinel-2c': 60989,
   'landsat-8': 39084,
   'landsat-9': 49260,
+  'sentinel-1a': 39634,
+  'sentinel-1c': 62261,
+  'sentinel-1d': 66315,
 }
 
 /** Landsat platforms we accept. Landsat 7 (scan-line-corrector failure, decommissioned) is excluded. */
@@ -231,6 +236,38 @@ export function earthSearchItemToCandidate(item: StacItem, place: LatLon): Candi
   }
 }
 
+/**
+ * Convert a Planetary Computer `sentinel-1-rtc` item (radar: no cloud, no sun). Its polarisation is VV where it has one
+ * (nearly everywhere), else HH; a scene with neither is not shown.
+ */
+export function pcRadarItemToCandidate(item: StacItem, place: LatLon): Candidate | undefined {
+  const p = item.properties
+  const datetime = Date.parse(str(p['datetime']) ?? '')
+  const platform = normalizePlatform(str(p['platform']) ?? '')
+  if (!Number.isFinite(datetime) || !platform.startsWith('sentinel-1')) return undefined
+  const pols = Array.isArray(p['sar:polarizations']) ? (p['sar:polarizations'] as unknown[]).map((v) => String(v).toLowerCase()) : []
+  const pol: RadarPol | undefined = pols.includes('vv') && item.assets?.vv ? 'vv' : pols.includes('hh') && item.assets?.hh ? 'hh' : undefined
+  if (!pol) return undefined
+  const itemId = item.id
+  const code = p['proj:code']
+  const epsg = typeof code === 'string' && /^EPSG:\d+$/.test(code) ? Number(code.slice(5)) : num(p['proj:epsg'])
+  const capture: Capture = {
+    id: itemId,
+    provider: 'planetary-computer',
+    collection: RADAR_COLLECTION,
+    itemId,
+    platform,
+    norad: PLATFORM_NORAD[platform],
+    datetime,
+    gsdM: RADAR_GSD_M,
+    footprint: footprintRing(item.geometry, place),
+    cropUrl: (opts: CropOpts) => radarCropUrl(itemId, pol, place, opts),
+    previewUrl: item.assets?.['rendered_preview']?.href,
+    sourceUrl: selfLink(item),
+  }
+  return { capture, processing: str(p['s1:processing_datetime']) ?? str(p['created']) ?? '', epsg }
+}
+
 // ── Geometry helpers for dedupe ────────────────────────────────────────────────────────────
 
 /** Ray-casting point-in-polygon on a lon/lat ring (fine at scene scale). */
@@ -296,7 +333,7 @@ export function dedupeCandidates(cands: Candidate[], place: LatLon): Candidate[]
   const margin = new Map(sorted.map((c) => [c, footprintMarginKm(c.capture.footprint, place)]))
   const onGrid = (c: Candidate) => sceneOnPlaceGrid(c.epsg, place.lat, place.lon)
   // The photo's square lies inside the footprint: the place is at least its half-diagonal from the edge.
-  const holdsPhoto = (c: Candidate) => margin.get(c)! >= ((CROP_HALF_KM as Record<string, number>)[c.capture.collection] ?? 5) * Math.SQRT2
+  const holdsPhoto = (c: Candidate) => margin.get(c)! >= ((CROP_HALF_KM as Record<string, number>)[c.capture.collection] ?? (c.capture.collection === RADAR_COLLECTION ? RADAR_HALF_KM : 5)) * Math.SQRT2
   const better = (a: Candidate, b: Candidate) => {
     const ga = onGrid(a)
     if (ga !== onGrid(b) && holdsPhoto(ga ? a : b)) return ga
@@ -504,6 +541,20 @@ export async function searchCapturesDetailed(
  */
 export async function searchCaptures(place: LatLon, start: number, end: number, signal?: AbortSignal): Promise<Capture[]> {
   return (await searchCapturesDetailed(place, start, end, signal)).captures
+}
+
+/**
+ * Sentinel-1's radar images of `place` in [start, end] (Planetary Computer `sentinel-1-rtc`), one per overflight, newest
+ * first. A search of its own, never part of searchCapturesDetailed: the engine asks for it alongside and takes what has
+ * answered by the time its report is built, so radar never makes the photos wait. Abortable; rejects when the archive
+ * can't be reached (the radar passes then stay as geometry says).
+ */
+export async function searchRadar(place: LatLon, start: number, end: number, signal?: AbortSignal): Promise<Capture[]> {
+  throwIfAborted(signal)
+  if (!(end > start) || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) return []
+  const items = await stacSearchAll(PC_STAC_SEARCH, searchBody(RADAR_COLLECTION, place, start, end), signal)
+  const cands = items.map((it) => pcRadarItemToCandidate(it, place)).filter((c): c is Candidate => !!c)
+  return dedupeCandidates(cands, place).map((c) => c.capture)
 }
 
 /** Scene cloud below which an archive scene is a clear-cover candidate (server-side filter). */

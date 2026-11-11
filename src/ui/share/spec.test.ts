@@ -99,11 +99,11 @@ describe('share card spec', () => {
     // R3-13: the results headline, N satellites watched / K photos made public.
     expect(client.lead).toMatch(/^\d+ satellites watched$/)
     expect(`${client.place}${client.tail}`).toBe('Waterloo this week.')
-    expect(client.sub).toMatch(/^\d+ photos were made public\.$/)
+    expect(client.sub).toMatch(/^\d+ images were made public\.$/)
     expect(client.plate.kind === 'image' && client.plate.chip.segs[0].text).toMatch(/^Closest look · Sentinel-2C · 10 m$/)
     expect(client.readouts.map((r) => r.label)).toEqual(['Photo', 'Likely', 'Could', 'Overhead'])
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: 7, photos: 12 })).toBe(
-      '7 satellites watched Waterloo this week. 12 photos were made public.\n\nSomething watched you this week too.\nvia @armaangupt0',
+      '7 satellites watched Waterloo this week. 12 images were made public.\n\nSomething watched you this week too.\nvia @armaangupt0',
     )
   })
 
@@ -179,5 +179,13 @@ describe('share card spec', () => {
         expect(localStamp(t, tz)).toBe(`${fmtLocalDay(t, tz)} ${new Date(t + 0).getUTCFullYear() === 2026 ? '2026' : ''} · ${fmtLocalTime(t, tz)} ${zoneAbbr(t, tz)}`)
       }
     }
+  })
+})
+
+describe('share card: a Sentinel-1 radar image', () => {
+  it('names the radar instrument and credits Copernicus, as the results do', async () => {
+    const { creditFor, sensorName } = await import('../../../api/_lib/cardSpec')
+    expect(sensorName({ collection: 'sentinel-1-rtc', platform: 'sentinel-1d' })).toBe('C-SAR')
+    expect(creditFor({ collection: 'sentinel-1-rtc', datetime: Date.UTC(2026, 10, 10) })).toBe('Contains modified Copernicus Sentinel data 2026')
   })
 })

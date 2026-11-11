@@ -227,7 +227,7 @@ export function summaryLink(origin: string, i: SummaryLinkInput): string {
 }
 
 /**
- * "31 satellites watched Waterloo this week. 12 photos were made public." (R3-13: the results headline, N and K),
+ * "31 satellites watched Waterloo this week. 12 images were made public." (R3-13: the results headline, N and K),
  * then the invitation and the credit (R3-14).
  */
 export function summaryPostText(i: { placeLabel: string; satellites: number; photos: number; archiveDown?: boolean; partial?: boolean }): string {

@@ -224,11 +224,11 @@ describe('summary copy matches the results headline: N watched, K made public (R
     const one = buildSummarySpec({ ...base, satellites: 1, counts: counts(1) })
     expect(`${one.lead} ${one.place}${one.tail}`).toBe('1 satellite watched Waterloo this week.')
     expect(one.sub).toBe(photosLine(1))
-    expect(one.sub).toBe('1 photo was made public.')
+    expect(one.sub).toBe('1 image was made public.')
     expect(buildSummarySpec({ ...base, satellites: 31, counts: counts(4), partial: true }).sub).toBe(photosLine(4, { partial: true }))
-    // A zero reads "No photos were made public." (the first sentence already says "this week").
-    expect(buildSummarySpec({ ...base, satellites: 31, counts: counts(0) }).sub).toBe('No photos were made public.')
-    expect(photosLine(0)).toBe('No photos were made public this week.')
+    // A zero reads "No images were made public." (the first sentence already says "this week").
+    expect(buildSummarySpec({ ...base, satellites: 31, counts: counts(0) }).sub).toBe('No images were made public.')
+    expect(photosLine(0)).toBe('No images were made public this week.')
     // Nothing flew over: the results' zero headline.
     const none = buildSummarySpec({ ...base, satellites: 0, counts: { imaged: 0, likely: 0, could: 0, overhead: 0 } })
     expect(`${none.lead} ${none.place}${none.tail}`).toBe('No satellite we track watched Waterloo this week.')
@@ -254,6 +254,6 @@ describe('summary copy matches the results headline: N watched, K made public (R
     const f = summaryFacts(only, 'Waterloo', meta)
     expect(f.counts.imaged).toBe(headline(only, meta).images)
     expect(f.counts.imaged).toBeGreaterThan(0)
-    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: f.satellites, photos: f.counts.imaged })).toMatch(/ photos? (was|were) made public\.\n/)
+    expect(summaryPostText({ placeLabel: 'Waterloo', satellites: f.satellites, photos: f.counts.imaged })).toMatch(/ images? (was|were) made public\.\n/)
   })
 })

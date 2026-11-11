@@ -22,7 +22,7 @@ import { useApp } from '@/state/store'
 import type { Pass } from '@/types'
 import { Glyph, cx, palette, useReducedMotion } from '@/ui/system'
 import { Mark } from './Mark'
-import { isDailyMosaic } from './lib/captures'
+import { isDailyMosaic, isRadar } from './lib/captures'
 import { int } from './lib/copy'
 import { glyphForPass, markColorVar, VERDICT_GLYPH, VERDICT_META, VERDICT_TAG, type Verdict } from './lib/meta'
 import { daylight, hitTest, SUN_SAMPLE_MS } from './lib/timeline'
@@ -477,7 +477,12 @@ export function Timeline({ model, selectedId, onSelect, compact = false, index =
 function markWords(pass: Pass, model: ResultsModel): string {
   const m = model.meta(pass.norad)
   const capture = pass.captureId ? model.report.captures.find((c) => c.id === pass.captureId) : undefined
-  if (pass.verdict === 'imaged') return capture && isDailyMosaic(capture) ? `Daily mosaic, ${Math.round(capture.gsdM)} m · ●` : `${VERDICT_META.imaged.title} · ◆`
+  if (pass.verdict === 'imaged')
+    return capture && isDailyMosaic(capture)
+      ? `Daily mosaic, ${Math.round(capture.gsdM)} m · ●`
+      : capture && isRadar(capture)
+        ? `Radar image, ${Math.round(capture.gsdM)} m · ◆`
+        : `${VERDICT_META.imaged.title} · ◆`
   const kind: Record<string, string> = {
     'open-optical': 'open imager · ◇',
     'commercial-optical': 'commercial · □',

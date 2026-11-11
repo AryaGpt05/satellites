@@ -55,6 +55,8 @@ function paintUniforms(rt: GlobeRuntime) {
     uDecal2Map: p.uDecal2Map,
     uDecal2Uv: p.uDecal2Uv,
     uDecal2On: p.uDecal2On,
+    uDecalLit: p.uDecalLit,
+    uDecal2Lit: p.uDecal2Lit,
     uScanT0: p.uScanT0,
     uScanS: p.uScanS,
     uFull: p.uFull,

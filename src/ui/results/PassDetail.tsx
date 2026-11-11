@@ -13,7 +13,7 @@
  * near-total one is dimmed so it is never the brightest thing on screen.
  */
 import { startTransition, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { isTonedUrl, spotCloud, tonedImageBlob } from '@/imagery'
+import { isRadarUrl, isTonedUrl, spotCloud, tonedImageBlob } from '@/imagery'
 import type { Capture, Pass, SpotCloud } from '@/types'
 import { Glyph, Readout, Rule, ScrambleOnce, cx, fmtNorad, fmtUtc } from '@/ui/system'
 import { reportNow } from './Ago'
@@ -23,7 +23,7 @@ import { Gallery } from './Gallery'
 import { PassPlan } from './PassPlan'
 import { ReplayControls } from './ReplayControls'
 import { Paragraph } from './Text'
-import { archiveName, cropSpec, downloadUrl, isDailyMosaic, slug, captureFor } from './lib/captures'
+import { archiveName, cropSpec, downloadUrl, isDailyMosaic, isRadar, slug, captureFor } from './lib/captures'
 import { compassAbbr, dec1, dec2, int, passSentences } from './lib/copy'
 import type { SatMeta } from './lib/meta'
 import { replayWindow } from './lib/replay'
@@ -107,10 +107,16 @@ function PassBody({ model, pass, entering }: { model: ResultsModel; pass: Pass; 
 
       <section className={cx(r.section, stc, s.prose)} style={st(60)}>
         <Paragraph sentences={sentences} />
-        {capture && !isDailyMosaic(capture) ? <SpotLine state={cloud} /> : null}
+        {capture && !isDailyMosaic(capture) && !isRadar(capture) ? <SpotLine state={cloud} /> : null}
         {capture && isDailyMosaic(capture) ? (
           <p className={r.footnote}>
             A daily mosaic: NASA stitches each day’s swaths into one picture at {int(capture.gsdM)} m per pixel. Coarse, but real, and from this pass’s day.
+          </p>
+        ) : null}
+        {capture && isRadar(capture) ? (
+          <p className={r.footnote}>
+            A radar image, not a photograph: Sentinel-1 sends out microwaves and records their echo, so cloud and darkness don’t stop it. Brightness is how
+            strongly the ground sends them back: buildings and rough ground are bright, calm water is dark.
           </p>
         ) : null}
         {meta.profile?.blurb ? <p className={r.blurb}>{meta.profile.blurb}</p> : null}
@@ -144,6 +150,7 @@ function noImageNote(p: Pass, meta: SatMeta, archiveFailed: boolean, now: number
   switch (p.verdict) {
     case 'could':
       // The sentence below says what we can't know; this only says why there is no picture.
+      if (meta.profile?.openArchive) return `No ${meta.name} image of this spot from this pass. Plan view of the pass.`
       return meta.category === 'radar'
         ? 'No public image: this radar operator’s archive is private. Plan view of the pass.'
         : 'No public image: commercial archives are private. Plan view of the pass.'
@@ -167,9 +174,10 @@ function Links({ capture, pass, meta, placeLabel }: { capture: Capture; pass: Pa
     setDl('busy')
     const url = downloadUrl(capture, spec)
     try {
-      // Sentinel-2 / Landsat: the lossless render, toned exactly like the photo on screen (same curve, PNG).
+      // Sentinel-2 / Landsat: the lossless render, toned exactly like the photo on screen (same curve, PNG); a radar
+      // image toned as on screen too.
       let blob: Blob
-      if (isTonedUrl(url)) blob = await tonedImageBlob(url, { fmt: 'png' })
+      if (isTonedUrl(url) || isRadarUrl(url)) blob = await tonedImageBlob(url, { fmt: 'png' })
       else {
         const res = await fetch(url)
         if (!res.ok) throw new Error(String(res.status))
@@ -220,7 +228,8 @@ function ReadoutStrip({ pass: p, meta, capture, cloud }: { pass: Pass; meta: Sat
   const res = capture?.gsdM ?? meta.profile?.resolutionM
   const spot: SpotCloud | undefined = cloud === 'checking' || cloud === 'none' ? capture?.spot : cloud
   let last: { label: string; value: string; unit?: string }
-  if (!capture) last = { label: 'Sun', value: `${dec1(p.sunElevationDeg)}°`, unit: p.sunElevationDeg >= 0 ? 'day' : p.sunElevationDeg >= -6 ? 'twilight' : 'night' }
+  // A radar image needs no light: the sun is the fact worth showing (it may well have been night).
+  if (!capture || isRadar(capture)) last = { label: 'Sun', value: `${dec1(p.sunElevationDeg)}°`, unit: p.sunElevationDeg >= 0 ? 'day' : p.sunElevationDeg >= -6 ? 'twilight' : 'night' }
   else if (isDailyMosaic(capture)) last = { label: 'Cloud', value: '—', unit: 'mosaic' }
   else if (cloud === 'checking' && !capture.spot) last = { label: 'Cloud at spot', value: '…' }
   else if (spot && spot !== 'unknown')
@@ -256,7 +265,7 @@ function useSpotCloud(capture: Capture | undefined, place: { lat: number; lon: n
   const known = capture?.spot
   const [state, setState] = useState<CloudState>(() => known ?? 'none')
   useEffect(() => {
-    if (!capture || isDailyMosaic(capture)) return setState('none')
+    if (!capture || isDailyMosaic(capture) || isRadar(capture)) return setState('none')
     if (capture.spot) return setState(capture.spot)
     const ctl = new AbortController()
     setState('checking')

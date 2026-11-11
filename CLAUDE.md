@@ -35,6 +35,9 @@
 - Analytics props are allow-listed in SQL (`overflight_private.event_props`, latest definition in
   `supabase/migrations/0011_*`). A new enum value (a search source, an action) is silently stored as null until a
   migration adds it.
+- Shares keep a capture only from an allow-list of collections in `create_share` (latest definition in
+  `supabase/migrations/0012_*`, which adds Sentinel-1 radar); an unknown collection is dropped and the share made
+  without its image. The collection lists in `api/_lib/share.ts` and `src/lib/backend.ts` must match it.
 - Admin stats are precomputed every 5 minutes by pg_cron (`admin_stats_cache`, migration 0009). Admin times are US
   Eastern.
 - `VITE_*` env vars are bundled into the browser. Server secrets (`CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET`) are only
@@ -77,3 +80,7 @@
 - Vercel functions use the fetch-style handler (`export default { fetch }`) and are registered in `vercel.json`
   (`maxDuration`). Vercel passes the query string percent-encoded in `req.url`.
 - Honest labelling is a product rule: a label (resolution, "watched", counts) must say exactly what is on screen.
+- Sentinel-1 radar images (`sentinel-1-rtc`) are real images but not photos: `isDetailed` is false for them, they
+  never lead or get a cloud check, and their crops are toned by `radarTone.ts` (route new radar URLs through
+  `isRadarUrl`). The radar search must never be awaited by the report: it is used only if it has already answered.
+  The second line counts every image in one number ("N images were made public"; owner).

@@ -155,12 +155,12 @@ describe('copy', () => {
   })
 
   it('owner F: the photos line, exact strings', () => {
-    expect(photosLine(31)).toBe('31 photos were made public.')
-    expect(photosLine(1)).toBe('1 photo was made public.')
-    expect(photosLine(0)).toBe('No photos were made public this week.')
-    expect(photosLine(0, { week: 'that week' })).toBe('No photos were made public that week.')
-    expect(photosLine(4, { partial: true })).toBe('At least 4 photos were made public.')
-    expect(photosLine(1234)).toBe('1,234 photos were made public.')
+    expect(photosLine(31)).toBe('31 images were made public.')
+    expect(photosLine(1)).toBe('1 image was made public.')
+    expect(photosLine(0)).toBe('No images were made public this week.')
+    expect(photosLine(0, { week: 'that week' })).toBe('No images were made public that week.')
+    expect(photosLine(4, { partial: true })).toBe('At least 4 images were made public.')
+    expect(photosLine(1234)).toBe('1,234 images were made public.')
     expect(ARCHIVE_DOWN_LINE).not.toContain('—')
   })
 
@@ -563,8 +563,8 @@ describe('one vocabulary for verdicts (R9)', () => {
     expect(VERDICT_META.imaged.title).toBe('Watched')
     expect(VERDICT_META.imaged.verb).toBe('watched')
     expect(VERDICT_TAG.imaged).toBe('Photo')
-    expect(verdictUnit('imaged', 1)).toBe('image')
-    expect(verdictUnit('imaged', 31)).toBe('images')
+    expect(verdictUnit('imaged', 1)).toBe('pass')
+    expect(verdictUnit('imaged', 31)).toBe('passes')
     expect(verdictUnit('could', 1)).toBe('pass')
     expect(verdictUnit('could', 2)).toBe('passes')
     expect(shareHeadline('likely', 'Sentinel-2C', 'Waterloo').lead).toBe('Sentinel-2C swept over')
@@ -688,7 +688,7 @@ describe('photos: one order everywhere (owner B1 + D1)', () => {
     expect(set.photos[1].clouded).toBe(true)
     expect(filterPhotos(set.photos, 'detailed').map((p) => p.key)).toEqual(['A', 'B', 'L'])
     expect(filterPhotos(set.photos, 'weather').map((p) => p.key)).toEqual(['M1', 'M2'])
-    expect(filterCounts(set.photos)).toEqual({ all: 5, detailed: 3, weather: 2 })
+    expect(filterCounts(set.photos)).toEqual({ all: 5, detailed: 3, weather: 2, radar: 0 })
   })
 
   it('no clear detailed photo this week: the last clear look from before the window leads, and is not counted', () => {
@@ -832,5 +832,78 @@ describe('owner F: polar night never contradicts itself', () => {
     const text = plain(darkSentences(h))
     expect(text).toBe('The sun never rose, so no daylight camera could see it. Weather satellites still swept it in infrared, 2 times.')
     expect(text).not.toContain('in daylight')
+  })
+})
+
+describe('Sentinel-1 radar images: real images, never photographs', () => {
+  const radar = (id: string, over: Partial<Capture> = {}): Capture => ({
+    id,
+    provider: 'planetary-computer',
+    collection: 'sentinel-1-rtc',
+    itemId: id,
+    platform: 'sentinel-1c',
+    norad: 62261,
+    datetime: 0,
+    gsdM: 20,
+    cropUrl: ({ halfSizeKm, px }) =>
+      `https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/${px}x${px}.png?collection=sentinel-1-rtc&item=${id}&assets=vv&expression=x&h=${halfSizeKm}`,
+    ...over,
+  })
+  const S1: SatMeta = { norad: 62261, name: 'Sentinel-1C', category: 'radar', profile: { operator: 'ESA / Copernicus', category: 'radar', blurb: '', openArchive: true } }
+  const metaS1 = (n: number): SatMeta => (n === 62261 ? S1 : meta(n))
+  const opt = (id: string, over: Partial<Capture> = {}): Capture => ({ ...s2, id, itemId: id, spot: 'clear', cloudCoverPct: 5, ...over })
+
+  it('is labelled as radar at its own 20 m, on a 20 km square, with no sharper layer', () => {
+    const r = radar('R')
+    expect(productLabel(r)).toBe('Sentinel-1 radar · 20 m')
+    expect(cropSpec('sentinel-1-rtc')).toEqual({ halfSizeKm: 10, px: 1000 })
+    expect(cardUrl(r)).toContain('/1000x1000.jpg?')
+    expect(hiResUrl(r)).toBeUndefined()
+  })
+
+  it('never leads: the cover is a photo, radar images sit in the newest-first order, and have their own filter', () => {
+    const passes = [pass({ captureId: 'A', tClosest: 100 }), pass({ norad: 62261, captureId: 'R1', tClosest: 300 }), pass({ norad: 62261, captureId: 'R2', tClosest: 50 })]
+    const set = orderPhotos({ captures: [opt('A'), radar('R1'), radar('R2')], passes })
+    expect(set.cover?.photo.key).toBe('A')
+    expect(set.photos.map((p) => [p.key, p.kind])).toEqual([
+      ['A', 'detailed'],
+      ['R1', 'radar'],
+      ['R2', 'radar'],
+    ])
+    expect(set.photos[1].clouded).toBe(false)
+    expect(filterPhotos(set.photos, 'radar').map((p) => p.key)).toEqual(['R1', 'R2'])
+    expect(filterPhotos(set.photos, 'detailed').map((p) => p.key)).toEqual(['A'])
+    expect(filterCounts(set.photos)).toEqual({ all: 3, detailed: 1, weather: 0, radar: 2 })
+    const best = pickBestLook({ captures: [opt('A'), radar('R1')], passes, geo: [] })
+    expect(best && best.kind !== 'geo' && best.capture.id).toBe('A')
+  })
+
+  it('a week with radar images only lists them, with no cover (nothing for the results to wait on)', () => {
+    const passes = [pass({ norad: 62261, captureId: 'R1', tClosest: 100 }), pass({ norad: 62261, captureId: 'R2', tClosest: 300 })]
+    const set = orderPhotos({ captures: [radar('R1'), radar('R2')], passes })
+    expect(set.cover).toBeUndefined()
+    expect(set.photos.map((p) => p.key)).toEqual(['R2', 'R1'])
+    expect(pickBestLook({ captures: [radar('R1')], passes, geo: [] })).toBeNull()
+  })
+
+  it('is counted with the photos in the one line, and broken down in the footnote', () => {
+    const passes = [pass({ captureId: 'A' }), pass({ norad: 62261, captureId: 'R1' }), pass({ norad: 62261, captureId: 'R2', sunElevationDeg: -30 })]
+    const h = headline({ passes, captures: [opt('A'), radar('R1'), radar('R2')], notes: [] }, metaS1)
+    expect(h.images).toBe(3)
+    expect(h.detailed).toBe(1)
+    expect(h.radarImages).toBe(2)
+    expect(h.radar).toBeUndefined()
+    expect(photosLine(h.images)).toBe('3 images were made public.')
+  })
+
+  it('its pass reads as radar: to the side, at 20 m, in the dark when it was', () => {
+    const p = pass({ norad: 62261, captureId: 'R1', offNadirDeg: 33.4, sunElevationDeg: -40 })
+    const text = plain(passSentences({ pass: p, meta: S1, capture: radar('R1'), timeZone: TZ, placeLabel: 'Waterloo' }))
+    expect(text).toContain('Its radar, looking 33.4° to the side, imaged Waterloo at 20 m per pixel, in the dark.')
+    expect(text).not.toMatch(/cloud/i)
+    // A Sentinel-1 pass with no image: we looked, and say so (a private operator: we can't know).
+    const could = plain(passSentences({ pass: { ...p, verdict: 'could', captureId: undefined }, meta: S1, timeZone: TZ, placeLabel: 'Waterloo' }))
+    expect(could).toContain('We found no published image of it from this pass.')
+    expect(plain(passSentences({ pass: { ...p, norad: 40697, verdict: 'could', captureId: undefined }, meta: meta(40697), timeZone: TZ, placeLabel: 'Waterloo' }))).toContain('We can’t know whether it did.')
   })
 })

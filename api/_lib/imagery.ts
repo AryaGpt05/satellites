@@ -3,12 +3,14 @@
  *
  * Sentinel-2 / Landsat crops use the encoded render and the tone every renderer shares (./tone.ts: the same
  * Planetary Computer request recipe, the same curve measured over the same square, the same mask), so the card
- * shows the pixels the app showed. GIBS mirrors src/imagery/endpoints.ts (WMS axis order); it is duplicated, not
+ * shows the pixels the app showed. Sentinel-1 radar crops likewise (./radar.ts: the same decibel render, the same
+ * per-image stretch). GIBS mirrors src/imagery/endpoints.ts (WMS axis order); it is duplicated, not
  * imported, because api/ is bundled separately from the browser app.
  */
 import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js'
 import type { ShareCapture } from './share.js'
 import { maskFromResponse, pcCropUrlAt, toneCrop, tonePlanForUrl, type ToneMask } from './tone.js'
+import { isRadarUrl, radarCropUrlAt, radarPolOfItemId, toneRadar } from './radar.js'
 
 const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi'
 const EARTH_RADIUS_KM = 6371
@@ -38,6 +40,8 @@ const NATIVE_GSD_M: Record<ShareCapture['collection'], number> = {
   'gibs-goes-east': 1000,
   'gibs-goes-west': 1000,
   'gibs-himawari': 1000,
+  // Sentinel-1 radar: its resolution (20 × 22 m), the app's 20 m a pixel
+  'sentinel-1-rtc': 20,
 }
 
 /** Square [minLon, minLat, maxLon, maxLat] of half-size km around a point (as src/lib/geo.ts). */
@@ -88,6 +92,13 @@ export function cropPlan(capture: ShareCapture, lat: number, lon: number, px: nu
       metresPerPx,
       source: capture.collection === 'sentinel-2-l2a' ? 'SENTINEL-2 L2A' : 'LANDSAT C2 L2',
     }
+  }
+
+  if (capture.collection === 'sentinel-1-rtc') {
+    const pol = radarPolOfItemId(capture.itemId)
+    if (!pol) return null
+    // 630 px of 20 m (12.6 km): the app's card is cut at the same scale from its 20 m picture.
+    return { url: radarCropUrlAt(capture.itemId, pol, lat, lon, halfSizeKm, px, 'jpg'), halfSizeKm, metresPerPx, source: 'SENTINEL-1 RADAR' }
   }
 
   // GIBS: itemId is "<layer>@<YYYY-MM-DD or ISO time>".
@@ -156,6 +167,7 @@ export interface CropPicture {
  * timeout, HTTP error, a non-image answer or a suspiciously tiny body (PC returns a ~100-byte image for "no data").
  */
 export async function fetchCropPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
+  if (isRadarUrl(url)) return fetchRadarPicture(url, timeoutMs)
   const plan = tonePlanForUrl(url)
   if (!plan) {
     const dataUri = await fetchImageDataUri(url, timeoutMs)
@@ -181,6 +193,20 @@ export async function fetchCropPicture(url: string, timeoutMs: number): Promise<
     toneCrop(raw.data, raw.width, raw.height, plan, mask, undefined, { sharpen: plan.crs === 4326 ? 0 : 1 })
     const out = encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 95)
     return { dataUri: `data:image/jpeg;base64,${Buffer.from(out.data).toString('base64')}`, complete: mask !== null }
+  } catch {
+    return null
+  }
+}
+
+/** A radar crop toned as the app tones it (./radar.ts toneRadar), as a JPEG data URI; null without data. */
+async function fetchRadarPicture(url: string, timeoutMs: number): Promise<CropPicture | null> {
+  const img = await fetchBytes(url, timeoutMs, ['image/jpeg', 'image/jpg', 'image/png'])
+  if (!img || img.byteLength < 1024 || img.byteLength > 8_000_000) return null
+  try {
+    const raw = decodeJpeg(img, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256 })
+    if (!toneRadar(raw.data, raw.width, raw.height)) return null
+    const out = encodeJpeg({ data: raw.data, width: raw.width, height: raw.height }, 95)
+    return { dataUri: `data:image/jpeg;base64,${Buffer.from(out.data).toString('base64')}`, complete: true }
   } catch {
     return null
   }

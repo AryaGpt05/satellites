@@ -105,6 +105,8 @@ export function decalSpecFor(collection: CaptureCollection, mobile: boolean): { 
   const px = mobile ? 768 : 1024
   if (collection === 'sentinel-2-l2a') return { halfSizeKm: 40, px }
   if (collection === 'landsat-c2-l2') return { halfSizeKm: 45, px }
+  // Sentinel-1 radar: the same strip as Sentinel-2's (its scenes are ~250 × 170 km).
+  if (collection === 'sentinel-1-rtc') return { halfSizeKm: 40, px }
   if (isDaily(collection)) return { halfSizeKm: 300, px }
   return null
 }

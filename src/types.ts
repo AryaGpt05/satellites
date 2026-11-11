@@ -93,6 +93,8 @@ export interface SatProfile {
   daylightOnly?: boolean
   /** If set, actual imagery is searchable via STAC */
   stac?: { collection: 'sentinel-2-l2a' | 'landsat-c2-l2'; platform: string }
+  /** Its images are public and searched for at the place (Sentinel-1's radar): no image found means none published */
+  openArchive?: boolean
   /** If set, actual imagery is available from NASA GIBS */
   gibs?: { collection: CaptureCollection; layer: string; kind: 'daily' | 'subdaily' }
   /** For geostationary: where its newest frame can be had (src/imagery/geoFrames.ts) */
@@ -168,6 +170,7 @@ export interface TrackPoint {
  * Imagery collections we can show real pixels from.
  *  - STAC (Planetary Computer / Earth Search): per-scene, 10–30 m
  *  - NASA GIBS: daily VIIRS/MODIS true-colour mosaics (250–375 m) and 10-min geostationary GeoColor (1–2 km)
+ *  - Sentinel-1 radar (Planetary Computer `sentinel-1-rtc`): per-scene backscatter, shown at 20 m; not a photograph
  */
 export type CaptureCollection =
   | 'sentinel-2-l2a'
@@ -180,6 +183,7 @@ export type CaptureCollection =
   | 'gibs-goes-east'
   | 'gibs-goes-west'
   | 'gibs-himawari'
+  | 'sentinel-1-rtc'
 
 /**
  * Where a geostationary watcher's newest frame comes from (src/imagery/geoFrames.ts: NASA GIBS or EUMETSAT). A frame

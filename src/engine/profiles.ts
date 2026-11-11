@@ -624,9 +624,11 @@ export const PROFILES: readonly SatProfile[] = [
     operator: 'ESA / Copernicus',
     category: 'radar',
     swathKm: 250,
-    resolutionM: 5,
+    // Its IW images as published (GRD: 20 × 22 m); the 5 m is single-look range only, never shown here.
+    resolutionM: 20,
     maxOffNadirDeg: 40,
-    blurb: 'Copernicus C-band radar: a 250 km swath at 5 × 20 m, through cloud, day or night.',
+    blurb: 'Copernicus C-band radar that publishes every image: a 250 km swath to one side at 20 m, through cloud, day or night.',
+    openArchive: true,
   },
   {
     namePattern: '^ICEYE-',

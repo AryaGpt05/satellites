@@ -10,6 +10,7 @@ const imagery = vi.hoisted(() => ({
   ensureTz: vi.fn(),
   sentinel2PlanCovers: vi.fn(),
   searchClearScenes: vi.fn(),
+  searchRadar: vi.fn(),
 }))
 vi.mock('@/imagery', async () => {
   // Pure helpers are the real ones.
@@ -56,6 +57,7 @@ beforeEach(() => {
   imagery.ensureTz.mockReset().mockResolvedValue(undefined)
   imagery.sentinel2PlanCovers.mockReset().mockResolvedValue(true)
   imagery.searchClearScenes.mockReset().mockResolvedValue([])
+  imagery.searchRadar.mockReset().mockResolvedValue([])
   _resetClearCoverCache()
 })
 
@@ -685,5 +687,60 @@ describe('computeReport', () => {
     const p = computeReport(waterloo, { now, signal: ctl.signal })
     ctl.abort()
     await expect(p).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('computeReport: Sentinel-1 radar images', () => {
+  const S1C = 62261
+  const radarScene = (p: Pass, id: string) =>
+    capture({ id, platform: 'sentinel-1c', norad: S1C, collection: 'sentinel-1-rtc', datetime: p.tClosest - 10_000, gsdM: 20, cropUrl: () => 'about:blank' })
+
+  it('turns the radar pass with an image into a watched one, and keeps the others as geometry says', async () => {
+    const could = passesOf(S1C, WATERLOO)
+    expect(could.length).toBeGreaterThan(1)
+    const target = could[0]
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.searchRadar.mockResolvedValue([radarScene(target, 'S1C_RTC')])
+    const report = await computeReport(waterloo, { now })
+    const s1 = report.passes.filter((p) => p.norad === S1C)
+    const imaged = s1.filter((p) => p.verdict === 'imaged')
+    expect(imaged.map((p) => p.captureId)).toEqual(['S1C_RTC'])
+    expect(Math.abs(imaged[0].tClosest - target.tClosest)).toBeLessThan(1000)
+    expect(s1.filter((p) => p.verdict !== 'imaged').every((p) => p.verdict === 'could')).toBe(true)
+    expect(report.captures.map((c) => c.id)).toContain('S1C_RTC')
+    expect(report.counts.imaged).toBe(report.passes.filter((p) => p.verdict === 'imaged').length)
+  })
+
+  it('never waits for the radar search: a report built before it answers leaves radar out', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.searchRadar.mockReturnValue(new Promise(() => undefined))
+    const t0 = performance.now()
+    const report = await computeReport(waterloo, { now })
+    expect(performance.now() - t0).toBeLessThan(15_000)
+    expect(report.passes.filter((p) => p.norad === S1C).every((p) => p.verdict === 'could')).toBe(true)
+    expect(report.captures.some((c) => c.collection === 'sentinel-1-rtc')).toBe(false)
+  })
+
+  it('leaves radar out when its archive fails, without a note (the passes are what they always were)', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.searchRadar.mockRejectedValue(new Error('down'))
+    const report = await computeReport(waterloo, { now })
+    expect(report.captures.some((c) => c.collection === 'sentinel-1-rtc')).toBe(false)
+    expect(report.notes).toEqual([])
+  })
+
+  it('lists only the radar images a pass shows (an image that matched none is not in the report)', async () => {
+    const target = passesOf(S1C, WATERLOO)[0]
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    // A second slice of the same overflight, and a scene of a satellite that never came near.
+    imagery.searchRadar.mockResolvedValue([radarScene(target, 'A'), radarScene(target, 'B'), { ...radarScene(target, 'Z'), platform: 'sentinel-1z', norad: undefined }])
+    const report = await computeReport(waterloo, { now })
+    const radar = report.captures.filter((c) => c.collection === 'sentinel-1-rtc').map((c) => c.id)
+    expect(radar).toHaveLength(1)
+    expect(report.passes.filter((p) => p.captureId && radar.includes(p.captureId))).toHaveLength(1)
   })
 })

@@ -20,13 +20,16 @@
  * sharper layer and the download match exactly; that layer (a magnified view) takes the curve the photo was shown
  * with even when none was shared (the photo toned before its mask came), so its crossfade changes sharpness only.
  * `fetchMaskHere` reads the cloud mask both the curve and the spot check use (one request per capture and place,
- * shared).
+ * shared). A Sentinel-1 radar crop (./radar.ts) goes the same way with its own tone (./radarTone.ts: its contrast,
+ * measured on the image itself; no mask, no curve to share).
  */
 import { PHOTO_PX, canShareCurve, isMagnifiedView, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams, type TonePlan } from '../../api/_lib/tone'
 import { greyInfrared, isEnhancedInfraredUrl } from './infrared'
 import { HttpError } from './net'
 import { panSharpen } from './panSharpen'
 import { panApiPath, parsePanSharpUrl } from './panUrl'
+import { isRadarUrl } from './radar'
+import { toneRadar } from './radarTone'
 
 export interface Pixels {
   data: Uint8ClampedArray
@@ -312,7 +315,7 @@ export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jp
     return { status: res.status, contentType }
   }
   const src = await res.blob()
-  if (!plan) return { status: res.status, contentType, blob: src }
+  if (!plan) return isRadarUrl(url) ? toneRadarBlob(src, res.status, fmt) : { status: res.status, contentType, blob: src }
   const bmp = await createImageBitmap(src, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
   const { width, height } = bmp
   const c = canvas2d(width, height)
@@ -342,6 +345,24 @@ export async function fetchTonedHere(url: string, signal?: AbortSignal, fmt: 'jp
   c.ctx.putImageData(img, 0, 0)
   const type = fmt === 'png' ? 'image/png' : 'image/jpeg'
   return { status: res.status, contentType: type, blob: await encode(c, type) }
+}
+
+/** A radar crop's encoded decibels, decoded, toned (radarTone.ts) and encoded again. An image with no data is a 404. */
+async function toneRadarBlob(src: Blob, status: number, fmt: 'jpeg' | 'png'): Promise<CheckedImage> {
+  const bmp = await createImageBitmap(src, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width, height } = bmp
+  const c = canvas2d(width, height)
+  if (!c) {
+    bmp.close()
+    throw new Error('2D canvas unavailable')
+  }
+  c.ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  const img = c.ctx.getImageData(0, 0, width, height)
+  if (!toneRadar(img.data, width, height)) return { status: 404, contentType: '' }
+  c.ctx.putImageData(img, 0, 0)
+  const type = fmt === 'png' ? 'image/png' : 'image/jpeg'
+  return { status, contentType: type, blob: await encode(c, type) }
 }
 
 /**

@@ -50,7 +50,7 @@ export interface PhotoFrameProps {
   onExpand?: (frame: HTMLElement) => void
   className?: string
   /** A tag on the picture, top left (a cover: why it leads, "Closest look" / "Last clear look") */
-  tag?: { text: string }
+  tag?: { text: string; ice?: boolean }
   /** A one-line note on the picture, bottom left (the last clear look: why it leads; a clouded picture: how clouded) */
   note?: { text: string; warn?: boolean }
 }
@@ -191,7 +191,7 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
           </span>
         </span>
       ) : null}
-      {tag ? <span className={cx(s.chip, s.tl, s.tagChip)}>{tag.text}</span> : null}
+      {tag ? <span className={cx(s.chip, s.tl, s.tagChip, tag.ice && s.ice)}>{tag.text}</span> : null}
       {note ? <span className={cx(s.chip, s.noteChip, note.warn && s.warn)}>{note.text}</span> : null}
       {onExpand ? (
         <button

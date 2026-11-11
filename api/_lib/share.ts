@@ -22,6 +22,8 @@ export const CAPTURE_COLLECTIONS = [
   'gibs-goes-east',
   'gibs-goes-west',
   'gibs-himawari',
+  // Sentinel-1 radar (migration 0012 lets create_share keep it)
+  'sentinel-1-rtc',
 ] as const
 export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number]
 
@@ -329,7 +331,7 @@ export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>)
   return summaryHeadline(s)
 }
 
-/** "12 photos were made public. The closest look is from Sentinel-2C. What watched you this week?" */
+/** "12 images were made public. The closest look is from Sentinel-2C. What watched you this week?" */
 export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel' | 'archiveDown' | 'partial'>): string {
   const best = s.best ? ` The closest look is from ${s.best.satName}.` : ''
   return `${photosSentence(s.counts.imaged, s)}${best} What watched you this week?`

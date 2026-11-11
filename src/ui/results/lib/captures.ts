@@ -1,6 +1,6 @@
 /**
  * Capture helpers: which image belongs to a pass, how big a crop to ask for, and how to label it
- * honestly (a 375 m daily mosaic is not a 10 m photograph).
+ * honestly (a 375 m daily mosaic is not a 10 m photograph; a radar image is not a photograph at all).
  */
 import type { Capture, CaptureCollection, Pass, Report } from '@/types'
 
@@ -13,8 +13,11 @@ export function captureFor(report: Pick<Report, 'captures'>, pass: Pick<Pass, 'c
 export const isDailyMosaic = (c: Pick<Capture, 'provider' | 'collection'>) =>
   c.provider === 'gibs' && /^gibs-(viirs|modis)-/.test(c.collection)
 
-/** "Detailed" = per-scene archive imagery (Sentinel-2, Landsat), as opposed to weather mosaics. */
-export const isDetailed = (c: Pick<Capture, 'provider' | 'collection'>) => !isDailyMosaic(c) && c.provider !== 'gibs'
+/** A Sentinel-1 radar image (backscatter, not light: day or night, through cloud). */
+export const isRadar = (c: Pick<Capture, 'collection'>) => c.collection === 'sentinel-1-rtc'
+
+/** "Detailed" = per-scene archive photos (Sentinel-2, Landsat), as opposed to weather mosaics and radar images. */
+export const isDetailed = (c: Pick<Capture, 'provider' | 'collection'>) => !isDailyMosaic(c) && c.provider !== 'gibs' && !isRadar(c)
 
 export interface CropSpec {
   halfSizeKm: number
@@ -34,6 +37,7 @@ export const DETAILED_PX = 1000
  * Crop size per collection, chosen so the picture reads at its native scale:
  *  - Sentinel-2 (10 m): 10 km square = 1000 native pixels at 1000 px
  *  - Landsat (30 m): 15 km square (500 native pixels, an exact 2× on their own grid, still crisp)
+ *  - Sentinel-1 radar (20 m): 20 km square, 1000 px of its own resolution (imagery/radar.ts)
  *  - VIIRS / MODIS daily mosaics: 240 km square, enough to see the weather system over the place
  *  - geostationary frames: 800 km square
  * `px` defaults to the collection's own size (DETAILED_PX for Sentinel-2 / Landsat, CROP_PX otherwise).
@@ -44,6 +48,8 @@ export function cropSpec(collection: CaptureCollection, px?: number): CropSpec {
       return { halfSizeKm: 5, px: px ?? DETAILED_PX }
     case 'landsat-c2-l2':
       return { halfSizeKm: 7.5, px: px ?? DETAILED_PX }
+    case 'sentinel-1-rtc':
+      return { halfSizeKm: 10, px: px ?? DETAILED_PX }
     case 'gibs-goes-east':
     case 'gibs-goes-west':
     case 'gibs-himawari':
@@ -88,10 +94,12 @@ export function sensorName(c: Pick<Capture, 'collection' | 'platform'>): string 
       return 'ABI'
     case 'gibs-himawari':
       return 'AHI'
+    case 'sentinel-1-rtc':
+      return 'C-SAR'
   }
 }
 
-/** Product line for captions: "Sentinel-2 L2A · 10 m" / "Daily mosaic · 375 m". */
+/** Product line for captions: "Sentinel-2 L2A · 10 m" / "Daily mosaic · 375 m" / "Sentinel-1 radar · 20 m". */
 export function productLabel(c: Pick<Capture, 'collection' | 'provider' | 'gsdM'>): string {
   if (isDailyMosaic(c)) return `Daily mosaic · ${Math.round(c.gsdM)} m`
   switch (c.collection) {
@@ -99,6 +107,8 @@ export function productLabel(c: Pick<Capture, 'collection' | 'provider' | 'gsdM'
       return `Sentinel-2 L2A · ${Math.round(c.gsdM)} m`
     case 'landsat-c2-l2':
       return `Landsat C2 L2 · ${Math.round(c.gsdM)} m`
+    case 'sentinel-1-rtc':
+      return `Sentinel-1 radar · ${Math.round(c.gsdM)} m`
     default:
       return `${Math.round(c.gsdM)} m`
   }

@@ -517,12 +517,13 @@ export function sensorName(c: Pick<CardCaptureInput, 'collection' | 'platform'>)
   if (k.startsWith('gibs-viirs')) return 'VIIRS'
   if (k.startsWith('gibs-modis')) return 'MODIS'
   if (k === 'gibs-himawari') return 'AHI'
+  if (k === 'sentinel-1-rtc') return 'C-SAR'
   return 'ABI'
 }
 
 /** Attribution the archive asks for when its imagery is redistributed (the card is redistribution). */
 export function creditFor(c: Pick<CardCaptureInput, 'collection' | 'datetime'>, fallbackMs?: number): string {
-  if (c.collection === 'sentinel-2-l2a') {
+  if (c.collection === 'sentinel-2-l2a' || c.collection === 'sentinel-1-rtc') {
     const t = c.datetime ?? fallbackMs
     return `Contains modified Copernicus Sentinel data ${t !== undefined ? new Date(t).getUTCFullYear() : new Date().getUTCFullYear()}`
   }
@@ -817,21 +818,22 @@ export function watchedLead(n: number): string {
 }
 
 /** The archive outage, as the results' second line says it (src/ui/results/lib/copy.ts ARCHIVE_DOWN_LINE). */
-export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public photos right now.'
+export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public images right now.'
 /** The same, where the card's sub-line has room for one line. */
 export const ARCHIVE_DOWN_SHORT = 'The image archives didn’t answer.'
 
 /**
- * The second line (owner F): "31 photos were made public." / "1 photo was made public." / "At least 4 photos were made
- * public." The results panel's photosLine words, except a zero: the summary's first sentence already says "this week",
- * so it reads "No photos were made public." rather than repeating it.
+ * The second line (owner F): "31 images were made public." / "1 image was made public." / "At least 4 images were made
+ * public." (one count: photos, weather mosaics and radar images alike). The results panel's photosLine words, except a
+ * zero: the summary's first sentence already says "this week", so it reads "No images were made public." rather than
+ * repeating it.
  */
 export function photosSentence(k: number, opts: { archiveDown?: boolean; partial?: boolean; short?: boolean } = {}): string {
   if (opts.archiveDown) return opts.short ? ARCHIVE_DOWN_SHORT : ARCHIVE_DOWN_LINE
   const v = Math.max(0, Math.round(k))
-  if (v <= 0) return 'No photos were made public.'
+  if (v <= 0) return 'No images were made public.'
   const lead = opts.partial ? 'At least ' : ''
-  return v === 1 ? `${lead}1 photo was made public.` : `${lead}${int(v)} photos were made public.`
+  return v === 1 ? `${lead}1 image was made public.` : `${lead}${int(v)} images were made public.`
 }
 
 /** "31 satellites watched Waterloo this week." (R3-13: the summary share's first sentence, everywhere it is printed) */
@@ -839,12 +841,12 @@ export function summaryHeadline(i: Pick<SummaryInput, 'satellites' | 'placeLabel
   return `${watchedLead(i.satellites)} ${i.placeLabel} this week.`
 }
 
-/** "31 satellites watched Waterloo this week. 12 photos were made public." (R3-13, owner F) */
+/** "31 satellites watched Waterloo this week. 12 images were made public." (R3-13, owner F) */
 export function summarySentences(i: Pick<SummaryInput, 'satellites' | 'placeLabel' | 'counts' | 'archiveDown' | 'partial'>): string {
   return `${summaryHeadline(i)} ${photosSentence(i.counts.imaged, i)}`
 }
 
-/** "31 satellites watched *Waterloo this week.*" + "12 photos were made public." over the week's closest look, with the four verdict counts. */
+/** "31 satellites watched *Waterloo this week.*" + "12 images were made public." over the week's closest look, with the four verdict counts. */
 export function buildSummarySpec(i: SummaryInput): CardSpec {
   const n = Math.max(0, Math.round(i.satellites))
   const cps = Array.from(i.placeLabel)
@@ -863,7 +865,7 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
     plate = { kind: 'image', crop, chip, credit, scale, overlay: imageOverlay([chip, credit], scale), fallback: emptyPlate(planNote('imaged', 'transient')) }
   } else {
     // Say "no public photo" only when K says so: with the archives down (K unknown) or a count but no picture in the link,
-    // the plate stays neutral beside the sub-line ("The image archives didn’t answer." / "1 photo was made public.").
+    // the plate stays neutral beside the sub-line ("The image archives didn’t answer." / "1 image was made public.").
     const none = !i.archiveDown && Math.round(i.counts.imaged) <= 0
     plate = emptyPlate(none ? 'No public photo this week' : 'No photo to show')
   }

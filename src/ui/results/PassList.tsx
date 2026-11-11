@@ -16,7 +16,7 @@ import { Ago, reportNow } from './Ago'
 import { Mark } from './Mark'
 import { prefetchPassImage } from './actions'
 import { isClouded } from './lib/bestLook'
-import { captureFor, isDailyMosaic } from './lib/captures'
+import { captureFor, isDailyMosaic, isRadar } from './lib/captures'
 import { EAGER_THUMBS } from './warm'
 import { thumbUrl } from './lib/photos'
 import { useGallery } from './gallery'
@@ -133,10 +133,11 @@ function Group({ group, model, selectedId, onSelect }: { group: PassGroup } & Pr
 
 const hover = (p: Pass | undefined) => useApp.getState().setHoveredNorad(p?.norad)
 
-/** "Clouded · 86%" when the picture is mostly cloud, "Mosaic" for a daily weather mosaic, else nothing. */
+/** "Clouded · 86%" when the picture is mostly cloud, "Mosaic" for a daily weather mosaic, "Radar" for a radar image. */
 function exceptionTag(c: Capture | undefined): { text: string; warn: boolean } | null {
   if (!c) return null
   if (isDailyMosaic(c)) return { text: 'Mosaic', warn: false }
+  if (isRadar(c)) return { text: 'Radar', warn: false }
   if (isClouded(c)) return { text: `Clouded · ${c.cloudCoverPct !== undefined ? `${int(c.cloudCoverPct)}%` : 'at spot'}`, warn: true }
   return null
 }

@@ -21,7 +21,7 @@ import type * as Deps from './telemetryDeps'
  * leaves the boot chunks exactly as they were (a static import of the store from a lazy chunk re-splits them). */
 export type TelemetryDeps = typeof Deps
 
-/** N (distinct satellites with any pass) and K (distinct public photos), as the results headline counts them. */
+/** N (distinct satellites with any pass) and K (public images), as the results headline counts them. */
 export function reportCounts(r: Pick<Report, 'passes' | 'archiveFailed' | 'partial'>): Props {
   const sats = new Set<number>()
   const photos = new Set<string>()

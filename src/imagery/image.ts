@@ -14,7 +14,7 @@
  *  - Sentinel-2 / Landsat photos (the encoded render, api/_lib/tone.ts) are never shown as they come: the pixels
  *    worker fetches them, applies the photo's one global curve + light sharpening and hands back the bytes, and
  *    the element shows those (a blob: URL), exactly as for GIBS. Every view, the share card and the download use
- *    the same toned pixels (owner rules a, b, d).
+ *    the same toned pixels (owner rules a, b, d). Sentinel-1 radar crops (radar.ts) are toned there too (radarTone.ts).
  *
  * All images are requested with `crossOrigin="anonymous"`: every archive we use sends
  * `Access-Control-Allow-Origin: *`, and CORS-clean pixels can be read back (probe, canvas
@@ -28,6 +28,7 @@ import { HttpError, raceAbort, sleep, withRetry } from './net'
 import { measureNoData } from './pixels'
 import { fetchCheckedImage, fetchPanSharp, fetchPixels, fetchToned } from './pixelsClient'
 import { isPanSharpUrl, parsePanSharpUrl } from './panUrl'
+import { isRadarUrl } from './radar'
 
 export { decodeImagePixels, measureNoData } from './pixels'
 
@@ -190,7 +191,7 @@ export function preloadImage(url: string, opts: { signal?: AbortSignal; timeoutM
       ? loadGibs(url, timeoutMs)
       : blobs && isPanSharpUrl(url)
         ? loadPanSharp(url, timeoutMs)
-        : blobs && isTonedUrl(url)
+        : blobs && (isTonedUrl(url) || isRadarUrl(url))
           ? loadToned(url, timeoutMs)
           : loadOnce(url, timeoutMs)
   const p = memoAsync(imageCache, url, async () => {
