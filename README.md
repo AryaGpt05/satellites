@@ -33,10 +33,11 @@
    from an example: Area 51, Central Park, Giza, or *Surprise me* for a famous place picked at random.
 2. **It finds the passes.** While the globe flies there, your browser replays the past week of orbits for nearly 400
    imaging, weather, radar and crewed satellites, and notes every time one's field of view crossed your spot.
-3. **It finds the photos.** At the same time it searches the Sentinel-2 and Landsat archives and NASA's weather
-   imagery, matches each photo to the pass that took it, and checks whether your spot was under cloud. The results
-   open with a summary (*In the last 7 days, 260 satellites watched Palm Jumeirah. 28 photos were made public.*),
-   then the photos, a timeline of the week and every pass.
+3. **It finds the photos.** At the same time it searches the Sentinel-2 and Landsat archives, NASA's weather
+   imagery and Sentinel-1's radar images (which see through cloud and at night), matches each image to the pass that
+   took it, and checks whether your spot was under cloud. The results open with a summary (*In the last 7 days, 260
+   satellites watched Palm Jumeirah. 31 images were made public.*), then the images, a timeline of the week and every
+   pass.
 4. **Replay a pass.** The satellite flies its real track while the strip of ground its camera sees (its swath)
    sweeps across the place. The photo then develops line by line in the direction of flight, the way the
    satellite's camera recorded it.
@@ -59,19 +60,20 @@
 
 ## What *watched* means
 
-Every pass gets one of four labels, and only the first means a photo exists. The line in italics is the rule behind
+Every pass gets one of four labels, and only the first means an image exists. The line in italics is the rule behind
 each one.
 
 | Label | What it means |
 |:--|:--|
-| ◆&nbsp;**Watched** | A real photo of this place exists in a public archive.<br>*A Sentinel-2, Landsat or weather photo was matched to the pass. A VIIRS daily mosaic still unchecked after 2.5 s also counts, if the same satellite has a verified mosaic on a later day.* |
+| ◆&nbsp;**Watched** | A real image of this place exists in a public archive.<br>*A Sentinel-2, Landsat or weather photo, or a Sentinel-1 radar image, was matched to the pass. A VIIRS daily mosaic still unchecked after 2.5 s also counts, if the same satellite has a verified mosaic on a later day.* |
 | ◇&nbsp;**Likely watched** | A fixed camera's swath covered this place. No photo of it is published.<br>*Sentinel-2 or Landsat in daylight, or a polar weather satellite, with no photo found.* |
-| □&nbsp;**Could have pointed here** | A steerable or private camera was in range. Its operator doesn't say whether it looked.<br>*A commercial camera in daylight, or a radar satellite at any hour.* |
+| □&nbsp;**Could have pointed here** | A steerable or private camera was in range. Its operator doesn't say whether it looked.<br>*A commercial camera in daylight, or a radar satellite at any hour (for Sentinel-1, whose images are public: none of this pass shows the place).* |
 | +&nbsp;**Passed overhead** | Crossed your sky, with no camera known to be recording this place.<br>*The ISS or Tiangong at least 10° above the horizon, or a Sentinel-2 or Landsat pass over open ocean (outside Sentinel-2's acquisition plan).* |
 
 The results headline (*260 satellites watched Palm Jumeirah*) counts every satellite with at least one pass,
-whatever its label, so *watched* there is meant broadly; only ◆ passes come with a photo. The second line counts the
-photos that were made public, and starts with "At least" while archives are still answering. Geostationary weather
+whatever its label, so *watched* there is meant broadly; only ◆ passes come with an image. The second line counts the
+images that were made public (photos, weather mosaics and radar images alike), and starts with "At least" while
+archives are still answering. Geostationary weather
 satellites never pass; they sit over the equator all week, so they are listed separately and not counted. The app
 says *watched*, never *photographed*.
 
@@ -90,6 +92,10 @@ says *watched*, never *photographed*.
   brightness curve, a little extra saturation, smoothed compression blocks and light sharpening. Nothing is added or
   removed. Opened full size, a Landsat 8 or 9 photo is sharpened with the same capture's 15 m panchromatic band (real
   detail the satellite recorded, from Landsat Level-1), and its labels then say 15 m.
+- Sentinel-1 radar images are shown at 20 m, the radar's own resolution, in grey with a faint ice tint: brightness is
+  how strongly the ground echoes the radar (rough ground and buildings bright, calm water dark), not light. Each
+  image gets its own contrast. They never lead the photos, and the radar search never delays the results: the
+  report takes them if they have answered by the time it is ready (they nearly always have).
 
 Everything uncertain is labelled as such in the app.
 

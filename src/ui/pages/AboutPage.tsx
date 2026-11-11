@@ -334,14 +334,18 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                   ['Tilting cameras', 'Lots of commercial satellites can lean 30 to 45 degrees. If you were in reach, we call it “could have pointed here”.'],
                   ['Daylight', 'Regular cameras need the sun. A pass in the dark never counts as a photo.'],
                   [
+                    'Radar',
+                    'Sentinel-1 doesn’t need the sun. It sends out microwaves and records the echo, so it sees through cloud and at night, looking off to one side of its track. Its images are public too, so we show them, in grey: bright is rough ground and buildings, dark is calm water.',
+                  ],
+                  [
                     'Weather satellites',
                     'A few sit over the equator and watch half the planet every 10 minutes. If you’re on their side of Earth, you’re in every frame.',
                   ],
                 ]}
               />
               <p>
-                Then we search the image archives (Microsoft Planetary Computer, Element 84 and NASA) and match each photo to the
-                pass that took it. Every photo you see is the real one, cropped around your spot.
+                Then we search the image archives (Microsoft Planetary Computer, Element 84 and NASA) and match each image to the
+                pass that took it. Every image you see is the real one, cropped around your spot.
               </p>
               <Facts
                 rows={[
@@ -395,7 +399,7 @@ export function AboutPage({ onClose }: { onClose: () => void }) {
                   </a>{' '}
                   on X
                 </Credit>
-                <Credit who="Sentinel-2">Contains modified Copernicus Sentinel data {years}, processed by ESA.</Credit>
+                <Credit who="Sentinel-1 / 2">Contains modified Copernicus Sentinel data {years}, processed by ESA.</Credit>
                 <Credit who="Landsat 8 / 9">Landsat imagery courtesy of the U.S. Geological Survey and NASA.</Credit>
                 <Credit who="NASA GIBS">Imagery from NASA’s GIBS, part of EOSDIS. GOES via NOAA and CIRA, Himawari via JMA.</Credit>
                 <Credit who="Archives">Microsoft Planetary Computer and Element 84 Earth Search; Landsat’s 15 m band from the Copernicus Data Space Ecosystem.</Credit>

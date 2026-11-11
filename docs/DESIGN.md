@@ -46,6 +46,11 @@ All colours are CSS variables in `src/styles/tokens.css`. Never hard-code hex va
 - `open-optical` with geometry only (likely): signal outline diamond ◇
 - `commercial-optical`: bone outline square □
 - `radar`: ice outline square with a centre dot
+
+**Radar images** (Sentinel-1) are not photographs and never look like one: a ramp from `--ink-2` through a mid-grey a
+quarter of the way to `--ice` to a cool off-white (`src/imagery/radarTone.ts`), each image stretched to its own
+contrast. They never lead the gallery; a radar slide wears an `--ice` "Radar" tag on the summary card. On the globe a
+radar image lights itself on the night side (it needs no sun); photos only ever show by day.
 - `weather-leo`: bone circle outline ○
 - `weather-geo`: bone ring with a tick ◎ (a constant presence, drawn as a band, not as events)
 - `crewed`: bone plus ✛
@@ -74,7 +79,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
 | `--fs-panel-h` | 34px | 34px | panel headline (condensed) |
 | `--fs-panel-sub` | 22px | 22px | panel sub-headline |
 
-The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public photos (Sentinel-2, Landsat and the daily weather mosaics) are counted on the second line, the only one that can read "At least…" and settle in place: it does while the archives answer (a partial report) and while late weather mosaics are still being checked after the report (`lateChecks`), so a number shown without "At least" never changes.
+The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public images (Sentinel-2, Landsat, the daily weather mosaics and Sentinel-1's radar images: one count, "27 images were made public.") are counted on the second line, the only one that can read "At least…" and settle in place: it does while the archives answer (a partial report) and while late weather mosaics are still being checked after the report (`lateChecks`), so a number shown without "At least" never changes.
 
 ## 4. Layout
 

@@ -77,3 +77,7 @@
 - Vercel functions use the fetch-style handler (`export default { fetch }`) and are registered in `vercel.json`
   (`maxDuration`). Vercel passes the query string percent-encoded in `req.url`.
 - Honest labelling is a product rule: a label (resolution, "watched", counts) must say exactly what is on screen.
+- Sentinel-1 radar images (`sentinel-1-rtc`) are real images but not photos: `isDetailed` is false for them, they
+  never lead or get a cloud check, and their crops are toned by `radarTone.ts` (route new radar URLs through
+  `isRadarUrl`). The radar search must never be awaited by the report: it is used only if it has already answered.
+  The second line counts every image in one number ("N images were made public"; owner).
