@@ -80,7 +80,7 @@ The results headline integer is static: it does not count up. It counts the dist
 
 - The viewport is an **instrument bezel**: a hairline frame inset 16px (12px on mobile) with **corner tick marks** (8px L-shapes) and **edge rulers** (tiny ticks every 24px along the top edge, fading out at the centre). The 3D scene sits behind and bleeds past the frame.
 - Fixed **corner readouts** in mono 10.5px (they hide on small screens if crowded):
-  - TL: the serif wordmark **Watched.** (SVG, full stop in signal; `<Wordmark/>` from src/ui/system, outline in api/_lib/wordmark.ts) plus version tag `v0.1`
+  - TL: the serif wordmark **Watched.** (SVG, full stop in signal; `<Wordmark/>` from src/ui/system, outline in api/_lib/wordmark.ts) (no version tag)
   - TR: live UTC clock `2026-11-08 03:31:07 UTC` with a blinking signal dot (1Hz, 50% duty, no fade)
   - BL: catalog status `12,847 OBJECTS · TLE EPOCH 2026-11-08 03:15Z · CELESTRAK`
   - BR: sub-solar point `SUN 12.4°S 118.2°E` plus scene FOV or camera altitude

@@ -29,8 +29,8 @@
 
 ## What it does
 
-1. **Pick a place.** Search a city, a landmark or coordinates, use your location, or start from an example: Area 51,
-   Central Park, Giza, Uluru, Palm Jumeirah.
+1. **Pick a place.** Search a city, a landmark or coordinates, use your location, drop a pin on the globe, or start
+   from an example: Area 51, Central Park, Giza, or *Surprise me* for a famous place picked at random.
 2. **It finds the passes.** While the globe flies there, your browser replays the past week of orbits for nearly 400
    imaging, weather, radar and crewed satellites, and notes every time one's field of view crossed your spot.
 3. **It finds the photos.** At the same time it searches the Sentinel-2 and Landsat archives and NASA's weather
