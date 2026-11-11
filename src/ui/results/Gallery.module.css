@@ -56,6 +56,11 @@
   min-width: calc(12 * (1ch + var(--track-label, 0.08em)));
   text-align: right;
 }
+/* No last clear look in the list: the counter only ever says "3 / 29", so the filter keeps that room (its four
+   segments, with Radar, need it in the 382 px dock). */
+.counterShort {
+  min-width: calc(7.5 * (1ch + var(--track-label, 0.08em)));
+}
 .filter {
   display: inline-flex;
   border: 1px solid var(--line-strong);

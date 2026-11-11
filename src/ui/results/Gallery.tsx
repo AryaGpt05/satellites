@@ -379,6 +379,8 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
   for (let i = Math.max(0, idx - MOUNT_NEAR); i <= Math.min(n - 1, idx + MOUNT_NEAR); i++) mountedSlides.current.add(items[i].key)
   // Only when there is a choice: two kinds of picture or more.
   const showFilter = [counts.detailed, counts.weather, counts.radar].filter((n) => n > 0).length > 1
+  // The counter's longest words ("27 this week") are only said on the last clear look, a photo with no pass.
+  const hasLastClear = items.some((p) => !p.pass)
   const hero = !detail
 
   return (
@@ -386,7 +388,7 @@ export function Gallery({ model, context, mobile, selectedId, onReplay, onShare 
       <div className={s.bar}>
         {showFilter ? <FilterControl filter={filter} counts={counts} /> : <span className={s.barLabel}>{hero ? 'Photos' : null}</span>}
         <span className={s.nav}>
-          <span ref={counterRef} className={s.counter} aria-live="polite" aria-atomic="true">
+          <span ref={counterRef} className={cx(s.counter, !hasLastClear && s.counterShort)} aria-live="polite" aria-atomic="true">
             {counterText(idx)}
           </span>
           {!mobile ? (
@@ -624,7 +626,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
           gateOnVisible={mobile}
           onExpand={(el) => onExpand(photo, el)}
           className={detail ? s.square : s.heroFrame}
-          tag={!detail && (cover === 'closest' || cover === 'lastClear') ? { text: lead! } : photo.kind === 'radar' ? { text: 'Radar', ice: true } : undefined}
+          tag={detail ? undefined : cover === 'closest' || cover === 'lastClear' ? { text: lead! } : photo.kind === 'radar' ? { text: 'Radar', ice: true } : undefined}
           note={
             detail
               ? undefined
@@ -660,7 +662,8 @@ function shortStatus(p: Photo): string | undefined {
 /** Laptops' summary card, second line: a clouded picture says so on the picture itself (a chip), not here. */
 function heroStatus(p: Photo): string | undefined {
   if (p.kind === 'mosaic') return 'Daily mosaic'
-  if (p.kind === 'radar') return 'Through cloud, day or night'
+  // A radar image's tag on the picture already says what it is.
+  if (p.kind === 'radar') return undefined
   return p.clouded ? undefined : shortStatus(p)
 }
 
