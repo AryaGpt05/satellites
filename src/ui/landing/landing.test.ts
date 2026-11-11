@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { balancePad } from './balance'
 import { canSubmitQuery, clampActive, enterTarget, isTypingTarget, stepActive } from './listNav'
-import { EXAMPLE_PLACES } from './places'
+import { EXAMPLE_PLACES, SURPRISE_PLACES, surprisePlace } from './places'
 import { windowLabel } from './windowLabel'
 
 describe('combobox keyboard model', () => {
@@ -31,9 +31,9 @@ describe('combobox keyboard model', () => {
 })
 
 describe('example places', () => {
-  it('are real coordinates with distinct labels', () => {
-    expect(EXAMPLE_PLACES).toHaveLength(5)
-    expect(new Set(EXAMPLE_PLACES.map((p) => p.chip)).size).toBe(5)
+  it('are three real places with distinct chips', () => {
+    expect(EXAMPLE_PLACES).toHaveLength(3)
+    expect(new Set(EXAMPLE_PLACES.map((p) => p.chip)).size).toBe(3)
     for (const p of EXAMPLE_PLACES) {
       expect(Math.abs(p.lat)).toBeLessThanOrEqual(90)
       expect(Math.abs(p.lon)).toBeLessThanOrEqual(180)
@@ -42,14 +42,30 @@ describe('example places', () => {
       expect(p.countryCode).toMatch(/^[a-z]{2}$/)
     }
   })
-  it('spans hemispheres', () => {
-    expect(EXAMPLE_PLACES.some((p) => p.lat < 0)).toBe(true)
-    expect(EXAMPLE_PLACES.some((p) => p.lon > 90)).toBe(true)
-    expect(EXAMPLE_PLACES.some((p) => p.lon < -60)).toBe(true)
+})
+
+describe('surprise me', () => {
+  it('draws from real, distinct places on every side of the world', () => {
+    expect(SURPRISE_PLACES.length).toBeGreaterThanOrEqual(20)
+    expect(new Set(SURPRISE_PLACES.map((p) => p.label)).size).toBe(SURPRISE_PLACES.length)
+    for (const p of SURPRISE_PLACES) {
+      expect(Math.abs(p.lat)).toBeLessThanOrEqual(70)
+      expect(Math.abs(p.lon)).toBeLessThanOrEqual(180)
+      expect(p.source).toBe('demo')
+      expect(p.countryCode).toMatch(/^[a-z]{2}$/)
+      // Not one of the chips: the surprise is somewhere they don't already show.
+      expect(EXAMPLE_PLACES.some((e) => e.label === p.label)).toBe(false)
+    }
+    expect(SURPRISE_PLACES.some((p) => p.lat < 0)).toBe(true)
+    expect(SURPRISE_PLACES.some((p) => p.lon > 90)).toBe(true)
+    expect(SURPRISE_PLACES.some((p) => p.lon < -60)).toBe(true)
   })
-  it('stays out of the polar night (every chip must be able to deliver a picture in winter)', () => {
-    for (const p of EXAMPLE_PLACES) expect(Math.abs(p.lat)).toBeLessThan(60)
-    expect(EXAMPLE_PLACES.map((p) => p.chip)).toContain('Palm Jumeirah')
+  it('never repeats the place it just picked', () => {
+    for (let i = 0; i < 200; i++) {
+      const a = surprisePlace()
+      expect(surprisePlace(a).label).not.toBe(a.label)
+    }
+    expect(surprisePlace(undefined, () => 0.9999)).toBe(SURPRISE_PLACES[SURPRISE_PLACES.length - 1])
   })
 })
 
