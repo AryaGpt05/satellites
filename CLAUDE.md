@@ -33,7 +33,7 @@
   "apply 000N". Never run `supabase/tests/0004_*` against production (its DDL deadlocks against live traffic). Never
   delete real data, and never use a service-role or secret key; only the publishable key, which is public.
 - Analytics props are allow-listed in SQL (`overflight_private.event_props`, latest definition in
-  `supabase/migrations/0010_*`). A new enum value (a search source, an action) is silently stored as null until a
+  `supabase/migrations/0011_*`). A new enum value (a search source, an action) is silently stored as null until a
   migration adds it.
 - Admin stats are precomputed every 5 minutes by pg_cron (`admin_stats_cache`, migration 0009). Admin times are US
   Eastern.
