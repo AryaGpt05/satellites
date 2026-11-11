@@ -4,8 +4,8 @@
  * Himawari on NASA GIBS, the Meteosats on EUMETSAT), the row gets a small live frame: the newest one that
  * service actually has pixels for at the place (src/imagery/geoFrames.ts). A frame taken in infrared says so
  * on the picture, in ice (the night-capable hue, DESIGN §2): it is cloud tops, not the ground. A place at the
- * rim of a satellite's disc keeps its frame here, part empty as it may be (that is how far out the place sits);
- * with no pixels at all the row says "Edge of its view".
+ * rim of a satellite's disc keeps its frame here while most of it is picture; once more than half is off the
+ * disc the row says "Edge of its view".
  */
 import { useEffect, useState } from 'react'
 import { isEumetsatSource, latestGeoFrame, type GeoFrameBand } from '@/imagery'
@@ -18,6 +18,8 @@ import { fmtRelative } from './lib/time'
 import s from './GeoWatchers.module.css'
 
 const FRAME = { halfSizeKm: 400, px: 176 }
+/** A frame from the rim of a disc is shown while at least half of it is picture. */
+const RIM_MAX_EMPTY = 0.5
 
 export type GeoFrameState = { kind: 'loading' } | { kind: 'ok'; url: string; time: number; band: GeoFrameBand; gridKm: number } | { kind: 'none'; reason: string }
 
@@ -44,8 +46,10 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
     latestGeoFrame(source, place, { halfSizeKm, px }, { signal: ctl.signal })
       .then((r) => {
         if (ctl.signal.aborted) return
-        // Nothing with pixels: at the rim, the place is off the disc as the service draws it; else it is not answering.
-        const v: GeoFrameState = r ? { kind: 'ok', ...r } : { kind: 'none', reason: watcher.rim ? 'Edge of its view' : 'No frame just now' }
+        // At the rim of a disc, a frame that is mostly off it shows nothing of the place: say where the place sits
+        // instead. Elsewhere, nothing with pixels means the service is not answering.
+        const offDisc = !!watcher.rim && (!r || r.empty > RIM_MAX_EMPTY)
+        const v: GeoFrameState = r && !offDisc ? { kind: 'ok', url: r.url, time: r.time, band: r.band, gridKm: r.gridKm } : { kind: 'none', reason: offDisc ? 'Edge of its view' : 'No frame just now' }
         probed.set(key, v)
         setState(v)
       })

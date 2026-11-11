@@ -3,6 +3,7 @@ import { PROFILES } from '@/engine/profiles'
 import type { GeoFrameSource } from '@/types'
 
 vi.mock('./gibs', async (orig) => ({ ...(await orig<typeof import('./gibs')>()), latestGibsFrame: vi.fn() }))
+vi.mock('./image', async (orig) => ({ ...(await orig<typeof import('./image')>()), preloadImage: vi.fn(async (url: string) => ({ dataset: { nodata: url === 'u-rim' ? '0.85' : '0.00' } })) }))
 vi.mock('./eumetsat', async (orig) => ({ ...(await orig<typeof import('./eumetsat')>()), latestEumetsatFrame: vi.fn() }))
 
 import { latestEumetsatFrame } from './eumetsat'
@@ -48,21 +49,26 @@ describe('geostationary frame sources', () => {
 describe('the newest frame of a source', () => {
   it("is the first layer's when it has one, labelled with that layer's band and pixel", async () => {
     gibs.mockResolvedValueOnce({ url: 'u-visible', time: 5 })
-    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-visible', time: 5, band: 'visible', gridKm: 1 })
+    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-visible', time: 5, band: 'visible', gridKm: 1, empty: 0 })
     expect(gibs).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to infrared when the daylight layer has nothing (night)', async () => {
     gibs.mockResolvedValueOnce(null).mockResolvedValueOnce({ url: 'u-ir', time: 7 })
-    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-ir', time: 7, band: 'infrared', gridKm: 2 })
+    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-ir', time: 7, band: 'infrared', gridKm: 2, empty: 0 })
     expect(gibs.mock.calls[1][0]).toBe(HIMAWARI_INFRARED)
     // The daylight layer is only asked for its newest few frames; the last layer searches as far as it likes.
     expect(gibs.mock.calls[0][3]).toMatchObject({ maxSteps: 3 })
     expect(gibs.mock.calls[1][3]?.maxSteps).toBeUndefined()
 
     eumetsat.mockResolvedValueOnce(null).mockResolvedValueOnce({ url: 'e-ir', time: 9 })
-    await expect(latestGeoFrame('meteosat-iodc', DELHI, OPTS)).resolves.toEqual({ url: 'e-ir', time: 9, band: 'infrared', gridKm: 5 })
+    await expect(latestGeoFrame('meteosat-iodc', DELHI, OPTS)).resolves.toEqual({ url: 'e-ir', time: 9, band: 'infrared', gridKm: 5, empty: 0 })
     expect(eumetsat.mock.calls.map((c) => c[0].layer)).toEqual(['msg_iodc:rgb_naturalenhncd', 'msg_iodc:ir108'])
+  })
+
+  it('says how much of the frame is empty, as the loader measured it', async () => {
+    eumetsat.mockResolvedValueOnce({ url: 'u-rim', time: 3 })
+    await expect(latestGeoFrame('meteosat-0deg', DELHI, OPTS)).resolves.toMatchObject({ url: 'u-rim', empty: 0.85 })
   })
 
   it('is null when no layer has a frame, and passes an abort through', async () => {

@@ -76,7 +76,10 @@ async function loadGibs(url: string, timeoutMs: number): Promise<HTMLImageElemen
   }
   if (!checked.blob) throw new Error('Image failed to load') // an HTTP error, or WMS's 200 + XML error
   if ((checked.noData ?? 0) >= EMPTY_NO_DATA) throw new EmptyImageError(url)
-  return loadOnce(URL.createObjectURL(checked.blob), timeoutMs)
+  const img = await loadOnce(URL.createObjectURL(checked.blob), timeoutMs)
+  // How much of the picture has no data, for callers that hold a part-empty one back (a frame at the rim of a disc).
+  img.dataset.nodata = (checked.noData ?? 0).toFixed(2)
+  return img
 }
 
 /**

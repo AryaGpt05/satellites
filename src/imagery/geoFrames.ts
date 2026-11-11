@@ -25,6 +25,7 @@ import type { GeoFrameSource, LatLon } from '@/types'
 import type { CropOpts } from './endpoints'
 import { latestEumetsatFrame, type EumetsatFrameLayer } from './eumetsat'
 import { GIBS_LAYERS, HIMAWARI_INFRARED, latestGibsFrame, type GibsFrameLayer } from './gibs'
+import { preloadImage } from './image'
 
 /** What a frame shows: day-and-night colour, visible light only, or thermal infrared. */
 export type GeoFrameBand = 'colour' | 'visible' | 'infrared'
@@ -76,6 +77,8 @@ export interface GeoFrame {
   time: number
   band: GeoFrameBand
   gridKm: number
+  /** 0..1 share of the picture with no data, as measured on the bytes shown (off the disc; a black night sea counts too) */
+  empty: number
 }
 
 /**
@@ -87,7 +90,11 @@ export async function latestGeoFrame(source: GeoFrameSource, place: LatLon, opts
   for (const [i, l] of layers.entries()) {
     const search = i < layers.length - 1 ? { ...o, maxSteps: PREFERRED_STEPS } : o
     const found = l.via === 'gibs' ? await latestGibsFrame(l.layer, place, opts, search) : await latestEumetsatFrame(l.layer, place, opts, search)
-    if (found) return { ...found, band: l.band, gridKm: l.gridKm }
+    if (found) {
+      // Already loaded by the search: this only reads what the loader measured.
+      const img = await preloadImage(found.url).catch(() => null)
+      return { ...found, band: l.band, gridKm: l.gridKm, empty: Number(img?.dataset.nodata) || 0 }
+    }
   }
   return null
 }
