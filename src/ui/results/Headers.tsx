@@ -1,15 +1,17 @@
 /**
  * Panel headers.
  *
- * OverviewHeader: one header from computing through results (decision #10). Two mono rows on
- * desktop (≈ 76 px), so the best-look picture fits above the fold:
+ * OverviewHeader: one header from computing through results (decision #10).
  *
- *   COMPUTING · T+1.84 S                           CANCEL [ESC]       ← computing
- *   7 DAYS · 1 → 8 NOV  (● VERIFYING WEATHER MOSAICS)  NEW SEARCH [ESC] ← results
- *   WATERLOO · 43.4723°N 80.5449°W · AMERICA/TORONTO                   ← the same node throughout
+ *   COMPUTING · T+1.84 S                           CANCEL [ESC]       ← computing: two mono rows
+ *   WATERLOO · 43.4723°N 80.5449°W · AMERICA/TORONTO
  *
- * Phones add the headline and its second line under row 1 (the peek shows them with the hero), and
- * drop the place row once results land (the headline names the place).
+ *   [⌕ Waterloo                                        CHANGE]        ← results: the search bar alone (owner: no
+ *                                                                        dates, coordinates or zone), as tall as the
+ *                                                                        two rows it replaces, so nothing moves
+ *
+ * Phones then have the headline and its second line (with the week's Share at its end) under the bar, across the
+ * sheet's full width (the peek shows them with the hero).
  *
  * DetailHeader: back crumb, "3 / 31 ‹ ›" stepping within the pass's verdict (chevrons, so stepping never
  * reads as the ← of "back"), name, local time. A pass with a photo drops the stepper (the gallery under it
@@ -76,15 +78,18 @@ export function OverviewHeader(props: OverviewHeaderProps) {
   const { place, model, computing, mobile, enter, searching } = props
   const tz = model?.tz ?? (place ? timeZoneAt(place.lat, place.lon) : undefined)
   const partial = !computing && !!model && countPending(model.report)
-  const showPlaceRow = !!place && (!mobile || computing) && !searching
+  // Results: the search bar is the whole top, on every layout (owner). Computing and the open search keep their rows.
+  const bar = !computing && !searching && !!place && !!model
+  const showPlaceRow = !!place && (!mobile || computing) && !searching && !bar
 
   return (
-    <div className={s.overviewHead}>
-      <div className={s.headTop}>
+    <div className={cx(s.overviewHead, bar && s.overviewHeadBar)}>
+      {bar && place ? <SearchBar place={place} desk={!mobile} onOpen={props.onOpenSearch ?? props.onBack} /> : null}
+      <div className={cx(s.headTop, bar && s.headTopOff)}>
         <span className={s.headLeft}>
           {computing ? (
             <ComputeClock t0={props.t0} />
-          ) : (
+          ) : searching ? null /* the open search keeps only its Close (no dates: owner) */ : (
             <>
               <span className={cx(s.headSwap, partial && s.headSwapOff)} aria-hidden={partial}>
                 {model ? windowText(model) : null}
@@ -107,8 +112,6 @@ export function OverviewHeader(props: OverviewHeaderProps) {
         />
       </div>
 
-      {/* Phones, results: the search bar, where the place row was while computing (so nothing above it moves). */}
-      {mobile && !computing && !searching && place && model ? <SearchBar place={place} onOpen={props.onOpenSearch ?? props.onBack} /> : null}
 
       {showPlaceRow && place ? (
         <div className={s.placeRow}>
@@ -190,13 +193,14 @@ function HeadAction({
 }
 
 /**
- * Phones: the way to a new search, as the first thing in the sheet. It looks like the landing's search field (the
- * same height, glyph and mono line) holding the current place, with "Change" at its end; a tap anywhere opens the
- * inline search with the field focused.
+ * The way to a new search, the whole top of the results: it looks like the landing's search field (the same glyph and
+ * mono line) holding the current place, with "Change" at its end; a tap anywhere opens the inline search with the
+ * field focused. As tall as the two computing rows it replaces. Laptops (`desk`): the panel header's rule under it,
+ * not its own hairline.
  */
-function SearchBar({ place, onOpen }: { place: Place; onOpen: () => void }) {
+function SearchBar({ place, desk = false, onOpen }: { place: Place; desk?: boolean; onOpen: () => void }) {
   return (
-    <button type="button" className={s.searchBar} onClick={onOpen} aria-label={`Search another place (now ${place.label})`}>
+    <button type="button" className={cx(s.searchBar, desk && s.searchBarDesk)} onClick={onOpen} aria-label={`Search another place (now ${place.label})`}>
       <span className={s.searchBarGlyph} aria-hidden>
         <Glyph name="search" size={16} />
       </span>
