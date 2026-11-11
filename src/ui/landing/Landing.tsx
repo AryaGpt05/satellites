@@ -45,7 +45,7 @@ import {
 } from '@/ui/system'
 import { useSecondClock, useSecondDerived } from '@/ui/hud/clock'
 import { balancePad } from './balance'
-import { EXAMPLE_PLACES, type ExamplePlace } from './places'
+import { EXAMPLE_PLACES, surprisePlace, type ExamplePlace } from './places'
 import { SearchBox } from './SearchBox'
 import { useLocate, type LocateState } from './useLocate'
 import { WINDOW_DAYS, windowLabel } from './windowLabel'
@@ -544,6 +544,9 @@ function LocatingStatus({ state }: { state: Extract<LocateState, { kind: 'locati
   )
 }
 
+/** The last "Surprise me" place this visit (the landing remounts after each search): the next one is somewhere else. */
+let lastSurprise: Place | undefined
+
 /** Touch screens: a finger can't hover the globe to discover the pin, so a chip drops one (see Examples). */
 const TOUCH_QUERY = '(hover: none) and (pointer: coarse)'
 
@@ -642,6 +645,21 @@ function Examples({ onPick, disabled, locate }: { onPick: (p: Place) => void; di
             </button>
           </li>
         ))}
+        {/* A famous place picked at random (places.ts SURPRISE_PLACES), never the one it picked last. */}
+        <li>
+          <button
+            type="button"
+            className={s.chip}
+            disabled={disabled}
+            onClick={() => {
+              lastSurprise = surprisePlace(lastSurprise)
+              onPick(lastSurprise)
+            }}
+            aria-label="Surprise me: a famous place picked at random"
+          >
+            Surprise me
+          </button>
+        </li>
       </ul>
     </div>
   )
