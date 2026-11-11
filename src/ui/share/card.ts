@@ -40,10 +40,13 @@ import {
   type PlateSource,
   type Prim,
   type ScaleBar,
+  type SummaryLook,
 } from '../../../api/_lib/cardSpec'
 import { cropCrs, gridOfBox, isToneCollection, nativeBox } from '../../../api/_lib/toneRender'
 import { loadPhoto } from '../results/images'
-import { pickBestLook } from '../results/lib/bestLook'
+import { coverPinKey, pinnedOrder } from '../results/gallery'
+import { orderPhotos } from '../results/lib/photos'
+import { platformDisplayName } from '@/lib/backend'
 import { captureFor, cropSpec, displayUrl } from '../results/lib/captures'
 import { archiveDown, headline } from '../results/lib/copy'
 import type { MetaFn, SatMeta } from '../results/lib/meta'
@@ -182,24 +185,35 @@ export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: st
 
 /**
  * The week at a place (share SH6, R3-13), in the results headline's numbers: N, the distinct satellites that
- * watched it (any pass; geostationary watchers excluded), and K, the photos made public (the imaged passes'
- * captures, weather mosaics included). Plus the four verdict counts and the closest look.
+ * watched it (any pass; geostationary watchers excluded), and K, the images made public (the imaged passes'
+ * captures, weather mosaics and radar included). Plus the four verdict counts and the picture: the results gallery's
+ * FIRST image (owner), as the gallery shows it (its pinned cover) and labelled as the gallery tags it: the closest
+ * clear look, or the last clear look from before a cloudy week, or the least cloudy one, or a radar image.
  */
-export function summaryFacts(report: Report, placeLabel: string, meta: MetaFn): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { altitudeKm: number; capture: Capture } } {
+export function summaryFacts(report: Report, placeLabel: string, meta: MetaFn): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { capture: Capture } } {
   const counts = { imaged: 0, likely: 0, could: 0, overhead: 0 }
   for (const p of report.passes) counts[p.verdict]++
   const head = headline(report, meta)
-  const look = pickBestLook(report)
+  const set = orderPhotos(report)
+  const first = pinnedOrder(set.photos, coverPinKey(report))[0]
+  const look: SummaryLook | undefined = !first
+    ? undefined
+    : set.cover?.photo.key === first.key
+      ? set.cover.why
+      : first.kind === 'radar'
+        ? 'radar'
+        : 'plain'
+  const norad = first ? (first.pass?.norad ?? first.capture.norad) : undefined
   const best =
-    look && look.kind !== 'geo'
+    first && look
       ? {
-          collection: look.capture.collection,
-          itemId: look.capture.itemId,
-          satName: meta(look.pass.norad).name,
-          tClosest: look.pass.tClosest,
-          gsdM: look.capture.gsdM,
-          altitudeKm: look.pass.altitudeKm,
-          capture: look.capture,
+          collection: first.capture.collection,
+          itemId: first.capture.itemId,
+          satName: norad !== undefined ? meta(norad).name : (platformDisplayName(first.capture.platform) ?? 'A satellite'),
+          tClosest: first.pass?.tClosest ?? first.capture.datetime,
+          gsdM: first.capture.gsdM,
+          capture: first.capture,
+          look,
         }
       : undefined
   const down = archiveDown(report)
@@ -232,7 +246,7 @@ export function summaryCardSpec(report: Report, placeLabel: string, meta: MetaFn
     partial: f.partial,
     windowEnd: f.windowEnd,
     timeZone,
-    best: f.best && c ? { satName: f.best.satName, tClosest: f.best.tClosest, capture: { collection: c.collection, itemId: c.itemId, gsdM: c.gsdM } } : undefined,
+    best: f.best && c ? { satName: f.best.satName, tClosest: f.best.tClosest, capture: { collection: c.collection, itemId: c.itemId, gsdM: c.gsdM }, look: f.best.look } : undefined,
     host,
   })
   if (spec.plate.kind === 'image' && c) {

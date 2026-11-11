@@ -804,9 +804,46 @@ export interface SummaryInput {
   /** End of the 7-day window, epoch ms */
   windowEnd?: number
   timeZone?: string
-  /** The closest look of the week (results' pickBestLook: the most zoomed-in clear photo), if any */
-  best?: { satName: string; tClosest?: number; capture: CardCaptureInput }
+  /**
+   * The results gallery's first image, and why it leads (its tag in the gallery): the closest clear look, the last
+   * clear look from before the week, the least cloudy when every photo is clouded, a radar image in a week with no
+   * photo; `plain` for a first image the gallery tags with nothing. Missing `look` reads as the closest look.
+   */
+  best?: { satName: string; tClosest?: number; capture: CardCaptureInput; look?: SummaryLook }
   host: string
+}
+
+/** Why the summary card's picture leads (results lib/photos.ts CoverKind, plus radar and none). */
+export type SummaryLook = 'closest' | 'lastClear' | 'clouded' | 'radar' | 'plain'
+
+/** A summary link's `bw`: why its picture leads, when it is not the closest look (the default, never written). */
+export const LOOK_CODES: Record<Exclude<SummaryLook, 'closest'>, string> = { lastClear: 'lc', clouded: 'co', radar: 'ra', plain: 'pl' }
+export const lookOfCode = (code: string | null): SummaryLook | undefined =>
+  (Object.keys(LOOK_CODES) as Exclude<SummaryLook, 'closest'>[]).find((k) => LOOK_CODES[k] === code)
+
+/**
+ * The summary plate's chip, in the gallery's own words: "Closest look · Sentinel-2B · 10 m", "Last clear look · 3 Nov ·
+ * Landsat 9 · 30 m" (from before the week, so its day is said), "Clouded over · …", "Radar · Sentinel-1D · 20 m".
+ */
+export function summaryLookChip(best: NonNullable<SummaryInput['best']>, timeZone = 'UTC'): string {
+  const c = best.capture
+  const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection] ?? cardCrop(c).metresPerPx
+  const tail = `${best.satName} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`
+  switch (best.look ?? 'closest') {
+    case 'closest':
+      return `Closest look · ${tail}`
+    case 'lastClear': {
+      if (best.tClosest === undefined) return `Last clear look · ${tail}`
+      const p = parts(best.tClosest, timeZone)
+      return `Last clear look · ${p.day} ${MONTHS[p.month - 1] ?? ''} · ${tail}`
+    }
+    case 'clouded':
+      return `Clouded over · ${tail}`
+    case 'radar':
+      return `Radar · ${tail}`
+    default:
+      return tail
+  }
 }
 
 const SHORT: Record<Verdict, string> = { imaged: 'Photo', likely: 'Likely', could: 'Could', overhead: 'Overhead' }
@@ -846,7 +883,7 @@ export function summarySentences(i: Pick<SummaryInput, 'satellites' | 'placeLabe
   return `${summaryHeadline(i)} ${photosSentence(i.counts.imaged, i)}`
 }
 
-/** "31 satellites watched *Waterloo this week.*" + "12 images were made public." over the week's closest look, with the four verdict counts. */
+/** "31 satellites watched *Waterloo this week.*" + "12 images were made public." over the gallery's first image, with the four verdict counts. */
 export function buildSummarySpec(i: SummaryInput): CardSpec {
   const n = Math.max(0, Math.round(i.satellites))
   const cps = Array.from(i.placeLabel)
@@ -858,8 +895,7 @@ export function buildSummarySpec(i: SummaryInput): CardSpec {
   const c = i.best?.capture
   if (c && i.best) {
     const crop = cardCrop(c)
-    const gsd = c.gsdM ?? NATIVE_GSD_M[c.collection] ?? crop.metresPerPx
-    const chip = plateChip(`Closest look · ${i.best.satName} · ${gsd < 1 ? fixed(gsd, 2) : int(gsd)} m`, { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
+    const chip = plateChip(summaryLookChip(i.best, i.timeZone), { left: INSET, top: INSET }, 'bone', CARD_FS.chipLead)
     const credit = plateChip(creditFor(c, i.best.tClosest), { left: INSET, bottom: INSET }, 'bone2', CARD_FS.micro)
     const scale = scaleFor(crop.metresPerPx)
     plate = { kind: 'image', crop, chip, credit, scale, overlay: imageOverlay([chip, credit], scale), fallback: emptyPlate(planNote('imaged', 'transient')) }

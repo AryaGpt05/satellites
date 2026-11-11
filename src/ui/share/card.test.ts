@@ -257,3 +257,44 @@ describe('summary copy matches the results headline: N watched, K made public (R
     expect(summaryPostText({ placeLabel: 'Waterloo', satellites: f.satellites, photos: f.counts.imaged })).toMatch(/ images? (was|were) made public\.\n/)
   })
 })
+
+describe('the week’s card shows the gallery’s first image, labelled as the gallery labels it (owner)', () => {
+  const META: Record<number, SatMeta> = {
+    60989: { norad: 60989, name: 'Sentinel-2C', category: 'open-optical' },
+    42063: { norad: 42063, name: 'Sentinel-2B', category: 'open-optical' },
+    49260: { norad: 49260, name: 'Landsat 9', category: 'open-optical' },
+  }
+  const meta = (n: number): SatMeta => META[n] ?? { norad: n, name: `NORAD ${n}`, category: 'other' }
+  const T_CLEAR = Date.UTC(2026, 10, 3, 13, 36)
+  const chipText = (c: { segs: { text: string }[] }) => c.segs.map((x) => x.text).join('')
+  const LS9 = 'LC09_L2SP_224078_20261103_02_T1'
+
+  it('a cloudy week: the last clear look from before it, with its day, in the card, the link and the server', async () => {
+    const { summaryFromParams, summaryDescription } = await server()
+    const report = await waterlooReport({ withTracks: false })
+    // Every detailed photo of the week clouded over; a clear Landsat 9 scene from before the window.
+    const cloudy: Report = { ...report, captures: report.captures.map((c) => (isDetailed(c) ? { ...c, spot: 'cloud' as const, cloudCoverPct: 95 } : c)) }
+    const ls = report.captures.find((c) => isDetailed(c))!
+    const clearCover: Capture = { ...ls, id: LS9, itemId: LS9, collection: 'landsat-c2-l2', platform: 'landsat-9', norad: 49260, gsdM: 30, datetime: T_CLEAR, spot: 'clear', cloudCoverPct: 2 }
+    const f = summaryFacts({ ...cloudy, clearCover }, 'Waterloo', meta)
+    expect(f.best).toMatchObject({ itemId: LS9, satName: 'Landsat 9', tClosest: T_CLEAR, look: 'lastClear' })
+    const spec = summaryCardSpec({ ...cloudy, clearCover }, 'Waterloo', meta, 'America/Toronto', 'www.watched.earth')
+    expect(spec.plate.kind === 'image' && chipText(spec.plate.chip)).toBe('Last clear look · 3 Nov · Landsat 9 · 30 m')
+    const link = new URL(summaryLink('https://www.watched.earth', f))
+    expect(link.searchParams.get('bw')).toBe('lc')
+    const back = summaryFromParams(link.searchParams) as Parameters<typeof buildSummarySpec>[0]
+    expect(back.best?.look).toBe('lastClear')
+    const fromLink = buildSummarySpec({ ...back, timeZone: 'America/Toronto', host: 'www.watched.earth' }).plate
+    expect(fromLink.kind === 'image' && chipText(fromLink.chip)).toBe('Last clear look · 3 Nov · Landsat 9 · 30 m')
+    expect(summaryDescription(back)).toContain('The last clear look is from Landsat 9.')
+  })
+
+  it('a week with a clear photo: the closest look, as before (no extra link parameter)', async () => {
+    const report = await waterlooReport({ withTracks: false })
+    const f = summaryFacts(report, 'Waterloo', meta)
+    expect(f.best?.look).toBe('closest')
+    expect(new URL(summaryLink('https://www.watched.earth', f)).searchParams.get('bw')).toBeNull()
+    const spec = summaryCardSpec(report, 'Waterloo', meta, 'America/Toronto', 'www.watched.earth')
+    expect(spec.plate.kind === 'image' && chipText(spec.plate.chip)).toMatch(/^Closest look · /)
+  })
+})

@@ -5,7 +5,7 @@
  * (≈ 1.1 km of latitude, less of longitude), and the card's crop is centred on that rounded point.
  */
 import type { Pass } from '@/types'
-import { cloudWords, photosSentence, summaryHeadline } from '../../../api/_lib/cardSpec'
+import { LOOK_CODES, cloudWords, photosSentence, summaryHeadline, type SummaryLook } from '../../../api/_lib/cardSpec'
 
 /** 2 decimals of a degree ≈ 1.1 km north–south. */
 export const SHARE_DECIMALS = 2
@@ -198,7 +198,8 @@ export interface SummaryLinkInput {
   /** The archives were still answering (K is a floor) */
   partial?: boolean
   windowEnd: number
-  best?: { collection: string; itemId: string; satName: string; tClosest: number; gsdM?: number }
+  /** The results gallery's first image, and why it leads (missing: the closest look) */
+  best?: { collection: string; itemId: string; satName: string; tClosest: number; gsdM?: number; look?: SummaryLook }
 }
 
 /**
@@ -222,6 +223,7 @@ export function summaryLink(origin: string, i: SummaryLinkInput): string {
     p.set('bs', i.best.satName)
     p.set('bt', String(Math.round(i.best.tClosest)))
     if (i.best.gsdM !== undefined) p.set('bg', String(Math.round(i.best.gsdM * 100) / 100))
+    if (i.best.look && i.best.look !== 'closest') p.set('bw', LOOK_CODES[i.best.look])
   }
   return `${origin}/?${p.toString()}`
 }

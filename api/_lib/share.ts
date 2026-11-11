@@ -6,7 +6,7 @@
  * are anyone's). Each field is re-validated and clamped before it reaches a renderer.
  */
 import tzlookup from '@photostructure/tz-lookup'
-import { VERDICT_WORDS, cloudWords, localStamp, photosSentence, summaryHeadline, watchedLead, type CardInput, type SummaryInput } from './cardSpec.js'
+import { VERDICT_WORDS, cloudWords, localStamp, photosSentence, summaryHeadline, watchedLead, lookOfCode, type CardInput, type SummaryInput, type SummaryLook } from './cardSpec.js'
 import { supabaseConfig } from './env.js'
 
 export type Verdict = 'imaged' | 'likely' | 'could' | 'overhead'
@@ -287,18 +287,19 @@ export function placeFromParams(q: URLSearchParams): SharedPlace | null {
 // ── Summary links (share SH6): the week at a place, carried in the link itself ─────────────
 
 /** Summary params a summary link carries next to q / n (nothing is stored server-side). */
-export const SUMMARY_KEYS = ['sv', 'sc', 'sw', 'sa', 'sp', 'bc', 'bi', 'bs', 'bt', 'bg'] as const
+export const SUMMARY_KEYS = ['sv', 'sc', 'sw', 'sa', 'sp', 'bc', 'bi', 'bs', 'bt', 'bg', 'bw'] as const
 
 /**
  * A summary from a link: `sv` the satellites that watched the place (N: any pass, geostationary excluded),
  * `sc` the four verdict counts ("31,220,1544,66"; the first is K, the photos made public), `sw` the window
  * end (ms), `sa=1` the archives didn't answer, `sp=1` the archives were still answering (K is a floor), and
- * the closest look: `bc` collection, `bi` item id, `bs` satellite name, `bt` time (ms), `bg` pixel size (m).
+ * the gallery's first image: `bc` collection, `bi` item id, `bs` satellite name, `bt` time (ms), `bg` pixel size (m),
+ * `bw` why it leads when it is not the closest look (`lc` last clear look, `co` clouded over, `ra` radar, `pl` none).
  * Null unless place, sv and sc are valid.
  */
 export type LinkSummary = Omit<SummaryInput, 'host' | 'timeZone' | 'best'> & {
   place: SharedPlace
-  best?: { satName: string; tClosest?: number; capture: ShareCapture }
+  best?: { satName: string; tClosest?: number; capture: ShareCapture; look?: SummaryLook }
 }
 
 export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
@@ -318,7 +319,7 @@ export function summaryFromParams(q: URLSearchParams): LinkSummary | null {
     satellites: Math.round(satellites),
     counts: { imaged, likely, could, overhead },
     windowEnd: num(q.get('sw'), 0, 8.64e15),
-    best: capture && satName ? { satName, tClosest, capture } : undefined,
+    best: capture && satName ? { satName, tClosest, capture, ...(lookOfCode(q.get('bw')) ? { look: lookOfCode(q.get('bw')) } : {}) } : undefined,
   }
   // Flags are present only when set, so a summary rebuilt from its link equals the one the app built.
   if (q.get('sa') === '1') out.archiveDown = true
@@ -333,7 +334,9 @@ export function summaryTitle(s: Pick<SummaryInput, 'satellites' | 'placeLabel'>)
 
 /** "12 images were made public. The closest look is from Sentinel-2C. What watched you this week?" */
 export function summaryDescription(s: Pick<SummaryInput, 'best' | 'counts' | 'placeLabel' | 'archiveDown' | 'partial'>): string {
-  const best = s.best ? ` The closest look is from ${s.best.satName}.` : ''
+  const look = s.best?.look ?? 'closest'
+  const what = look === 'closest' ? 'The closest look' : look === 'lastClear' ? 'The last clear look' : 'The first image'
+  const best = s.best ? ` ${what} is from ${s.best.satName}.` : ''
   return `${photosSentence(s.counts.imaged, s)}${best} What watched you this week?`
 }
 
