@@ -17,12 +17,13 @@
  * F opens the photo large (the lightbox); Space plays/pauses the replay. Esc is NOT handled here (except
  * inside the inline search field and the lightbox): the app shell owns it.
  */
-import { flushSync } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { timeZoneAt } from '@/imagery'
 import { useBackLayer } from '@/lib/backStack'
 import { SHORT_LANDSCAPE_QUERY } from '@/lib/layout'
 import { announceUiEntrance } from '@/lib/uiEvents'
+import type { ShareFrom } from '@/lib/telemetry'
 import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
@@ -143,7 +144,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const listScroll = useRef(0)
-  const [sharing, setSharing] = useState<Pass | null>(null)
+  // The open share sheet: a pass's, or (no pass) the week's summary; `from` is the Share that opened it.
+  const [sharing, setSharing] = useState<{ pass?: Pass; from: ShareFrom } | null>(null)
   const [searching, setSearching] = useState(false)
   const [inviteClosed, setInviteClosed] = useState(false)
   const [snap, setSnap] = useState(0)
@@ -301,6 +303,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
   useDeselectCleanup()
   useKeys(model, selected, select, !!sharing || searching)
   const closeShare = useCallback(() => setSharing(null), [])
+  const shareWeek = useCallback(() => setSharing({ from: 'headline' }), [])
+  const shareHero = useCallback((pass: Pass) => setSharing({ pass, from: 'hero' }), [])
+  const sharePass = useCallback((pass: Pass) => setSharing({ pass, from: 'pass' }), [])
+  const shareViewed = useCallback((pass: Pass) => setSharing({ pass, from: 'viewer' }), [])
   // A selection that vanished (report replaced by the final one) falls back to the overview.
   useEffect(() => {
     if (selectedId && model && !model.passById.has(selectedId)) clearPass()
@@ -671,6 +677,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       onCloseSearch={() => setSearching(false)}
       onSearch={onSearch}
       onRetry={onRetry}
+      onShareWeek={shareWeek}
     />
   )
 
@@ -695,7 +702,7 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
       mobile={mobile}
       compact={headActions}
       sharedPass={sharedPass}
-      onShare={setSharing}
+      onShare={sharePass}
       onCheckPlace={openSearch}
       onReplay={() => replayShown(shownPass)}
     />
@@ -758,7 +765,8 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
               enterKey={enterKey}
               selectedId={selectedId}
               onSelect={select}
-              onShare={setSharing}
+              onShare={shareHero}
+              onShareWeek={shareWeek}
               onRetry={onRetry}
               invite={!!shared && !inviteClosed && !searching}
               onCheckPlace={openSearch}
@@ -774,8 +782,10 @@ export function ResultsView({ onBack, onRetry, onSearch }: ResultsViewProps) {
         </TimelineDock>
       ) : null}
 
-      {model ? <Lightbox model={model} mobile={mobile} onReplay={replayShown} /> : null}
-      {sharing && model ? <ShareFor pass={sharing} model={model} onClose={closeShare} /> : null}
+      {model ? <Lightbox model={model} mobile={mobile} onReplay={replayShown} onShare={shareViewed} covered={!!sharing} /> : null}
+      {/* On <body>, beside the photo viewer (itself a portal there): the app root is position: fixed, a stacking
+          context of its own, so a sheet inside it could never paint over the viewer its Share was pressed in. */}
+      {sharing && model ? createPortal(<ShareFor pass={sharing.pass} from={sharing.from} model={model} onClose={closeShare} />, document.body) : null}
     </>
   )
 }
@@ -838,13 +848,14 @@ interface OverviewProps {
   selectedId?: string
   onSelect: (p: Pass) => void
   onShare: (p: Pass) => void
+  onShareWeek: () => void
   onRetry?: () => void
   invite: boolean
   onCheckPlace?: () => void
   onCloseInvite: () => void
 }
 
-function Overview({ model, mobile, compactTimeline, noSummaryRule = false, wide = false, full, enterKey, selectedId, onSelect, onShare, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
+function Overview({ model, mobile, compactTimeline, noSummaryRule = false, wide = false, full, enterKey, selectedId, onSelect, onShare, onShareWeek, onRetry, invite, onCheckPlace, onCloseInvite }: OverviewProps) {
   const { report } = model
   // Notch indices in reading order (V22): phones have no SUMMARY rule (the summary is the sheet's
   // header and hero), so their first rule is 01 / PASSES; short laptops likewise (R2R1).
@@ -902,7 +913,7 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, wide 
           )}
           <div className={s.headBlock}>
             <Headline model={model} enter={enter} />
-            <MoreLine model={model} enter={enter} onRetry={onRetry} />
+            <MoreLine model={model} enter={enter} onRetry={onRetry} onShare={onShareWeek} />
           </div>
           {hero}
           <Verdicts model={model} enter={enter} />
@@ -1059,10 +1070,14 @@ function DetailFooter({
   )
 }
 
-/** The share sheet, told when the picture is mostly cloud (share SH2 renders the clouded card). */
-function ShareFor({ pass, model, onClose }: { pass: Pass; model: ResultsModel; onClose: () => void }) {
+/**
+ * The share sheet: a pass's, told when the picture is mostly cloud (share SH2 renders the clouded card), or with no
+ * pass the week's summary (the headline's Share).
+ */
+function ShareFor({ pass, from, model, onClose }: { pass?: Pass; from: ShareFrom; model: ResultsModel; onClose: () => void }) {
+  if (!pass) return <ShareSheet kind="summary" report={model.report} onClose={onClose} from={from} />
   const c = captureFor(model.report, pass)
-  return <ShareSheet pass={pass} report={model.report} onClose={onClose} clouded={!!c && isClouded(c)} cloudPct={c?.cloudCoverPct} />
+  return <ShareSheet pass={pass} report={model.report} onClose={onClose} clouded={!!c && isClouded(c)} cloudPct={c?.cloudCoverPct} from={from} />
 }
 
 // ── behaviour ─────────────────────────────────────────────────────────────────────────────
