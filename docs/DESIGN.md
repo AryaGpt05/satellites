@@ -79,7 +79,7 @@ Numbers are always mono. Units are smaller and in `--bone-3`: `786.2 KM`, `7.46 
 | `--fs-panel-h` | 34px | 34px | panel headline (condensed) |
 | `--fs-panel-sub` | 22px | 22px | panel sub-headline |
 
-The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public images (Sentinel-2, Landsat, the daily weather mosaics and Sentinel-1's radar images: one count, "27 images were made public.") are counted on the second line, the only one that can read "At least…" and settle in place: it does while the archives answer (a partial report) and while late weather mosaics are still being checked after the report (`lateChecks`), so a number shown without "At least" never changes.
+The results headline integer is static: it does not count up. It counts the distinct satellites with any pass in the window (geostationary watchers excluded), which is final as soon as the passes exist, so it never changes while the archives and weather mosaics verify. The public images (Sentinel-2, Landsat, the daily weather mosaics, Sentinel-1's radar images, and every full-disc image the geostationary watchers with a public service took in the window, counted from their cadence: one count, "1,715 images were made public.") are counted on the second line, the only one that can read "At least…" and settle in place: it does while the archives answer (a partial report) and while late weather mosaics are still being checked after the report (`lateChecks`), so a number shown without "At least" never changes.
 
 ## 4. Layout
 
@@ -129,7 +129,7 @@ Declarative, specific, quietly uncanny. Second person. Real numbers.
 - Result headline: "In the last 7 days, **256 satellites watched** *Waterloo*." then "**29 photos were made public.**" (N = distinct satellites with any pass; K = real public images in the window; only the photos line can be partial: "At least K photos…"). None: "No satellite we track watched Waterloo this week." One: "1 satellite watched".
 - Pass detail: "Sentinel-2C crossed 786 km overhead at 16:14:21 UTC, moving south at 7.46 km/s. It was looking straight down. Cloud cover: 25%." Per-pass headline and share post: "Sentinel-2C watched Waterloo."
 - Commercial: "WorldView Legion 4 passed within view at 10:52 local. It could have watched Waterloo. We can't know whether it did."
-- Geostationary: "GOES-19 has watched this spot every 10 minutes, all week: 1,008 times."
+- Geostationary: "Meteosat-12 doesn’t pass. It sits 35,778 km above the equator at 0.2°W and scans the whole face of the Earth below it every 10 minutes. This scan’s line reached Paris at about 07:49 CET, moving north." (its newest image opened like a pass; rows without a picture say "No public image" or "Poor quality")
 - User-facing copy says **watched**, never "photographed" (code comments and identifiers may keep the old word). "{K} photos were made public." stays as the owner wrote it.
 
 Honesty is part of the aesthetic. Uncertainty is stated plainly in `--bone-3` mono footnotes.

@@ -95,6 +95,7 @@ export function searchCaptures(place: LatLon, start: number, end: number, signal
 export function weatherCaptures(place: LatLon, passes: Pass[], signal?: AbortSignal): Promise<Capture[]>             // GIBS daily VIIRS/MODIS for daytime weather-leo passes
 export function geoImageUrl(collection: CaptureCollection, place: LatLon, ms: number, opts: { halfSizeKm: number; px: number }): string // GOES/Himawari frame at time
 export function latestGeoFrame(source: GeoFrameSource, place: LatLon, opts: { halfSizeKm: number; px: number }, o?: { signal?: AbortSignal }): Promise<GeoFrame | null> // a geostationary watcher's newest frame: GOES / Himawari (GIBS), Meteosat (EUMETSAT); says its band (colour, visible, infrared)
+export function geoCapture(source: GeoFrameSource, frame: { time: number; layer: string }, place: LatLon, norad?: number): Capture | undefined // that frame as a capture of the report; geoCaptureFromItem(collection, itemId, place) rebuilds a shared one
 export function spotCloud(capture: Capture, place: LatLon, signal?: AbortSignal): Promise<'clear' | 'cloud' | 'shadow' | 'unknown'>
 export function searchPlaces(q: string, signal?: AbortSignal): Promise<Place[]>
 export function reversePlace(lat: number, lon: number, signal?: AbortSignal): Promise<Place>

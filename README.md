@@ -74,8 +74,10 @@ The results headline (*260 satellites watched Palm Jumeirah*) counts every satel
 whatever its label, so *watched* there is meant broadly; only ◆ passes come with an image. The second line counts the
 images that were made public (photos, weather mosaics and radar images alike), and starts with "At least" while
 archives are still answering. Geostationary weather
-satellites never pass; they sit over the equator all week, so they are listed separately and not counted. The app
-says *watched*, never *photographed*.
+satellites never pass; they sit over the equator all week, so they are listed separately and not counted among the
+satellites. Their images are counted, though: every full-disc image that GOES, Himawari or a Meteosat took of the
+place's side of the Earth that week (one every 10 or 15 minutes, about a thousand each) is in the second line's
+number, and the newest of each is shown. The app says *watched*, never *photographed*.
 
 ## Accuracy and limits
 
@@ -97,11 +99,14 @@ says *watched*, never *photographed*.
   image gets its own contrast. They never lead the photos, and the radar search never delays the results: the
   report takes them if they have answered by the time it is ready (they nearly always have).
 
-- The geostationary weather satellites that watch a place all week are listed with their newest frame where a public
-  map service carries it: GOES and Himawari from NASA, the two Meteosats from EUMETSAT. At night Himawari and
-  Meteosat-9 are shown in infrared, labelled *IR*: cloud tops by temperature, colder is lighter. NASA draws its
-  coldest cloud tops in a colour code; Watched puts them back on the grey scale, in the same order. At the rim of a
-  satellite's view a frame can be part empty; it is shown small, never as the lead picture.
+- The geostationary weather satellites that watch a place all week are listed with their newest image where a public
+  map service carries it: GOES and Himawari from NASA, the two Meteosats from EUMETSAT. That image closes the gallery
+  and can be opened, replayed and shared like a pass; the others of the week are counted from the satellite's
+  schedule, not fetched. Its replay shows the imager's scan line crossing the place: the time is good to about a
+  minute, and the app says "about". At night Himawari and Meteosat-9 are shown in infrared, labelled *IR*: cloud tops
+  by temperature, colder is lighter. NASA draws its coldest cloud tops in a colour code; Watched puts them back on
+  the grey scale, in the same order. At the rim of a satellite's view an image can be part empty; it is shown small
+  in its row, or not at all, and neither counted nor put in the gallery.
 
 Everything uncertain is labelled as such in the app.
 
