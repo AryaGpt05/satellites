@@ -212,8 +212,9 @@ function targetFor(
       if (pass && place && acq.passId === pass.id) {
         if (chasing) {
           const sat = propagate(pass.norad, simTime)
-          // A geostationary scan: the satellite stays put, the view stands back and the scan line comes to it.
-          if (sat && pass.geostationary) return geoScanPose(vp, insets, sat, place, geoDiveAt(simTime, acq.tc, acq.speedKmS), acq.halfKm, focusOf(acq, place))
+          // A geostationary scan: the satellite stays put, so the camera stands behind it and then dives to the place.
+          if (sat && pass.geostationary)
+            return geoScanPose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / EARTH_RADIUS_KM, _sat), place, geoDiveAt(simTime, acq.tc), acq.halfKm, focusOf(acq, place))
           if (sat) {
             const dive = diveAt(simTime, acq.tc, acq.speedKmS, acq.halfKm)
             return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / EARTH_RADIUS_KM, _sat), place, dive, acq.halfKm, focusOf(acq, place))

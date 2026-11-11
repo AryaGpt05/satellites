@@ -326,12 +326,16 @@ export function diveAt(t: number, tc: number, speedKmS: number, halfKm: number):
   return Math.min(1, u * u * u * (u * (6 * u - 15) + 10))
 }
 
-/** The same for a geostationary scan, whose line crosses the disc at tens of km/s over an 800 km frame. */
-export const GEO_DIVE_KM = { far: 2600, near: 520 }
+/**
+ * The same for a geostationary scan, in sim time before the capture rather than distance (its line crosses the disc
+ * at 20 to 60 km/s depending on where the place sits on it): the camera holds behind the spacecraft until `far`
+ * seconds before the line reaches the place, and is down on the frame by `near`, before the image starts to paint.
+ */
+export const GEO_DIVE_S = { far: 42, near: 13 }
 
-export function geoDiveAt(t: number, tc: number, speedKmS: number): number {
-  const d = (Math.abs(t - tc) / 1000) * speedKmS
-  const u = clamp((GEO_DIVE_KM.far - d) / (GEO_DIVE_KM.far - GEO_DIVE_KM.near), 0, 1)
+export function geoDiveAt(t: number, tc: number): number {
+  const d = Math.abs(t - tc) / 1000
+  const u = clamp((GEO_DIVE_S.far - d) / (GEO_DIVE_S.far - GEO_DIVE_S.near), 0, 1)
   return Math.min(1, u * u * u * (u * (6 * u - 15) + 10))
 }
 

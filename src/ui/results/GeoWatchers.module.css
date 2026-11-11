@@ -84,6 +84,13 @@
   .openText {
     display: none;
   }
+  /* Beside the name, out of the flow: the meta line under it keeps the row's full width and stays on one line. */
+  .open {
+    position: absolute;
+    top: 15px;
+    right: 2px;
+    padding-right: 0;
+  }
 }
 /* As wide as the frame, whatever the line under it says ("31 min ago" runs a little into the gap), so every row's
    text starts on one edge whether or not it has a picture. */

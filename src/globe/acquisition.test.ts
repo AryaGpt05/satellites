@@ -119,11 +119,12 @@ describe('decal and scan geometry', () => {
     }
   })
 
-  it('a geostationary scan dives over thousands of km, not hundreds (its line crosses the disc at tens of km/s)', () => {
-    expect(geoDiveAt(TC - 100_000, TC, 30)).toBe(0) // 3,000 km out: the wide view
-    expect(geoDiveAt(TC - 50_000, TC, 30)).toBeGreaterThan(0.2)
-    expect(geoDiveAt(TC - 10_000, TC, 30)).toBe(1) // 300 km out: on the frame
-    expect(geoDiveAt(TC, TC, 30)).toBe(1)
+  it('a geostationary scan holds behind the spacecraft, then dives in the last seconds before the line arrives', () => {
+    expect(geoDiveAt(TC - 80_000, TC)).toBe(0) // the opening shot from 35,786 km
+    expect(geoDiveAt(TC - 42_000, TC)).toBe(0)
+    expect(geoDiveAt(TC - 27_000, TC)).toBeGreaterThan(0.3)
+    expect(geoDiveAt(TC - 13_000, TC)).toBe(1) // on the frame before it paints
+    expect(geoDiveAt(TC, TC)).toBe(1)
   })
 
   it('the scan frame sits on the track at closest approach and points along the motion', () => {

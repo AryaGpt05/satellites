@@ -143,7 +143,7 @@ export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
           id={passAnchorId(item.id)}
           norad={item.norad}
           tone={item.verdict === 'imaged' ? 'signal' : 'bone'}
-          detail={item.verdict === 'imaged' ? imagedAt(item.tClosest) : undefined}
+          detail={item.verdict === 'imaged' ? (item.geostationary ? imagedAt(item.tClosest).replace(/^IMAGED (\d\d:\d\d):\d\d/, 'IMAGED ≈ $1') : imagedAt(item.tClosest)) : undefined}
           ready={catalogReady}
           leaving={leaving}
         />

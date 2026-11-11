@@ -401,21 +401,22 @@ export function chasePose(
   }
 }
 
-/** A geostationary scan's wide view: how much ground it shows, how far it leans from the place toward the satellite's seat. */
-const GEO_SCAN_GROUND_KM = 5200
-const GEO_SCAN_LEAN = 0.22
-const GEO_SCAN_TILT = 14 * DEG
+/** A geostationary scan's opening shot: how far behind the spacecraft the camera stands (Earth radii), and its lean. */
+const GEO_BEHIND_RANGE = { stacked: 3.4, desktop: 2.0 }
+const GEO_BEHIND_TILT = 9 * DEG
 
 /**
- * The approach of a geostationary scan (acquisition.ts): nothing flies past, so there is nothing to chase. The view
- * stands back over the region, north-up and nearly top-down, leaning a little toward the point under the satellite
- * (`sub`), and watches the scan line come across the disc; `dive` (acquisition.geoDiveAt) then brings it in onto the
- * frame as the line reaches the place, exactly as the chase's dive does for a passing satellite.
+ * The approach of a geostationary scan (acquisition.ts): nothing flies past, so there is nothing to chase. The
+ * camera stands just behind the spacecraft where it really is, 35,786 km out (`satWorld`, Earth radii), looking past
+ * it at the whole disc it images: the model in front, its light curtain reaching down to the scan line, the line
+ * crossing the Earth. `dive` (acquisition.geoDiveAt) then takes the camera down that line of sight onto the frame as
+ * the line reaches the place, as the chase's dive does for a passing satellite: the look-at point leaves the
+ * spacecraft for the place, and the range closes in until the image fills DIVE_FILL of the free rect.
  */
 export function geoScanPose(
   vp: Viewport,
   insets: Insets,
-  sub: { lat: number; lon: number },
+  satWorld: Vector3,
   place: { lat: number; lon: number },
   dive = 0,
   halfKm = 0,
@@ -423,10 +424,11 @@ export function geoScanPose(
 ): PoseSpec {
   const stacked = isPhone(vp)
   const f = freeRect(vp, insets)
-  latLonToDir(place.lat, place.lon, _s)
-  _m.copy(_s).lerp(latLonToDir(sub.lat, sub.lon, _f), GEO_SCAN_LEAN)
-  let range = clamp(rangeForGroundKm(vp, f, GEO_SCAN_GROUND_KM), 0.1, 1.9)
-  let tilt = GEO_SCAN_TILT
+  _m.copy(satWorld)
+  let range = stacked ? GEO_BEHIND_RANGE.stacked : GEO_BEHIND_RANGE.desktop
+  // The lean puts the spacecraft just off the limb, on the place's side of the equator, with the disc beyond it: the
+  // place's hemisphere is the one in the open (the other may sit under the timeline).
+  let tilt = place.lat >= 0 ? GEO_BEHIND_TILT : -GEO_BEHIND_TILT
   const k = halfKm > 0 ? clamp(dive, 0, 1) : 0
   if (k > 0) {
     _m.lerp(latLonToDir(focus.lat, focus.lon, _f), k)
@@ -438,6 +440,7 @@ export function geoScanPose(
   return {
     lat: Math.asin(clamp(_m.y / r, -1, 1)) * RAD,
     lon: Math.atan2(-_m.z, _m.x) * RAD,
+    r,
     headingDeg: 0,
     range,
     tilt,

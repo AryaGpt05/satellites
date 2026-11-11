@@ -30,6 +30,7 @@ import { selectSelectedPass, useApp } from '@/state/store'
 import type { Pass, SatCategory } from '@/types'
 import { palette } from '@/ui/system/palette'
 import { damp } from './cameraMath'
+import { geoDiveAt } from './acquisition'
 import { getSatInfo, groundTrack, propagate } from './data'
 import { Hairline } from './hairline'
 import { createCurtainMaterial, createRibbonMaterial, createSpacecraftMaterial, lin, type RibbonLook } from './materials'
@@ -114,9 +115,9 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   const pointable = field.mode === 'regard' || pass.verdict === 'could'
   // Imaging spacecraft get the model and the curtain; crewed / ambient objects keep their glyph and a nadir line.
   const imager = category !== 'crewed' && category !== 'other'
-  // A geostationary imager is 35,786 km up, behind any view of the ground: no model in frame, and no curtain (its
-  // foot would be the scan line a hemisphere away from its apex). The scan line on the surface says it.
-  const curtainOn = imager && field.mode !== 'none' && !pass.geostationary
+  // A geostationary imager's curtain reaches from where it sits, 35,786 km out, to its scan line on the disc (the
+  // camera starts behind it: framing.geoScanPose). Its foot is the line itself, not the ground under the spacecraft.
+  const curtainOn = imager && field.mode !== 'none'
 
   // ── ribbon
   const ribbon = useMemo(() => {
@@ -330,6 +331,9 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
       const x = Math.max(0, Math.min(1, (sepKm - WALL_FADE_KM.near) / (WALL_FADE_KM.far - WALL_FADE_KM.near)))
       wallWant = x * x * (3 - 2 * x)
     }
+    // A geostationary scan: the curtain belongs to the opening shot from behind the spacecraft, and bows out as the
+    // camera leaves it for the place (the scan line on the surface carries on).
+    if (pass.geostationary) wallWant = 1 - geoDiveAt(now, pass.tClosest)
     wall.current += (wallWant - wall.current) * damp(dt, tau)
     const L = live.current * wall.current * f
     u.uRate.value = isAcq ? acq.rate : st.timeMode === 'replay' ? st.replayRate : 0
@@ -352,7 +356,8 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
         z.copy(s.pos).normalize()
         x.copy(s.ahead).sub(s.pos)
         x.addScaledVector(z, -x.dot(z))
-        if (x.lengthSq() < 1e-14) x.set(0, 1, 0).addScaledVector(z, -z.y)
+        // A geostationary spacecraft barely moves over the ground: its drift is no heading to hang a model on. North.
+        if (pass.geostationary || x.lengthSq() < 1e-14) x.set(0, 1, 0).addScaledVector(z, -z.y)
         x.normalize()
         y.crossVectors(z, x)
         tmp.m.makeBasis(x, y, z)
@@ -380,11 +385,29 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
     if (edgesMesh.current) edgesMesh.current.visible = curtainVisible
     if (curtainVisible) {
       const { g, right, q } = tmp
-      g.copy(s.pos).normalize()
-      const tdir = tmp.x.copy(s.ahead).sub(s.pos)
-      tdir.addScaledVector(g, -tdir.dot(g)).normalize()
+      const tdir = tmp.x
+      let delta = Math.max(20, field.halfWidthKm(s.altKm)) / EARTH_RADIUS_KM
+      if (pass.geostationary) {
+        // The foot is the scan line: across the line's path (the pass's track) where the line is now, and no wider
+        // than the disc the spacecraft can see at that distance from the point under it.
+        const tr = pass.track
+        let i = 0
+        while (i < tr.length - 2 && tr[i + 1].t < now) i++
+        const fr = Math.max(0, Math.min(1, (now - tr[i].t) / Math.max(1, tr[i + 1].t - tr[i].t)))
+        latLonToWorld(tr[i].lat, tr[i].lon, 1, g)
+        latLonToWorld(tr[i + 1].lat, tr[i + 1].lon, 1, q)
+        tdir.copy(q).sub(g)
+        g.lerp(q, fr).normalize()
+        tdir.addScaledVector(g, -tdir.dot(g)).normalize()
+        const limb = (EARTH_RADIUS_KM / (EARTH_RADIUS_KM + s.altKm)) * 1.25
+        const c = g.dot(tmp.z.copy(s.pos).normalize())
+        delta = c > limb ? Math.min(delta, Math.acos(Math.min(1, limb / c))) : 0
+      } else {
+        g.copy(s.pos).normalize()
+        tdir.copy(s.ahead).sub(s.pos)
+        tdir.addScaledVector(g, -tdir.dot(g)).normalize()
+      }
       right.crossVectors(tdir, g).normalize()
-      const delta = Math.max(20, field.halfWidthKm(s.altKm)) / EARTH_RADIUS_KM
       const attr = curtain.geometry.attributes.position as BufferAttribute
       const arr = attr.array as Float32Array
       arr[0] = s.pos.x
