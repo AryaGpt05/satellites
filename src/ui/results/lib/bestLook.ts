@@ -6,19 +6,16 @@
  *   detailed  the most zoomed-in CLEAR Sentinel-2 / Landsat capture (smallest gsd, clearest spot, newest);
  *             if every one is clouded, the least cloudy (honestly labelled "Clouded over")
  *   mosaic    else the sharpest weather mosaic (VIIRS / MODIS, 250–375 m): well lit, then newest
- *   geo       else the latest frame of the highest geostationary watcher that has the place well inside its disc
- *             (GOES / Himawari / Meteosat)
- *   null      else nothing: the summary says why
+ *   null      else nothing: the summary says why (radar images and geostationary frames are in the gallery, but
+ *             neither is a photo to lead with)
  *
  * Pure: unit-tested in lib.test.ts; the controller calls it (via bestLookImageUrl) to preload the hero.
  */
-import type { Capture, GeoWatcher, Pass, Report, SpotCloud } from '@/types'
+import type { Capture, Pass, Report, SpotCloud } from '@/types'
 import { isCloudedOver } from '@/lib/clarity'
 import { orderPhotos, windowCover } from './photos'
 
-export type BestLook =
-  | { kind: 'detailed' | 'mosaic'; pass: Pass; capture: Capture }
-  | { kind: 'geo'; watcher: GeoWatcher }
+export type BestLook = { kind: 'detailed' | 'mosaic'; pass: Pass; capture: Capture }
 
 /** Primary clarity class of a capture's spot classification. */
 const SPOT_CLASS: Record<SpotCloud, number> = { clear: 0, cirrus: 0, unknown: 1, shadow: 2, cloud: 3 }
@@ -47,13 +44,11 @@ export function byClarity(a: { pass: Pass; capture?: Capture }, b: { pass: Pass;
   return b.pass.tClosest - a.pass.tClosest
 }
 
-export function pickBestLook(report: Pick<Report, 'passes' | 'captures' | 'geo'>): BestLook | null {
+export function pickBestLook(report: Pick<Report, 'passes' | 'captures'>): BestLook | null {
   const { photos } = orderPhotos({ passes: report.passes, captures: report.captures })
   const cover = windowCover(photos)
   // The window's cover is a detailed photo or a mosaic, never a radar image (photos.ts windowCover).
-  if (cover?.photo.pass && cover.photo.kind !== 'radar') return { kind: cover.photo.kind, pass: cover.photo.pass, capture: cover.photo.capture }
-  // Not from the rim of a disc: half of that frame can be empty (engine/geostationary.ts).
-  const watcher = report.geo.find((g) => !!g.frames && !g.rim)
-  if (watcher) return { kind: 'geo', watcher }
+  const kind = cover?.photo.kind
+  if (cover?.photo.pass && (kind === 'detailed' || kind === 'mosaic')) return { kind, pass: cover.photo.pass, capture: cover.photo.capture }
   return null
 }

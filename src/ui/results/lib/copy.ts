@@ -84,8 +84,16 @@ export interface Headline {
   infraredSweeps: number
   /** Distinct other satellites that passed within view (likely / could / overhead) */
   more: number
-  /** Total real images made public (what "K images were made public" counts): photos, mosaics and radar images alike */
+  /**
+   * Total real images made public (what "K images were made public" counts): photos, mosaics and radar images, and
+   * every full-disc image the geostationary watchers with a public service took in the window (owner)
+   */
   images: number
+  /**
+   * Of which geostationary: each watcher's frames over the window, by its cadence (GOES, Himawari and the Meteosats
+   * with the place well inside their disc). Known as soon as the watchers are: only the newest of each is shown.
+   */
+  geoImages: number
   /** Of which per-scene detailed images (Sentinel-2, Landsat) */
   detailed: number
   /** Of which coarse daily weather mosaics */
@@ -101,6 +109,19 @@ export interface Headline {
   radar?: { names: string[]; sats: number; passes: number }
 }
 
+/**
+ * Which geostationary watchers have public images of the place: a public service carries them, and the place is
+ * well inside their disc. The ones whose newest frame the gallery shows and whose week of frames is counted.
+ */
+export const hasPublicImages = (g: Pick<GeoWatcher, 'frames' | 'rim'>) => !!g.frames && !g.rim
+
+/** Every full-disc image those watchers took in the window, by their cadence. */
+export function geoImageCount(geo: readonly Pick<GeoWatcher, 'frames' | 'rim' | 'imagesInWindow'>[] | undefined): number {
+  let n = 0
+  for (const g of geo ?? []) if (hasPublicImages(g)) n += g.imagesInWindow
+  return n
+}
+
 /** The archives failed (flag from the engine, or its outage note in older reports). */
 export function archiveDown(report: Pick<Report, 'notes' | 'archiveFailed'>): boolean {
   if (report.archiveFailed !== undefined) return report.archiveFailed
@@ -112,10 +133,11 @@ export function archiveDown(report: Pick<Report, 'notes' | 'archiveFailed'>): bo
  *                   samples), so polar night is told by the sun, not inferred from pass times.
  */
 export function headline(
-  report: Pick<Report, 'passes' | 'captures' | 'notes' | 'archiveFailed'>,
+  report: Pick<Report, 'passes' | 'captures' | 'notes' | 'archiveFailed'> & Partial<Pick<Report, 'geo'>>,
   meta: MetaFn,
   sunMaxDeg?: number,
 ): Headline {
+  const geoImages = geoImageCount(report.geo)
   const imagedSats = new Set<number>()
   const detailedSats = new Set<number>()
   const mosaicSats = new Set<number>()
@@ -128,6 +150,8 @@ export function headline(
   let infraredSweeps = 0
   const byId = new Map(report.captures.map((c) => [c.id, c]))
   for (const p of report.passes) {
+    // A geostationary scan is not an overflight: its images are counted from the watchers (geoImages).
+    if (p.geostationary) continue
     const cat = meta(p.norad).category
     if (cat !== 'weather-geo') flew.add(p.norad)
     if (p.verdict === 'imaged') {
@@ -154,7 +178,8 @@ export function headline(
     mosaicSats: mosaicSats.size,
     infraredSweeps,
     more: viewSats.size,
-    images: detailed + mosaics + radarImages,
+    images: detailed + mosaics + radarImages + geoImages,
+    geoImages,
     detailed,
     mosaics,
     radarImages,
@@ -228,14 +253,6 @@ export function radarSentence(r: NonNullable<Headline['radar']>): Sentence {
         ? `${r.names[0]} and ${r.names[1]}`
         : r.names[0]
   return [`Radar doesn’t need light. ${names} passed within range `, num(int(r.passes)), r.passes === 1 ? ' time.' : ' times.']
-}
-
-// ── geostationary ─────────────────────────────────────────────────────────────────────────
-
-/** "GOES-19 has watched this spot every 10 minutes, all week: 1,008 times." */
-export function geoSentence(g: GeoWatcher, days: number): Sentence {
-  const span = Math.round(days) === 7 ? 'all week' : `for ${int(days)} days`
-  return [`${g.name} has watched this spot every `, num(int(g.cadenceMin), 'minutes'), `, ${span}: `, num(int(g.imagesInWindow)), ' times.']
 }
 
 // ── pass detail ───────────────────────────────────────────────────────────────────────────

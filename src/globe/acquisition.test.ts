@@ -186,7 +186,7 @@ describe('decal and scan geometry', () => {
       }))
       const r = { partial: false, passes, captures, geo: [] } as unknown as Report
       const look = pickBestLook(r)
-      const want = look && look.kind !== 'geo' ? look.pass.id : undefined
+      const want = look ? look.pass.id : undefined
       expect(coverPass(r)?.id).toBe(want)
     }
   })

@@ -47,11 +47,11 @@
  * the radar passes stay what geometry says. They are never the lead photo, so they hold nothing else either.
  */
 import { MS_PER_DAY } from '@/lib/geo'
-import { ensureTz, searchCapturesDetailed, searchRadar, sentinel2PlanCovers, spotCheck } from '@/imagery'
+import { ensureTz, geoCapture, latestGeoFrame, searchCapturesDetailed, searchRadar, sentinel2PlanCovers, spotCheck } from '@/imagery'
 import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } from '@/types'
 import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
 import { satrecFor } from './sgp4'
-import { geoWatchers } from './geostationary'
+import { geoScanPass, geoWatchers } from './geostationary'
 import { needsClearCover, scenesLackClearPhoto, startClearCover } from './clearCover'
 import { attachCaptures, attachDailyCaptures, captureNorad, dailyCaptureTarget, MATCH_AFTER_MS, MATCH_BEFORE_MS } from './match'
 import { passNear, passTargetFor, type PassTarget } from './passes'
@@ -183,6 +183,10 @@ const SPOT_BUDGET_MS = 1_500
 const PLAN_BUDGET_MS = 2_000
 /** Without onUpdate (no way to deliver it later), the final report waits at most this long for the clear cover. */
 const COVER_WAIT_MS = 2_500
+/** The size the geostationary leg checks a frame at: the watcher's row shows this very image (results GeoWatchers.tsx). */
+export const GEO_FRAME_PROBE = { halfSizeKm: 400, px: 176 }
+/** A report whose window ended longer ago than this is not "now": it gets no newest geostationary frame. */
+const GEO_LIVE_WINDOW_MS = 3 * 3_600_000
 export const OCEAN_NOTE = "This spot is outside Sentinel-2's acquisition plan (open ocean)."
 
 const nf = /* @__PURE__ */ new Intl.NumberFormat('en-US')
@@ -478,6 +482,32 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   )
   geoP.catch(noop)
 
+  // ── Geostationary images: the newest public frame of each watcher that has the place well inside its disc, as a
+  // capture with the scan that took it as its pass (geostationary.ts geoScanPass). Asked for as soon as the watchers
+  // are known and never waited for: a report carries the ones that are in when it is built, and one that comes after
+  // the final report patches it through `onUpdate`. Only for a window that ends now: "newest" means nothing in an
+  // older one (a shared link's).
+  const geoShots: { pass: Pass; capture: Capture }[] = []
+  let onGeoShot: (() => void) | undefined
+  if (Math.abs(Date.now() - windowEnd) < GEO_LIVE_WINDOW_MS) {
+    void geoP.then((watchers) => {
+      for (const g of watchers) {
+        const source = g.frames
+        if (!source || g.rim) continue
+        latestGeoFrame(source, latLon, GEO_FRAME_PROBE, { signal })
+          .then((frame) => {
+            if (!frame || signal?.aborted) return
+            const capture = geoCapture(source, frame, latLon, g.norad)
+            const pass = capture && geoScanPass(g.norad, latLon, frame.time, capture.id)
+            if (!capture || !pass) return
+            geoShots.push({ pass, capture })
+            onGeoShot?.()
+          })
+          .catch(noop)
+      }
+    }, noop)
+  }
+
   let passes: Pass[]
   try {
     passes = (await Promise.all([gibsPasses, otherPasses])).flat()
@@ -500,9 +530,12 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   /** The end of the GIBS budget (set when the partial report goes out). */
   let finalDueAt: number | undefined
   const build = (list: Pass[], captures: Capture[], partial: boolean, firstResultMs: number): EngineReport => {
-    const sorted = [...list].sort((a, b) => a.tClosest - b.tClosest)
-    const counts = { satellitesConsidered, passes: sorted.length, imaged: 0, likely: 0, could: 0, overhead: 0 }
-    for (const p of sorted) counts[p.verdict]++
+    // The counts are of overflights: a geostationary scan is listed among the passes (it can be opened, replayed and
+    // shared like one) but never counted as one.
+    const counts = { satellitesConsidered, passes: list.length, imaged: 0, likely: 0, could: 0, overhead: 0 }
+    for (const p of list) counts[p.verdict]++
+    const sorted = [...list, ...geoShots.map((g) => g.pass)].sort((a, b) => a.tClosest - b.tClosest)
+    if (geoShots.length) captures = [...captures, ...geoShots.map((g) => g.capture)]
     const { startedAt, finishedAt } = weather.timing()
     return {
       place,
@@ -703,6 +736,12 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
       weatherCaps.push(c)
       missing = Math.max(0, missing - 1)
       weatherNotes = gibsNotes()
+      latest = build(current, [...shown, ...weatherCaps], false, firstMs)
+      safely(opts.onUpdate, latest)
+    }
+    // A geostationary image that came in after the final report: the same report, plus it.
+    onGeoShot = () => {
+      if (signal?.aborted) return
       latest = build(current, [...shown, ...weatherCaps], false, firstMs)
       safely(opts.onUpdate, latest)
     }

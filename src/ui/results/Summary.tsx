@@ -12,7 +12,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { Button, Glyph, cx, prefersReducedMotion } from '@/ui/system'
 import { Count } from './Count'
 import { Paragraph } from './Text'
-import { ARCHIVE_DOWN_LINE, darkSentences, geoSentence, int, photosLine, placeParts, plain, radarSentence, watchedPhrase, type Sentence } from './lib/copy'
+import { ARCHIVE_DOWN_LINE, darkSentences, int, photosLine, placeParts, plain, radarSentence, watchedPhrase, type Sentence } from './lib/copy'
 import { VERDICTS, VERDICT_GLYPH, VERDICT_META, verdictUnit, type Verdict } from './lib/meta'
 import { fmtDayMonth } from './lib/time'
 import type { ResultsModel } from './model'
@@ -82,12 +82,12 @@ export function Headline({ model, compact = false, enter = false }: { model: Res
 const weekWord = (model: ResultsModel) => (isOldWindow(model) ? 'that week' : 'this week')
 
 /**
- * The second line: how many images were made public (owner F; one count, radar images included). When there are none, one plain sentence says
- * why (the sun, the archives' lag, the geostationary imager that sees it anyway). An archive outage says so,
+ * The second line: how many images were made public (owner F; one count: radar images and the geostationary watchers' frames included). When there are none, one plain sentence says
+ * why (the sun, the archives' lag). An archive outage says so,
  * with Try again.
  */
 export function MoreLine({ model, compact = false, enter = false, onRetry }: { model: ResultsModel; compact?: boolean; enter?: boolean; onRetry?: () => void }) {
-  const { head, report, best } = model
+  const { head, report } = model
   const cls = cx(compact ? s.mMore : s.headlineMore, enter && s.enter)
   const style = enterStyle(0.5)
   if (model.archiveFailed) {
@@ -113,7 +113,6 @@ export function MoreLine({ model, compact = false, enter = false, onRetry }: { m
   let why: Sentence[] | undefined
   if (head.zeroKind === 'dark') why = darkSentences(head)
   else if (head.radar && head.zeroKind !== 'unpublished') why = [radarSentence(head.radar)]
-  else if (best?.kind === 'geo') why = [geoSentence(best.watcher, model.windowDays)]
   else if (head.zeroReason && head.zeroKind !== 'archive') why = [[head.zeroReason[0].toUpperCase() + head.zeroReason.slice(1) + '.']]
   return (
     <>
@@ -199,6 +198,13 @@ export function Notes({ model, enter = false }: { model: ResultsModel; enter?: b
             <>
               {' '}
               · <b>{int(head.radarImages)}</b> radar {head.radarImages === 1 ? 'image' : 'images'} (Sentinel-1, 20 m)
+            </>
+          ) : null}
+          {head.geoImages ? (
+            <>
+              {' '}
+              · <b>{int(head.geoImages)}</b> full-disc {head.geoImages === 1 ? 'image' : 'images'} from geostationary weather satellites (2–5 km; the newest of each is
+              shown)
             </>
           ) : null}
           . {int(counts.passes)} passes from {int(counts.satellitesConsidered)} imaging and crewed satellites checked.

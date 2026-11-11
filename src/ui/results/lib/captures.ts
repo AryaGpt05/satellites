@@ -17,7 +17,10 @@ export const isDailyMosaic = (c: Pick<Capture, 'provider' | 'collection'>) =>
 export const isRadar = (c: Pick<Capture, 'collection'>) => c.collection === 'sentinel-1-rtc'
 
 /** "Detailed" = per-scene archive photos (Sentinel-2, Landsat), as opposed to weather mosaics and radar images. */
-export const isDetailed = (c: Pick<Capture, 'provider' | 'collection'>) => !isDailyMosaic(c) && c.provider !== 'gibs' && !isRadar(c)
+/** A geostationary imager's full-disc frame (GOES, Himawari, Meteosat): 2–5 km, the newest one of each watcher. */
+export const isGeoFrame = (c: Pick<Capture, 'collection'>) => /^(gibs-(goes-east|goes-west|himawari)|eumetsat-meteosat-)/.test(c.collection)
+
+export const isDetailed = (c: Pick<Capture, 'provider' | 'collection'>) => !isDailyMosaic(c) && c.provider !== 'gibs' && c.provider !== 'eumetsat' && !isRadar(c)
 
 export interface CropSpec {
   halfSizeKm: number
@@ -53,6 +56,8 @@ export function cropSpec(collection: CaptureCollection, px?: number): CropSpec {
     case 'gibs-goes-east':
     case 'gibs-goes-west':
     case 'gibs-himawari':
+    case 'eumetsat-meteosat-0deg':
+    case 'eumetsat-meteosat-iodc':
       return { halfSizeKm: 400, px: px ?? CROP_PX }
     default:
       return { halfSizeKm: 120, px: px ?? CROP_PX }
@@ -94,14 +99,20 @@ export function sensorName(c: Pick<Capture, 'collection' | 'platform'>): string 
       return 'ABI'
     case 'gibs-himawari':
       return 'AHI'
+    case 'eumetsat-meteosat-0deg':
+      return 'FCI'
+    case 'eumetsat-meteosat-iodc':
+      return 'SEVIRI'
     case 'sentinel-1-rtc':
       return 'C-SAR'
   }
 }
 
-/** Product line for captions: "Sentinel-2 L2A · 10 m" / "Daily mosaic · 375 m" / "Sentinel-1 radar · 20 m". */
-export function productLabel(c: Pick<Capture, 'collection' | 'provider' | 'gsdM'>): string {
+/** Product line for captions: "Sentinel-2 L2A · 10 m" / "Daily mosaic · 375 m" / "Sentinel-1 radar · 20 m" / "Full disc · 2 km". */
+export function productLabel(c: Pick<Capture, 'collection' | 'provider' | 'gsdM' | 'band'>): string {
   if (isDailyMosaic(c)) return `Daily mosaic · ${Math.round(c.gsdM)} m`
+  // The pixel the map service draws the disc on, in km; an infrared frame says so (cloud tops, not the ground).
+  if (isGeoFrame(c)) return `${c.band === 'infrared' ? 'Infrared' : 'Full disc'} · ${Math.round(c.gsdM / 1000)} km`
   switch (c.collection) {
     case 'sentinel-2-l2a':
       return `Sentinel-2 L2A · ${Math.round(c.gsdM)} m`
@@ -123,6 +134,8 @@ export function archiveName(c: Pick<Capture, 'provider'>): string {
       return 'Earth Search'
     case 'gibs':
       return 'NASA Worldview'
+    case 'eumetsat':
+      return 'EUMETSAT'
   }
 }
 

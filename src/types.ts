@@ -99,6 +99,8 @@ export interface SatProfile {
   gibs?: { collection: CaptureCollection; layer: string; kind: 'daily' | 'subdaily' }
   /** For geostationary: where its newest frame can be had (src/imagery/geoFrames.ts) */
   frames?: GeoFrameSource
+  /** For geostationary: how its imager covers the disc, from which side and in how many minutes */
+  scan?: { from: 'north' | 'south'; minutes: number }
   /** For geostationary: false if the satellite is in standby/storage (not imaging) */
   operational?: boolean
   /** One sentence, plain, precise. No hype. */
@@ -157,6 +159,13 @@ export interface Pass {
   /** Sampled ground track around tClosest (±~8 min), for drawing */
   track: TrackPoint[]
   captureId?: string
+  /**
+   * Not an overflight: one full-disc scan by a geostationary imager, the one that took its newest public frame
+   * (engine/geostationary.ts geoScanPass). The satellite stays put, so `track`, `headingDeg` and `groundSpeedKmS`
+   * are the SCAN LINE's as it sweeps the disc, tStart / tEnd the scan's, and tClosest the moment the line crossed
+   * the place. Never counted among the passes, nor its satellite among those that passed.
+   */
+  geostationary?: true
 }
 
 export interface TrackPoint {
@@ -183,11 +192,13 @@ export type CaptureCollection =
   | 'gibs-goes-east'
   | 'gibs-goes-west'
   | 'gibs-himawari'
+  | 'eumetsat-meteosat-0deg'
+  | 'eumetsat-meteosat-iodc'
   | 'sentinel-1-rtc'
 
 /**
- * Where a geostationary watcher's newest frame comes from (src/imagery/geoFrames.ts: NASA GIBS or EUMETSAT). A frame
- * is not a capture: no pass took it, it is never counted as a photo and never shared.
+ * Where a geostationary watcher's newest frame comes from (src/imagery/geoFrames.ts: NASA GIBS or EUMETSAT). The
+ * newest frame of each is also a capture of the report, with the scan that took it as its pass (engine/geostationary.ts).
  */
 export type GeoFrameSource = 'goes-east' | 'goes-west' | 'himawari' | 'meteosat-0deg' | 'meteosat-iodc'
 
@@ -197,7 +208,7 @@ export type SpotCloud = 'clear' | 'cirrus' | 'cloud' | 'shadow' | 'unknown'
 /** A real image that exists in a public archive. */
 export interface Capture {
   id: string
-  provider: 'earth-search' | 'planetary-computer' | 'gibs'
+  provider: 'earth-search' | 'planetary-computer' | 'gibs' | 'eumetsat'
   collection: CaptureCollection
   /** STAC item id, or for GIBS: "<layer>@<ISO time or date>" */
   itemId: string
@@ -222,6 +233,8 @@ export interface Capture {
   previewUrl?: string
   /** Human link to the item in a browser (STAC browser / PC explorer) */
   sourceUrl?: string
+  /** A geostationary frame: what it shows (day-and-night colour, visible light only, or thermal infrared) */
+  band?: 'colour' | 'visible' | 'infrared'
   /** Classification at the searched place; filled by the engine for best-look candidates */
   spot?: SpotCloud
   /**

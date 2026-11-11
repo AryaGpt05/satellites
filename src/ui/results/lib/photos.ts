@@ -13,6 +13,8 @@
  *       · no detailed capture at all → the sharpest weather mosaic (lit well, then newest).
  *   then every other photo of the window, NEWEST FIRST (by the pass's closest approach). Clouded ones stay,
  *   honestly labelled.
+ *   last the geostationary frames (GOES, Himawari, Meteosat: the newest full-disc frame of each watcher, 2–5 km),
+ *   under the Weather filter with the mosaics.
  *
  * Weather mosaics (250–375 m daily) are photos too. Sentinel-1's radar images are in the same order (newest first)
  * but never lead: a radar image is not a photograph, and the cover is what the results wait for. A week with only
@@ -26,7 +28,7 @@ import { pickLead, SPOT_RANK as CLARITY_SPOT_RANK, type Ranked } from '@/lib/cla
 import { isClouded } from './bestLook'
 import { northInCropDeg, placeInCrop } from '../../../../api/_lib/toneRender'
 import { panSharpUrl } from '@/imagery/panUrl'
-import { captureFor, cropSpec, displayUrl, isDetailed, isRadar, type CropSpec } from './captures'
+import { captureFor, cropSpec, displayUrl, isDetailed, isGeoFrame, isRadar, type CropSpec } from './captures'
 
 export interface Photo {
   /** Stable key: the capture id (one capture per pass) */
@@ -34,8 +36,11 @@ export interface Photo {
   capture: Capture
   /** The pass that took it; undefined for the clear cover from before the window */
   pass?: Pass
-  /** Sentinel-2 / Landsat (10–30 m) vs a daily weather mosaic (250–375 m) vs a Sentinel-1 radar image (20 m) */
-  kind: 'detailed' | 'mosaic' | 'radar'
+  /**
+   * Sentinel-2 / Landsat (10–30 m) vs a daily weather mosaic (250–375 m) vs a Sentinel-1 radar image (20 m) vs a
+   * geostationary imager's newest full-disc frame (2–5 km)
+   */
+  kind: 'detailed' | 'mosaic' | 'radar' | 'geo'
   /** Clouded over (detailed only): scene ≥ 70 % or cloud at the spot */
   clouded: boolean
 }
@@ -63,7 +68,7 @@ const MOSAIC_MIN_SUN_DEG = 10
 const tOf = (p: Photo) => p.pass?.tClosest ?? p.capture.datetime
 
 function toPhoto(capture: Capture, pass?: Pass): Photo {
-  const kind = isRadar(capture) ? 'radar' : isDetailed(capture) ? 'detailed' : 'mosaic'
+  const kind = isRadar(capture) ? 'radar' : isGeoFrame(capture) ? 'geo' : isDetailed(capture) ? 'detailed' : 'mosaic'
   return { key: capture.id, capture, pass, kind, clouded: kind === 'detailed' && isClouded(capture) }
 }
 
@@ -113,24 +118,29 @@ export function orderPhotos(report: Pick<Report, 'passes' | 'captures' | 'clearC
   const cc = report.clearCover
   // No clear detailed photo this week: the last clear look from before the window leads (owner D1).
   if (!hasClearDetailed && cc && !inWindow.some((p) => p.key === cc.id)) cover = { photo: { ...toPhoto(cc), clouded: false }, why: 'lastClear' }
-  // Radar images only: listed, newest first, with no cover (none of them is a photo to lead with).
-  if (!cover) return { photos: newest.filter((p) => p.kind === 'radar'), windowCount: newest.length }
+  // Geostationary frames close the gallery (owner): the coarsest pictures, and the one kind that is only a sample
+  // of what its satellite took (the newest of a thousand). Never the cover.
+  const geo = newest.filter((p) => p.kind === 'geo')
+  const rest = newest.filter((p) => p.kind !== 'geo')
+  // Radar images and geostationary frames only: listed with no cover (none of them is a photo to lead with).
+  if (!cover) return { photos: [...rest.filter((p) => p.kind === 'radar'), ...geo], windowCount: newest.length }
   const lead = cover.photo
-  return { photos: [lead, ...newest.filter((p) => p.key !== lead.key)], cover, windowCount: inWindow.length }
+  return { photos: [lead, ...rest.filter((p) => p.key !== lead.key), ...geo], cover, windowCount: inWindow.length }
 }
 
-const FILTER_KIND: Record<Exclude<PhotoFilter, 'all'>, Photo['kind']> = { detailed: 'detailed', weather: 'mosaic', radar: 'radar' }
+/** The filter a photo sits under: weather is the daily mosaics and the geostationary frames. */
+const filterOf = (p: Photo): Exclude<PhotoFilter, 'all'> => (p.kind === 'mosaic' || p.kind === 'geo' ? 'weather' : p.kind)
 
 export function filterPhotos(photos: Photo[], filter: PhotoFilter): Photo[] {
   if (filter === 'all') return photos
-  return photos.filter((p) => p.kind === FILTER_KIND[filter])
+  return photos.filter((p) => filterOf(p) === filter)
 }
 
 /** Which filters have anything in them (the control disables the empty ones). */
 export function filterCounts(photos: Photo[], windowOnly = false): Record<PhotoFilter, number> {
   const list = windowOnly ? photos.filter((p) => !!p.pass) : photos
   const out = { all: list.length, detailed: 0, weather: 0, radar: 0 }
-  for (const p of list) out[p.kind === 'mosaic' ? 'weather' : p.kind]++
+  for (const p of list) out[filterOf(p)]++
   return out
 }
 

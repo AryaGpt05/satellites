@@ -191,7 +191,7 @@ export function summaryFacts(report: Report, placeLabel: string, meta: MetaFn): 
   const head = headline(report, meta)
   const look = pickBestLook(report)
   const best =
-    look && look.kind !== 'geo'
+    look
       ? {
           collection: look.capture.collection,
           itemId: look.capture.itemId,

@@ -27,7 +27,6 @@ import { useApp } from '@/state/store'
 import type { Pass, Place } from '@/types'
 import { ShareSheet } from '@/ui/share'
 import { Button, Glyph, Rule, Sheet, cx, safeAreaTop, useIsMobile, useMediaQuery, useReducedMotion, useViewportHeight } from '@/ui/system'
-import { GeoLook } from './BestLook'
 import { ComputingBody } from './ComputingBody'
 import { Gallery, galleryCtl } from './Gallery'
 import { Lightbox } from './Lightbox'
@@ -851,15 +850,11 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, wide 
   const idx = (n: number) => String(mobile || noSummaryRule ? n - 1 : n).padStart(2, '0')
   const enter = useOnce(`${enterKey}:body`)
   const listReady = useListReady(model)
-  // The summary leads with the photos (owner B): the gallery, photo #1 being the closest look. With no photo
-  // at all, the geostationary imager that sees the place all week.
+  // The summary leads with the photos (owner B): the gallery, photo #1 being the closest look (with no photo
+  // at all it holds the radar images and the geostationary frames, if there are any).
   const hero = model.photos.length ? (
     <div data-peek-end className={cx(enter && s.enter)} style={enterStyle(1)}>
       <Gallery model={model} context="hero" mobile={mobile} onReplay={onSelect} onShare={onShare} />
-    </div>
-  ) : model.best?.kind === 'geo' ? (
-    <div data-peek-end className={cx(enter && s.enter)} style={enterStyle(1)}>
-      <GeoLook model={model} best={model.best} />
     </div>
   ) : null
   const inviteBar = invite ? (

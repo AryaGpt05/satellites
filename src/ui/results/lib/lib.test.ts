@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Capture, GeoWatcher, Pass } from '@/types'
 import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
-import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline, watchedPhrase } from './copy'
+import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, geoImageCount, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline, watchedPhrase } from './copy'
 import { cardUrl, filterCounts, filterPhotos, hiResHelps, hiResUrl, orderPhotos, photoHeadingDeg, placeOffset, thumbUrl } from './photos'
 import { isMagnifiedView, placeInCrop, tonePlanForUrl } from '../../../../api/_lib/toneRender'
 import { pcCropUrl, type CropOpts } from '@/imagery'
@@ -210,11 +210,6 @@ describe('copy', () => {
     const iss = plain(passSentences({ pass: pass({ norad: 25544, verdict: 'overhead', elevationDeg: 58, sunElevationDeg: -14 }), meta: meta(25544), timeZone: TZ, placeLabel: 'Waterloo' }))
     expect(iss).toContain('ISS passed 786 km up at 11:21 EST, 58° above your horizon')
     expect(iss).toContain('It was dark where you are.')
-  })
-
-  it('geostationary sentence', () => {
-    const g = { norad: 1, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008 }
-    expect(plain(geoSentence(g, 7))).toBe('GOES-19 has watched this spot every 10 minutes, all week: 1,008 times.')
   })
 
   it('share headline per verdict', () => {
@@ -484,46 +479,77 @@ describe('best look (decision #1)', () => {
     const b = cap('B', { spot: 'cloud', cloudCoverPct: 5 })
     const best = pickBestLook(report([a, b], [pass({ captureId: 'A', tClosest: 1 }), pass({ captureId: 'B', tClosest: 2 })]))
     expect(best?.kind).toBe('detailed')
-    expect(best && best.kind !== 'geo' && best.capture.id).toBe('A')
+    expect(best?.capture.id).toBe('A')
   })
   it('owner B1/D1: most zoomed-in clear first: smaller pixels beat a clearer spot, then the clearer spot, then newer', () => {
     const clear = cap('C', { spot: 'clear', cloudCoverPct: 35 })
     const cirrus = cap('I', { spot: 'cirrus', cloudCoverPct: 12 })
     const r1 = pickBestLook(report([clear, cirrus], [pass({ captureId: 'C', tClosest: 1 }), pass({ captureId: 'I', tClosest: 2 })]))
-    expect(r1 && r1.kind !== 'geo' && r1.capture.id).toBe('C') // same 10 m: clear beats cirrus, even though older
+    expect(r1?.capture.id).toBe('C') // same 10 m: clear beats cirrus, even though older
     const landsat = cap('L', { collection: 'landsat-c2-l2', gsdM: 30, spot: 'clear', cloudCoverPct: 2 })
     const r2 = pickBestLook(report([landsat, cirrus], [pass({ captureId: 'L', tClosest: 3 }), pass({ captureId: 'I', tClosest: 1 })]))
-    expect(r2 && r2.kind !== 'geo' && r2.capture.id).toBe('I') // 10 m (cirrus, not clouded) beats 30 m
+    expect(r2?.capture.id).toBe('I') // 10 m (cirrus, not clouded) beats 30 m
   })
   it('owner D1: a clouded capture never leads while a clear one exists; if all are clouded, the least cloudy', () => {
     const white = cap('W', { spot: 'cloud', cloudCoverPct: 99, gsdM: 10 })
     const grey = cap('G', { cloudCoverPct: 86, gsdM: 10 })
     const landsat = cap('L', { collection: 'landsat-c2-l2', gsdM: 30, spot: 'clear', cloudCoverPct: 20 })
     const r1 = pickBestLook(report([white, landsat], [pass({ captureId: 'W', tClosest: 9 }), pass({ captureId: 'L', tClosest: 1 })]))
-    expect(r1 && r1.kind !== 'geo' && r1.capture.id).toBe('L')
+    expect(r1?.capture.id).toBe('L')
     const r2 = pickBestLook(report([white, grey], [pass({ captureId: 'W', tClosest: 9 }), pass({ captureId: 'G', tClosest: 1 })]))
-    expect(r2 && r2.kind !== 'geo' && r2.capture.id).toBe('G')
+    expect(r2?.capture.id).toBe('G')
   })
   it('then the more recent one', () => {
     const a = cap('A', { cloudCoverPct: 21 })
     const b = cap('B', { cloudCoverPct: 24 })
     const best = pickBestLook(report([a, b], [pass({ captureId: 'A', tClosest: 1 }), pass({ captureId: 'B', tClosest: 2 })]))
-    expect(best && best.kind !== 'geo' && best.capture.id).toBe('B')
+    expect(best?.capture.id).toBe('B')
   })
-  it('falls back to a daylight weather mosaic, then the geostationary frame, then nothing', () => {
+  it('falls back to a daylight weather mosaic, then nothing (a geostationary frame is in the gallery, never the lead)', () => {
     const m = pickBestLook(report([viirs], [pass({ norad: 43013, captureId: viirs.id })]))
     expect(m?.kind).toBe('mosaic')
-    const g = pickBestLook(report([], [pass({ verdict: 'likely' })]))
-    expect(g?.kind).toBe('geo')
-    expect(pickBestLook(report([], [pass({ verdict: 'likely' })], []))).toBeNull()
+    expect(pickBestLook(report([], [pass({ verdict: 'likely' })]))).toBeNull()
+    const frame = cap('G', { provider: 'gibs', collection: 'gibs-goes-east', gsdM: 2000, band: 'colour' })
+    expect(pickBestLook(report([frame], [pass({ norad: 60133, captureId: 'G', geostationary: true })]))).toBeNull()
   })
-  it('the geostationary lead is the highest watcher with the place well inside its disc, never one at the rim', () => {
-    const rim = { ...geo[0], name: 'Meteosat-9', elevationDeg: 12, frames: 'meteosat-iodc', rim: true } satisfies GeoWatcher
-    const inside = { ...geo[0], name: 'Meteosat-12', elevationDeg: 11, frames: 'meteosat-0deg' } satisfies GeoWatcher
-    const noFrame = { ...geo[0], name: 'Elektro-L 3', elevationDeg: 40, frames: undefined }
-    const g = pickBestLook(report([], [pass({ verdict: 'likely' })], [noFrame, rim, inside]))
-    expect(g?.kind === 'geo' && g.watcher.name).toBe('Meteosat-12')
-    expect(pickBestLook(report([], [pass({ verdict: 'likely' })], [noFrame, rim]))).toBeNull()
+  it('geostationary frames close the gallery, under Weather, and never lead', () => {
+    const a = cap('A', { spot: 'clear', cloudCoverPct: 5 })
+    const g1 = cap('G1', { provider: 'gibs', collection: 'gibs-goes-east', gsdM: 2000, band: 'colour' })
+    const g2 = cap('G2', { provider: 'eumetsat', collection: 'eumetsat-meteosat-iodc', gsdM: 5000, band: 'infrared' })
+    const passes = [
+      pass({ captureId: 'A', tClosest: 100 }),
+      pass({ norad: 43013, captureId: viirs.id, tClosest: 200 }),
+      pass({ norad: 60133, captureId: 'G1', tClosest: 900, geostationary: true }),
+      pass({ norad: 28912, captureId: 'G2', tClosest: 950, geostationary: true }),
+    ]
+    const set = orderPhotos({ captures: [g1, a, g2, viirs], passes })
+    expect(set.photos.map((p) => p.key)).toEqual(['A', viirs.id, 'G2', 'G1'])
+    expect(set.photos.slice(2).map((p) => p.kind)).toEqual(['geo', 'geo'])
+    expect(set.cover?.photo.key).toBe('A')
+    expect(filterCounts(set.photos)).toEqual({ all: 4, detailed: 1, weather: 3, radar: 0 })
+    expect(filterPhotos(set.photos, 'weather').map((p) => p.key)).toEqual([viirs.id, 'G2', 'G1'])
+    // Alone, they are listed with no cover.
+    const alone = orderPhotos({ captures: [g1], passes: [passes[2]] })
+    expect(alone.cover).toBeUndefined()
+    expect(alone.photos.map((p) => p.key)).toEqual(['G1'])
+    expect(productLabel(g1)).toBe('Full disc · 2 km')
+    expect(productLabel(g2)).toBe('Infrared · 5 km')
+  })
+  it("the image count takes in every frame the public geostationary watchers took, and their scans are not passes", () => {
+    const watchers: GeoWatcher[] = [
+      { ...geo[0] },
+      { ...geo[0], norad: 28912, name: 'Meteosat-9', cadenceMin: 15, imagesInWindow: 672, frames: 'meteosat-iodc', rim: true },
+      { ...geo[0], norad: 44903, name: 'Elektro-L 3', cadenceMin: 30, imagesInWindow: 336, frames: undefined },
+    ]
+    expect(geoImageCount(watchers)).toBe(1008)
+    const a = cap('A', { spot: 'clear' })
+    const g1 = cap('G1', { provider: 'gibs', collection: 'gibs-goes-east', gsdM: 2000 })
+    const passes = [pass({ captureId: 'A', tClosest: 100 }), pass({ norad: 60133, captureId: 'G1', tClosest: 900, geostationary: true })]
+    const h = headline({ passes, captures: [a, g1], geo: watchers }, meta)
+    expect(h).toMatchObject({ images: 1009, geoImages: 1008, detailed: 1, flewOver: 1, photographed: 1 })
+    // The same before the frame itself has arrived: the count never waits for it.
+    expect(headline({ passes: [passes[0]], captures: [a], geo: watchers }, meta).images).toBe(1009)
+    expect(headline({ passes: [passes[0]], captures: [a] }, meta).images).toBe(1)
   })
   it('clouded: cloud at the spot or ≥ 70 % of the scene', () => {
     expect(isClouded({ cloudCoverPct: 86 })).toBe(true)
@@ -701,8 +727,8 @@ describe('photos: one order everywhere (owner B1 + D1)', () => {
     expect(set.photos.map((p) => p.key)).toEqual(['OLD', viirs.id, 'B'])
     expect(set.windowCount).toBe(2)
     // pickBestLook stays within the window (it needs a pass): the least cloudy capture.
-    const best = pickBestLook({ captures: [b, viirs], passes: [pass({ captureId: 'B', tClosest: 50 })], geo: [] })
-    expect(best && best.kind !== 'geo' && best.capture.id).toBe('B')
+    const best = pickBestLook({ captures: [b, viirs], passes: [pass({ captureId: 'B', tClosest: 50 })] })
+    expect(best?.capture.id).toBe('B')
   })
 
   it('no clear image anywhere: the least cloudy capture leads, honestly flagged', () => {
@@ -874,8 +900,8 @@ describe('Sentinel-1 radar images: real images, never photographs', () => {
     expect(filterPhotos(set.photos, 'radar').map((p) => p.key)).toEqual(['R1', 'R2'])
     expect(filterPhotos(set.photos, 'detailed').map((p) => p.key)).toEqual(['A'])
     expect(filterCounts(set.photos)).toEqual({ all: 3, detailed: 1, weather: 0, radar: 2 })
-    const best = pickBestLook({ captures: [opt('A'), radar('R1')], passes, geo: [] })
-    expect(best && best.kind !== 'geo' && best.capture.id).toBe('A')
+    const best = pickBestLook({ captures: [opt('A'), radar('R1')], passes })
+    expect(best?.capture.id).toBe('A')
   })
 
   it('a week with radar images only lists them, with no cover (nothing for the results to wait on)', () => {
@@ -883,7 +909,7 @@ describe('Sentinel-1 radar images: real images, never photographs', () => {
     const set = orderPhotos({ captures: [radar('R1'), radar('R2')], passes })
     expect(set.cover).toBeUndefined()
     expect(set.photos.map((p) => p.key)).toEqual(['R2', 'R1'])
-    expect(pickBestLook({ captures: [radar('R1')], passes, geo: [] })).toBeNull()
+    expect(pickBestLook({ captures: [radar('R1')], passes })).toBeNull()
   })
 
   it('is counted with the photos in the one line, and broken down in the footnote', () => {

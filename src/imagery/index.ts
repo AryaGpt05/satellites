@@ -22,7 +22,7 @@ export type { CaptureSearchResult } from './stac'
 export { weatherCaptures, weatherCandidates, verifyWeatherCapture, geoImageUrl, latestGeoImage, geoFrames, geoFrameCandidates, geoFrameTime, utcDate, GIBS_LAYERS, GIBS_DAILY_BY_NORAD, GEO_SAFE_LAG_MS, isGibsCollection } from './gibs'
 export type { GibsCollection, GibsLayer } from './gibs'
 
-export { latestGeoFrame, GEO_FRAMES, isEumetsatSource } from './geoFrames'
+export { latestGeoFrame, geoCapture, geoCaptureFromItem, geoSourceOf, GEO_FRAMES, GEO_COLLECTION, isEumetsatSource } from './geoFrames'
 export type { GeoFrame, GeoFrameBand } from './geoFrames'
 
 export { spotCloud, spotCheck, classifyScl, classifySclArea, classifyQaPixel, type SpotCheck } from './cloud'

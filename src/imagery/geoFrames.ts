@@ -18,13 +18,14 @@
  * `gridKm` is the pixel the service draws the layer on, measured on its own renders (2026-11-11), not the
  * instrument's best: what the label next to the picture must say.
  *
- * A frame is not a capture: no pass took it at a moment of its own, it is not counted as a photo and it is never
- * shared, so none of this touches the capture collections, the share links or the database.
+ * The newest frame is also a capture of the report (`geoCapture`): one image per watcher, in the gallery and the
+ * timeline, with the scan that took it as its pass (engine/geostationary.ts). Its id is "<layer>@<frame time>", so a
+ * shared one can be had again from the id alone (`geoCaptureFromItem`): the layer says which service and which band.
  */
-import type { GeoFrameSource, LatLon } from '@/types'
-import type { CropOpts } from './endpoints'
-import { latestEumetsatFrame, type EumetsatFrameLayer } from './eumetsat'
-import { GIBS_LAYERS, HIMAWARI_INFRARED, latestGibsFrame, type GibsFrameLayer } from './gibs'
+import type { Capture, CaptureCollection, GeoFrameSource, LatLon } from '@/types'
+import { EUMETSAT_GEOSERVER, gibsWmsUrl, worldviewUrl, type CropOpts } from './endpoints'
+import { eumetsatWmsUrl, latestEumetsatFrame, type EumetsatFrameLayer } from './eumetsat'
+import { GIBS_LAYERS, HIMAWARI_INFRARED, isoSeconds, latestGibsFrame, utcDate, type GibsFrameLayer } from './gibs'
 import { preloadImage } from './image'
 
 /** What a frame shows: day-and-night colour, visible light only, or thermal infrared. */
@@ -79,6 +80,61 @@ export interface GeoFrame {
   gridKm: number
   /** 0..1 share of the picture with no data, as measured on the bytes shown (off the disc; a black night sea counts too) */
   empty: number
+  /** The map layer it came from, and whose service */
+  layer: string
+  via: 'gibs' | 'eumetsat'
+}
+
+/** The capture collection of each source's frames. */
+export const GEO_COLLECTION: Readonly<Record<GeoFrameSource, CaptureCollection>> = {
+  'goes-east': 'gibs-goes-east',
+  'goes-west': 'gibs-goes-west',
+  himawari: 'gibs-himawari',
+  'meteosat-0deg': 'eumetsat-meteosat-0deg',
+  'meteosat-iodc': 'eumetsat-meteosat-iodc',
+}
+
+/** The source behind a capture collection, if it is a geostationary one. */
+export function geoSourceOf(collection: string): GeoFrameSource | undefined {
+  return (Object.keys(GEO_COLLECTION) as GeoFrameSource[]).find((k) => GEO_COLLECTION[k] === collection)
+}
+
+function captureOf(source: GeoFrameSource, l: GeoFrameLayer, time: number, place: LatLon, norad?: number): Capture {
+  const layer = l.layer.layer
+  const itemId = `${layer}@${isoSeconds(time)}`
+  const { lat, lon } = place
+  return {
+    id: itemId,
+    provider: l.via,
+    collection: GEO_COLLECTION[source],
+    itemId,
+    platform: source,
+    norad,
+    datetime: time,
+    gsdM: l.gridKm * 1000,
+    band: l.band,
+    // Both services cut in lon/lat already, so the globe's decal and the panel's card are the same kind of crop.
+    cropUrl: (o) => (l.via === 'gibs' ? gibsWmsUrl(layer, isoSeconds(time), { lat, lon }, o) : eumetsatWmsUrl(layer, time, { lat, lon }, o)),
+    sourceUrl: l.via === 'gibs' ? worldviewUrl(layer, utcDate(time), { lat, lon }) : `${EUMETSAT_GEOSERVER.replace('/geoserver', '')}/productviewer?v=${encodeURIComponent(layer)}`,
+  }
+}
+
+/** A frame the search found, as a capture of the report. `norad` is the satellite that took it. */
+export function geoCapture(source: GeoFrameSource, frame: Pick<GeoFrame, 'time' | 'layer'>, place: LatLon, norad?: number): Capture | undefined {
+  const l = GEO_FRAMES[source].layers.find((x) => x.layer.layer === frame.layer)
+  return l && captureOf(source, l, frame.time, place, norad)
+}
+
+/**
+ * A geostationary capture from its collection and item id alone ("<layer>@<ISO time>"): how a shared one comes back.
+ * Undefined for anything that is not one of ours (an unknown layer, a time that does not parse).
+ */
+export function geoCaptureFromItem(collection: string, itemId: string, place: LatLon, norad?: number): Capture | undefined {
+  const source = geoSourceOf(collection)
+  const [layer, iso] = itemId.split('@')
+  const time = Date.parse(iso ?? '')
+  if (!source || !Number.isFinite(time)) return undefined
+  return geoCapture(source, { time, layer }, place, norad)
 }
 
 /**
@@ -93,7 +149,7 @@ export async function latestGeoFrame(source: GeoFrameSource, place: LatLon, opts
     if (found) {
       // Already loaded by the search: this only reads what the loader measured.
       const img = await preloadImage(found.url).catch(() => null)
-      return { ...found, band: l.band, gridKm: l.gridKm, empty: Number(img?.dataset.nodata) || 0 }
+      return { ...found, band: l.band, gridKm: l.gridKm, empty: Number(img?.dataset.nodata) || 0, layer: l.layer.layer, via: l.via }
     }
   }
   return null

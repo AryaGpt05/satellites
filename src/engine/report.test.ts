@@ -11,6 +11,8 @@ const imagery = vi.hoisted(() => ({
   sentinel2PlanCovers: vi.fn(),
   searchClearScenes: vi.fn(),
   searchRadar: vi.fn(),
+  latestGeoFrame: vi.fn(async (..._args: unknown[]): Promise<unknown> => null),
+  geoCapture: vi.fn(),
 }))
 vi.mock('@/imagery', async () => {
   // Pure helpers are the real ones.
@@ -678,6 +680,65 @@ describe('computeReport', () => {
     const north = by(await computeReport({ lat: 74, lon: 5, label: 'Norwegian Sea', source: 'demo' }, { now }))
     expect(north['Meteosat-12']).toMatchObject({ frames: 'meteosat-0deg', rim: true })
     for (const g of Object.values(north)) expect(g.rim).toBe(true)
+  })
+
+  it("adds each public geostationary watcher's newest frame as an image with its scan, never counted as a pass", async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const frameTime = now - 40 * 60_000
+    imagery.latestGeoFrame.mockImplementation(async (source: unknown) => (source === 'goes-east' ? { url: 'u', time: frameTime, band: 'colour', gridKm: 2, empty: 0, layer: 'GOES-East_ABI_GeoColor', via: 'gibs' } : null))
+    imagery.geoCapture.mockImplementation((source: string, frame: { time: number; layer: string }, _p: LatLon, norad?: number) => ({
+      id: `${frame.layer}@${frame.time}`, provider: 'gibs', collection: 'gibs-goes-east', itemId: `${frame.layer}@${frame.time}`, platform: source, norad, datetime: frame.time, gsdM: 2000, band: 'colour', cropUrl: () => 'u',
+    }))
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const plain = await computeReport(waterloo, { now })
+      // The frame may land after the final report (nobody was listening): ask again with a listener and wait for it.
+      const updates: (typeof plain)[] = []
+      const r0 = await computeReport(waterloo, { now, onUpdate: (r) => updates.push(r) })
+      await new Promise((r) => setTimeout(r, 20))
+      const r = updates[updates.length - 1] ?? r0
+      const scans = r.passes.filter((p) => p.geostationary)
+      expect(scans).toHaveLength(1)
+      const scan = scans[0]
+      expect(getSatInfo(scan.norad)?.displayName).toBe('GOES-19')
+      expect(scan.verdict).toBe('imaged')
+      expect(r.captures.find((c) => c.id === scan.captureId)?.collection).toBe('gibs-goes-east')
+      // ABI scans north to south in 10 minutes: Waterloo (43°N) is crossed in the first half, the line heading south.
+      expect(scan.tStart).toBe(frameTime)
+      expect(scan.tEnd - scan.tStart).toBe(600_000)
+      expect(scan.tClosest).toBeGreaterThan(frameTime + 30_000)
+      expect(scan.tClosest).toBeLessThan(frameTime + 300_000)
+      expect(scan.headingDeg).toBe(180)
+      expect(scan.altitudeKm).toBeGreaterThan(35_000)
+      expect(scan.elevationDeg).toBeGreaterThan(30)
+      for (let i = 1; i < scan.track.length; i++) expect(scan.track[i].lat).toBeLessThan(scan.track[i - 1].lat)
+      // The line's path passes nearest Waterloo at the scan's closest approach.
+      const at = scan.track.reduce((a, b) => (Math.abs(b.t - scan.tClosest) < Math.abs(a.t - scan.tClosest) ? b : a))
+      expect(Math.abs(at.lat - 44)).toBeLessThan(4)
+      expect(scan.groundSpeedKmS).toBeGreaterThan(18)
+      expect(scan.groundSpeedKmS).toBeLessThan(60)
+      // Counts are of overflights only.
+      expect(r.counts.passes).toBe(plain.counts.passes)
+      expect(r.counts.imaged).toBe(plain.counts.imaged)
+      expect(r.passes.length).toBe(r.counts.passes + 1)
+    } finally {
+      clock.mockRestore()
+      imagery.latestGeoFrame.mockReset().mockResolvedValue(null)
+    }
+  })
+
+  it('asks for no geostationary frame when the window is not now (a shared link from last week)', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    imagery.latestGeoFrame.mockClear()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 2 * 86_400_000)
+    try {
+      await computeReport(waterloo, { now })
+      expect(imagery.latestGeoFrame).not.toHaveBeenCalled()
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('rejects with AbortError when aborted', async () => {

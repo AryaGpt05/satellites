@@ -6,6 +6,9 @@
  *  - NORAD ids are preferred; name patterns are used for constellations and are anchored so they
  *    never catch unrelated objects (e.g. "JILIN-1 GAOFEN" must not match the GAOFEN profiles).
  *  - Geostationary longitudes are never stored here: they always come from propagation.
+ *  - `scan` is how a geostationary imager covers the disc: ABI and AHI step their east-west swaths from north to
+ *    south, SEVIRI and FCI from south to north; a full disc takes about 10 minutes (SEVIRI 12.5). It times the scan
+ *    line's crossing of a place within a frame, to about a minute.
  *  - Blurbs are one plain sentence (docs/DESIGN.md §7). No hype.
  *
  * Resolution order: an exact NORAD id wins; otherwise the FIRST matching name pattern in table order.
@@ -189,6 +192,7 @@ export const PROFILES: readonly SatProfile[] = [
     cadenceMin: 10,
     gibs: { collection: 'gibs-goes-east', layer: 'GOES-East_ABI_GeoColor', kind: 'subdaily' },
     frames: 'goes-east',
+    scan: { from: 'north', minutes: 10 },
     blurb: 'GOES-East: images the full disk of the Americas every 10 minutes.',
   },
   {
@@ -201,6 +205,7 @@ export const PROFILES: readonly SatProfile[] = [
     cadenceMin: 10,
     gibs: { collection: 'gibs-goes-west', layer: 'GOES-West_ABI_GeoColor', kind: 'subdaily' },
     frames: 'goes-west',
+    scan: { from: 'north', minutes: 10 },
     blurb: 'GOES-West: images the full disk of the Pacific and the Americas every 10 minutes.',
   },
   {
@@ -231,6 +236,7 @@ export const PROFILES: readonly SatProfile[] = [
     cadenceMin: 10,
     gibs: { collection: 'gibs-himawari', layer: 'Himawari_AHI_Band3_Red_Visible_1km', kind: 'subdaily' },
     frames: 'himawari',
+    scan: { from: 'north', minutes: 10 },
     blurb: 'Japan’s weather satellite: images the full disk of Asia and the Pacific every 10 minutes.',
   },
   {
@@ -251,6 +257,7 @@ export const PROFILES: readonly SatProfile[] = [
     operational: true,
     cadenceMin: 10,
     frames: 'meteosat-0deg',
+    scan: { from: 'south', minutes: 10 },
     blurb: 'The first third-generation Meteosat (MTG-I1): images Europe and Africa every 10 minutes.',
   },
   {
@@ -262,6 +269,7 @@ export const PROFILES: readonly SatProfile[] = [
     operational: true,
     cadenceMin: 15,
     frames: 'meteosat-iodc',
+    scan: { from: 'south', minutes: 12.5 },
     blurb: 'Covers the Indian Ocean region, imaging the full disk every 15 minutes.',
   },
   {

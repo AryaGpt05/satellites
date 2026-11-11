@@ -49,20 +49,20 @@ describe('geostationary frame sources', () => {
 describe('the newest frame of a source', () => {
   it("is the first layer's when it has one, labelled with that layer's band and pixel", async () => {
     gibs.mockResolvedValueOnce({ url: 'u-visible', time: 5 })
-    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-visible', time: 5, band: 'visible', gridKm: 1, empty: 0 })
+    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-visible', time: 5, band: 'visible', gridKm: 1, empty: 0, layer: 'Himawari_AHI_Band3_Red_Visible_1km', via: 'gibs' })
     expect(gibs).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to infrared when the daylight layer has nothing (night)', async () => {
     gibs.mockResolvedValueOnce(null).mockResolvedValueOnce({ url: 'u-ir', time: 7 })
-    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-ir', time: 7, band: 'infrared', gridKm: 2, empty: 0 })
+    await expect(latestGeoFrame('himawari', TOKYO, OPTS)).resolves.toEqual({ url: 'u-ir', time: 7, band: 'infrared', gridKm: 2, empty: 0, layer: 'Himawari_AHI_Band13_Clean_Infrared', via: 'gibs' })
     expect(gibs.mock.calls[1][0]).toBe(HIMAWARI_INFRARED)
     // The daylight layer is only asked for its newest few frames; the last layer searches as far as it likes.
     expect(gibs.mock.calls[0][3]).toMatchObject({ maxSteps: 3 })
     expect(gibs.mock.calls[1][3]?.maxSteps).toBeUndefined()
 
     eumetsat.mockResolvedValueOnce(null).mockResolvedValueOnce({ url: 'e-ir', time: 9 })
-    await expect(latestGeoFrame('meteosat-iodc', DELHI, OPTS)).resolves.toEqual({ url: 'e-ir', time: 9, band: 'infrared', gridKm: 5, empty: 0 })
+    await expect(latestGeoFrame('meteosat-iodc', DELHI, OPTS)).resolves.toEqual({ url: 'e-ir', time: 9, band: 'infrared', gridKm: 5, empty: 0, layer: 'msg_iodc:ir108', via: 'eumetsat' })
     expect(eumetsat.mock.calls.map((c) => c[0].layer)).toEqual(['msg_iodc:rgb_naturalenhncd', 'msg_iodc:ir108'])
   })
 
