@@ -31,7 +31,7 @@ import { currentCatalog, loadCatalog, loadCatalogNames } from '@/engine/catalog'
 import { ensureTz } from '@/imagery'
 import { getShare, recordLookup, type Share } from '@/lib/backend'
 import { createLateShareGate } from './lateShare'
-import { passLinkOpts, pickPreselect, readUrlTarget, type RunOpts } from './links'
+import { passLinkOpts, sharedGeoItem, pickPreselect, readUrlTarget, type RunOpts } from './links'
 import { isSettled, raceTimeout, settleWaitMs, sleep } from './timing'
 
 export type { RunOpts } from './links'
@@ -205,7 +205,7 @@ async function loadFirstFonts(): Promise<void> {
 /** The report a share opens: its place, with the window centred on the pass when it is older than the default window. */
 function shareRun(share: Share): { place: Place; opts: RunOpts; share: Share } {
   const place: Place = { label: share.placeLabel, lat: share.lat, lon: share.lon, source: 'url' }
-  return { place, opts: passLinkOpts(share.tClosest ?? Date.now(), share.norad), share }
+  return { place, opts: { ...passLinkOpts(share.tClosest ?? Date.now(), share.norad), geoItem: sharedGeoItem(share) }, share }
 }
 
 /**
@@ -503,6 +503,7 @@ export async function runReport(place: Place, opts: RunOpts = {}) {
     if (inflight !== ctrl) return
     const report = await computeReport(place, {
       now: opts.now,
+      geoItem: opts.geoItem,
       signal: ctrl.signal,
       onProgress: progress.write,
       // The archive answers ~2 s before the partial report: start the likely hero's crop now (Planetary
@@ -571,7 +572,7 @@ function scheduleArchiveRetry(place: Place, opts: RunOpts, ctrl: AbortController
     if (inflight !== ctrl || ctrl.signal.aborted) return
     try {
       const { computeReport } = await loadEngine()
-      const r = await computeReport(place, { now: windowEnd ?? opts.now, signal: ctrl.signal })
+      const r = await computeReport(place, { now: windowEnd ?? opts.now, geoItem: opts.geoItem, signal: ctrl.signal })
       if (inflight !== ctrl || r.archiveFailed || r.partial) return
       const cur = useApp.getState().report
       // Only ever swap in a strictly better, final report: never fewer photographs than the user already saw

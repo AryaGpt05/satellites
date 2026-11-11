@@ -1,4 +1,4 @@
-import { gibsWmsUrl, pcCropUrl, radarCropUrl, radarPolOfItemId } from '@/imagery'
+import { geoCaptureFromItem, gibsWmsUrl, pcCropUrl, radarCropUrl, radarPolOfItemId } from '@/imagery'
 import type { Share } from '@/lib/backend'
 import { cropSpec } from '../results/lib/captures'
 
@@ -29,6 +29,9 @@ export function shareCropUrl(share: Share, px?: number): string | undefined {
     const pol = radarPolOfItemId(c.itemId)
     return pol ? radarCropUrl(c.itemId, pol, at, opts).replace(/\.png\?/, '.jpg?') : undefined
   }
+  // A geostationary frame (NASA GIBS or EUMETSAT): the layer and the time are its item id.
+  const geo = geoCaptureFromItem(c.collection, c.itemId, at)
+  if (geo) return geo.cropUrl(opts)
   if (c.collection.startsWith('gibs-')) {
     const [layer, time] = c.itemId.split('@')
     return layer && time ? gibsWmsUrl(layer, time, at, opts) : undefined

@@ -15,7 +15,7 @@
  * the cache (a summary's closest look, a recipient's first look), the same rect is loaded and faded in.
  * Pictures go through the results' session photo cache (loadPhoto): one request per URL for the page.
  */
-import { gibsWmsUrl, pcCropUrl, radarCropUrl, radarPolOfItemId } from '@/imagery'
+import { geoCaptureFromItem, gibsWmsUrl, pcCropUrl, radarCropUrl, radarPolOfItemId } from '@/imagery'
 import { bboxAround } from '@/lib/geo'
 import type { Capture, Pass, Report } from '@/types'
 import {
@@ -80,6 +80,9 @@ export function cropUrlFor(capture: Pick<Capture, 'provider' | 'collection' | 'i
     const pol = radarPolOfItemId(capture.itemId)
     return pol ? radarCropUrl(capture.itemId, pol, { lat, lon }, opts).replace(/\.png\?/, '.jpg?') : undefined
   }
+  // A geostationary frame, from NASA GIBS or EUMETSAT: the layer and the time are its item id.
+  const geo = geoCaptureFromItem(capture.collection, capture.itemId, { lat, lon })
+  if (geo) return geo.cropUrl(opts)
   if (capture.provider === 'gibs') {
     const [layer, time] = capture.itemId.split('@')
     return layer && time ? gibsWmsUrl(layer, time, { lat, lon }, opts) : undefined

@@ -17,6 +17,18 @@ export interface RunOpts {
   selectPassId?: string
   selectNorad?: number
   selectNear?: number
+  /** A shared geostationary image: the report holds that very frame (engine ReportOptions.geoItem) */
+  geoItem?: { norad: number; collection: string; itemId: string }
+}
+
+/**
+ * The geostationary image a share carries, if it is one: a recipient's report would otherwise hold that watcher's
+ * NEWEST frame, not the one that was shared.
+ */
+export function sharedGeoItem(share: { norad?: number; capture?: { collection: string; itemId: string } }): RunOpts['geoItem'] {
+  const c = share.capture
+  if (!c || share.norad === undefined || !/^(gibs-(goes-east|goes-west|himawari)|eumetsat-meteosat-)/.test(c.collection)) return undefined
+  return { norad: share.norad, collection: c.collection, itemId: c.itemId }
 }
 
 export type UrlTarget = { kind: 'share'; id: string } | { kind: 'q'; place: Place; opts: RunOpts }

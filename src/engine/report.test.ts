@@ -13,6 +13,7 @@ const imagery = vi.hoisted(() => ({
   searchRadar: vi.fn(),
   latestGeoFrame: vi.fn(async (..._args: unknown[]): Promise<unknown> => null),
   geoCapture: vi.fn(),
+  geoCaptureFromItem: vi.fn(),
 }))
 vi.mock('@/imagery', async () => {
   // Pure helpers are the real ones.
@@ -725,6 +726,29 @@ describe('computeReport', () => {
     } finally {
       clock.mockRestore()
       imagery.latestGeoFrame.mockReset().mockResolvedValue(null)
+    }
+  })
+
+  it('holds the geostationary image a shared link carries, in place of that watcher’s newest', async () => {
+    imagery.searchCapturesDetailed.mockResolvedValue({ captures: [], degraded: [] })
+    imagery.weatherCaptures.mockResolvedValue([])
+    const frameTime = Math.floor((now - 5 * 3_600_000) / 600_000) * 600_000
+    imagery.geoCaptureFromItem.mockImplementation((collection: string, itemId: string, _p: LatLon, norad?: number) => ({
+      id: itemId, provider: 'gibs', collection, itemId, platform: 'goes-east', norad, datetime: frameTime, gsdM: 2000, band: 'colour', cropUrl: () => 'u',
+    }))
+    imagery.latestGeoFrame.mockClear()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const r = await computeReport(waterloo, { now, geoItem: { norad: 60133, collection: 'gibs-goes-east', itemId: 'GOES-East_ABI_GeoColor@x' } })
+      const scans = r.passes.filter((p) => p.geostationary)
+      expect(scans).toHaveLength(1)
+      expect(scans[0]).toMatchObject({ norad: 60133, tStart: frameTime, captureId: 'GOES-East_ABI_GeoColor@x' })
+      // GOES-East's newest is not asked for; GOES-West's still is.
+      const asked = imagery.latestGeoFrame.mock.calls.map((c) => c[0])
+      expect(asked).not.toContain('goes-east')
+      expect(asked).toContain('goes-west')
+    } finally {
+      clock.mockRestore()
     }
   })
 

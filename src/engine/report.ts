@@ -47,7 +47,7 @@
  * the radar passes stay what geometry says. They are never the lead photo, so they hold nothing else either.
  */
 import { MS_PER_DAY } from '@/lib/geo'
-import { ensureTz, geoCapture, latestGeoFrame, searchCapturesDetailed, searchRadar, sentinel2PlanCovers, spotCheck } from '@/imagery'
+import { ensureTz, geoCapture, geoCaptureFromItem, latestGeoFrame, searchCapturesDetailed, searchRadar, sentinel2PlanCovers, spotCheck } from '@/imagery'
 import type { Capture, GeoWatcher, LatLon, Pass, Place, ProgressEvent, Report } from '@/types'
 import { featuredSats, getRow, getSatInfo, loadCatalog, type LoadedCatalog } from './catalog'
 import { satrecFor } from './sgp4'
@@ -102,6 +102,11 @@ function checkSpots(captures: Capture[], place: LatLon, budgetMs: number, signal
 export interface ReportOptions {
   days?: number
   now?: number
+  /**
+   * A geostationary image this report must hold whatever is newest now: the one a shared link carries. Its watcher's
+   * scan is built for that frame (not searched for), so the link opens on the picture that was shared.
+   */
+  geoItem?: { norad: number; collection: string; itemId: string }
   onProgress?: (e: ProgressEvent) => void
   /**
    * Called before the final result with a complete report that lacks only the GIBS weather-mosaic matches
@@ -489,11 +494,18 @@ export async function computeReport(place: Place, opts: ReportOptions = {}): Pro
   // older one (a shared link's).
   const geoShots: { pass: Pass; capture: Capture }[] = []
   let onGeoShot: (() => void) | undefined
+  const wanted = opts.geoItem
+  if (wanted) {
+    const capture = geoCaptureFromItem(wanted.collection, wanted.itemId, latLon, wanted.norad)
+    const pass = capture && geoScanPass(wanted.norad, latLon, capture.datetime, capture.id)
+    if (capture && pass) geoShots.push({ pass, capture })
+  }
   if (Math.abs(Date.now() - windowEnd) < GEO_LIVE_WINDOW_MS) {
     void geoP.then((watchers) => {
       for (const g of watchers) {
         const source = g.frames
-        if (!source || g.rim) continue
+        // One image per watcher: the shared one stands in for its newest.
+        if (!source || g.rim || geoShots.some((x) => x.pass.norad === g.norad)) continue
         latestGeoFrame(source, latLon, GEO_FRAME_PROBE, { signal })
           .then((frame) => {
             if (!frame || signal?.aborted) return
