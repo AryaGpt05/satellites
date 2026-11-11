@@ -129,6 +129,7 @@ export function PhotoFrame({ photo, model, view, load, current, reveal, chips, e
           alt={alt}
           startAt={reveal === 'hero' ? 'hero' : 'capture'}
           tc={pass.tClosest}
+          awaiting={pass.geostationary ? 'scan' : 'pass'}
           seenKey={seenKey}
           gateOnVisible={gateOnVisible}
           className={s.fill}

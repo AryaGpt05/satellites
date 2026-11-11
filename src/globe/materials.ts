@@ -47,6 +47,8 @@ export interface RibbonLook {
   kind: 0 | 1 | 2
   color: Color
   fill: number
+  /** Draw the ground track down the middle (default). Off for a geostationary scan, whose "track" is only the line's path. */
+  noTrack?: boolean
 }
 
 /** Swath ribbon on the surface (shaders/overlay.ts). Shares the scene's sun, cloud map and drift uniforms. */
@@ -70,6 +72,7 @@ export function createRibbonMaterial(
       uColor: { value: look.color },
       uEdgeColor: { value: lin(palette.bone) },
       uFill: { value: look.fill },
+      uTrack: { value: look.noTrack ? 0 : 1 },
       uOpacity: { value: 0 },
       uSunDir: shared.uSunDir,
       uClouds: shared.uCloudMap,

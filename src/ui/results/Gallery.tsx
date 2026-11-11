@@ -28,7 +28,7 @@ import { coverPinKey, pinCover, pinnedOrder, useGallery } from './gallery'
 import { warmPhoto } from './images'
 import { GALLERY_NEAR } from './warm'
 import { filterCounts, filterPhotos, cardUrl, cropWidthKm, type Photo, type PhotoFilter } from './lib/photos'
-import { productLabel } from './lib/captures'
+import { isGeoFrame, pixelLabel, productLabel } from './lib/captures'
 import { dec1, int } from './lib/copy'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from './lib/time'
 import type { ResultsModel } from './model'
@@ -572,7 +572,7 @@ const Slide = memo(function Slide({ photo, model, context, mobile, index, total,
           <span className={s.mLine}>
             {/* Phones, and a narrow card (PH-14), set the time at the head of the second line, so the first never cuts it. */}
             {mobile ? `${t.time} · ` : <span className={s.capTimeB}>{`${t.time} · `}</span>}
-            {int(capture.gsdM)} m
+            {pixelLabel(capture)}
             <span className={s.dim}>
               {' · '}
               <Ago t={when} base={model.clock} />
@@ -683,5 +683,9 @@ function cloudedWords(p: Photo, cover: boolean): string {
 export function credit(c: Photo['capture']): string {
   if (c.collection === 'sentinel-2-l2a' || c.collection === 'sentinel-1-rtc') return `Contains modified Copernicus Sentinel data ${new Date(c.datetime || Date.now()).getUTCFullYear()}`
   if (c.collection === 'landsat-c2-l2') return 'Landsat: USGS / NASA'
+  // The attribution EUMETSAT's data policy asks for (article 6.3).
+  if (c.provider === 'eumetsat') return `Contains modified EUMETSAT Meteosat data ${new Date(c.datetime || Date.now()).getUTCFullYear()}`
+  if (c.collection === 'gibs-himawari') return 'Himawari: JMA, via NASA GIBS'
+  if (isGeoFrame(c)) return 'GOES: NOAA / CIRA, via NASA GIBS'
   return 'NASA GIBS / EOSDIS'
 }

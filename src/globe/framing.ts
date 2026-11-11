@@ -401,6 +401,50 @@ export function chasePose(
   }
 }
 
+/** A geostationary scan's wide view: how much ground it shows, how far it leans from the place toward the satellite's seat. */
+const GEO_SCAN_GROUND_KM = 5200
+const GEO_SCAN_LEAN = 0.22
+const GEO_SCAN_TILT = 14 * DEG
+
+/**
+ * The approach of a geostationary scan (acquisition.ts): nothing flies past, so there is nothing to chase. The view
+ * stands back over the region, north-up and nearly top-down, leaning a little toward the point under the satellite
+ * (`sub`), and watches the scan line come across the disc; `dive` (acquisition.geoDiveAt) then brings it in onto the
+ * frame as the line reaches the place, exactly as the chase's dive does for a passing satellite.
+ */
+export function geoScanPose(
+  vp: Viewport,
+  insets: Insets,
+  sub: { lat: number; lon: number },
+  place: { lat: number; lon: number },
+  dive = 0,
+  halfKm = 0,
+  focus: { lat: number; lon: number } = place,
+): PoseSpec {
+  const stacked = isPhone(vp)
+  const f = freeRect(vp, insets)
+  latLonToDir(place.lat, place.lon, _s)
+  _m.copy(_s).lerp(latLonToDir(sub.lat, sub.lon, _f), GEO_SCAN_LEAN)
+  let range = clamp(rangeForGroundKm(vp, f, GEO_SCAN_GROUND_KM), 0.1, 1.9)
+  let tilt = GEO_SCAN_TILT
+  const k = halfKm > 0 ? clamp(dive, 0, 1) : 0
+  if (k > 0) {
+    _m.lerp(latLonToDir(focus.lat, focus.lon, _f), k)
+    const tight = Math.min(range, rangeForGroundKm(vp, f, (2 * halfKm) / DIVE_FILL))
+    range = Math.exp(Math.log(range) + (Math.log(tight) - Math.log(range)) * k)
+    tilt += ((stacked ? DIVE_TILT.stacked : DIVE_TILT.desktop) * 0.5 - tilt) * k
+  }
+  const r = _m.length()
+  return {
+    lat: Math.asin(clamp(_m.y / r, -1, 1)) * RAD,
+    lon: Math.atan2(-_m.z, _m.x) * RAD,
+    headingDeg: 0,
+    range,
+    tilt,
+    ...freeShift(vp, insets),
+  }
+}
+
 /**
  * The settled view of an imaged pass: near top-down, north-up, centred on the place, framing the image painted onto
  * the globe (2 × halfKm square). It may come closer than the base map's floor: the painted image (and the regional

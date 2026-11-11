@@ -25,11 +25,15 @@ export type TelemetryDeps = typeof Deps
 export function reportCounts(r: Pick<Report, 'passes' | 'archiveFailed' | 'partial'>): Props {
   const sats = new Set<number>()
   const photos = new Set<string>()
+  let passes = 0
   for (const p of r.passes) {
+    // Overflights only, as before geostationary scans were listed: the series stays comparable.
+    if (p.geostationary) continue
+    passes++
     sats.add(p.norad)
     if (p.verdict === 'imaged' && p.captureId) photos.add(p.captureId)
   }
-  return { sats: sats.size, photos: photos.size, passes: r.passes.length, partial: !!r.partial, archive_failed: !!r.archiveFailed }
+  return { sats: sats.size, photos: photos.size, passes, partial: !!r.partial, archive_failed: !!r.archiveFailed }
 }
 
 /** search source: typed suggestion / example chip / Surprise me / dropped pin / near me / deep link / share link. */

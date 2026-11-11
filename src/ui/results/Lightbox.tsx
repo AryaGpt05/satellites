@@ -36,7 +36,7 @@ import { coverPinKey, pinnedOrder, useGallery } from './gallery'
 import { decodedPhoto, hasPhotoElement, loadPhoto } from './images'
 import { Img } from './Img'
 import { cardSpec, cardUrl, cropWidthKm, filterPhotos, HIRES_INTENT_ZOOM, hiResHelps, hiResUrl, photoHeadingDeg, placeOffset, thumbUrl, type Photo } from './lib/photos'
-import { productLabel, scaleBarKm, sensorName } from './lib/captures'
+import { pixelLabel, productLabel, scaleBarKm, sensorName } from './lib/captures'
 import { dec1, int } from './lib/copy'
 import { fmtLocalDay, fmtLocalTime, zoneAbbr } from './lib/time'
 import type { ResultsModel } from './model'
@@ -640,7 +640,7 @@ function Viewer({ id, model, mobile, startKey, from, onReplay }: ViewerProps) {
           {meta.name} · {sensorName(photo.capture)}
         </span>
         <span className={cx(s.chip, s.tr)} title={panKeys.has(photo.key) ? "Pan-sharpened with Landsat's 15 m band" : undefined}>
-          {panKeys.has(photo.key) ? 15 : int(photo.capture.gsdM)} m / pixel
+          {panKeys.has(photo.key) ? '15 m' : pixelLabel(photo.capture)} / pixel
         </span>
         <span className={s.scale}>
           <span ref={barRef} className={s.scaleBar} />

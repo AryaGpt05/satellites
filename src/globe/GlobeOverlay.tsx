@@ -102,7 +102,10 @@ export function GlobeOverlay({ runtime }: { runtime: GlobeRuntime }) {
   // The capture line under the coordinates: the image's local time and its ground resolution.
   const report = useApp((st) => st.report)
   const cap = pass && pass.verdict === 'imaged' ? captureOf(report, pass) : undefined
-  const acqLine = pass && cap ? `ACQUIRED ${imagedAt(pass.tClosest).replace(/^IMAGED /, '')} · ${Math.round(cap.gsdM)} M` : undefined
+  // A geostationary scan's crossing is known to about a minute (engine geostationary.ts), and its pixel is in km.
+  const acqAt = pass ? imagedAt(pass.tClosest).replace(/^IMAGED /, '') : ''
+  const acqLine =
+    pass && cap ? `ACQUIRED ${pass.geostationary ? `≈ ${acqAt.replace(/^(\d\d:\d\d):\d\d/, '$1')}` : acqAt} · ${cap.gsdM >= 1000 ? `${Math.round(cap.gsdM / 1000)} KM` : `${Math.round(cap.gsdM)} M`}` : undefined
 
   return (
     <div ref={root} className={s.overlay} aria-hidden>

@@ -72,6 +72,8 @@ export interface ResultsModel {
   windowPhotos: number
   /** Photo key by pass id (imaged passes with a capture) */
   photoByPass: Map<string, string>
+  /** The geostationary scans (each public watcher's newest image, as a pass that can be opened) */
+  geoScans: Pass[]
 }
 
 interface PlaceModel {
@@ -164,6 +166,7 @@ export function buildResultsModel(report: Report, place = cachedPlace(report.pla
     cover: set.cover,
     windowPhotos: set.windowCount,
     photoByPass,
+    geoScans: report.passes.filter((p) => p.geostationary),
   }
 }
 

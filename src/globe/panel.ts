@@ -16,6 +16,8 @@ export function panelHalfKm(c: CaptureCollection): number {
   if (c === 'sentinel-2-l2a') return 5
   if (c === 'landsat-c2-l2') return 7.5
   if (c === 'sentinel-1-rtc') return 10
+  // A geostationary frame: its panel photo is the painted image itself (±400 km).
+  if (/^(gibs-(goes-east|goes-west|himawari)|eumetsat-meteosat-)/.test(c)) return 400
   return 120
 }
 

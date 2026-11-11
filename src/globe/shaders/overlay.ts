@@ -46,6 +46,7 @@ export const ribbonFragment = glsl`
   uniform vec3 uEdgeColor;    // bone: predicted (unswept) edges
   uniform vec3 uFrontColor;   // the scan line's core (HDR signal)
   uniform float uFill;
+  uniform float uTrack;     // 1 = draw the ground track line, 0 = not (a geostationary scan has none)
   uniform float uOpacity;
   uniform vec3 uSunDir;
   uniform sampler2D uClouds;
@@ -84,7 +85,7 @@ export const ribbonFragment = glsl`
     float w = uPx;                                // 1 CSS px
     float edgeD = 1.0 - abs(vSide);
     float edge = line(edgeD, fwS, w) * step(0.5, abs(vSide));
-    float track = line(vSide, fwS, w);
+    float track = line(vSide, fwS, w) * uTrack;
 
     // Dashes for the field of regard: ~6 px on, 5 px off along-track, in screen space.
     float dashPx = vAlong / max(fwA, 1e-6) / max(uPx, 1.0);

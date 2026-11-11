@@ -66,10 +66,11 @@ import {
 } from './cameraMath'
 import { applyControls, attachControls, createControlInput, createControlState } from './controls'
 import { propagate } from './data'
-import { diveAt, type AcqState } from './acquisition'
+import { diveAt, geoDiveAt, type AcqState } from './acquisition'
 import {
   acquiredPose,
   chasePose,
+  geoScanPose,
   coarserLevel,
   fovFor,
   freeRect,
@@ -211,6 +212,8 @@ function targetFor(
       if (pass && place && acq.passId === pass.id) {
         if (chasing) {
           const sat = propagate(pass.norad, simTime)
+          // A geostationary scan: the satellite stays put, the view stands back and the scan line comes to it.
+          if (sat && pass.geostationary) return geoScanPose(vp, insets, sat, place, geoDiveAt(simTime, acq.tc, acq.speedKmS), acq.halfKm, focusOf(acq, place))
           if (sat) {
             const dive = diveAt(simTime, acq.tc, acq.speedKmS, acq.halfKm)
             return chasePose(vp, insets, latLonToWorld(sat.lat, sat.lon, 1 + sat.altKm / EARTH_RADIUS_KM, _sat), place, dive, acq.halfKm, focusOf(acq, place))

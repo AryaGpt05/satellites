@@ -61,6 +61,8 @@ interface Props {
   startAt?: 'now' | 'arrival' | 'hero' | 'capture'
   /** Closest approach (sim ms) for startAt 'capture' */
   tc?: number
+  /** What the frame waits for before it develops: 'pass' (default), or 'scan' for a geostationary image */
+  awaiting?: 'pass' | 'scan'
   /** Marked as seen (useOnce key) when the reveal starts, so a remount shows the picture at once */
   seenKey?: string
   /** Draw the finished picture at once (no scan) */
@@ -103,6 +105,7 @@ export function PushbroomReveal({
   caption,
   acquiringNote,
   startAt = 'arrival',
+  awaiting = 'pass',
   tc,
   seenKey,
   instant = false,
@@ -397,7 +400,7 @@ export function PushbroomReveal({
         </span>
         {startAt === 'capture' && tc !== undefined ? (
           <span className={cx(s.awaitChip, phase === 'waiting' && s.scanChipOn)} aria-hidden>
-            Awaiting pass
+            Awaiting {awaiting}
             <b ref={countRef}>{awaitText(tc)}</b>
           </span>
         ) : null}

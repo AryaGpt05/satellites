@@ -269,6 +269,9 @@ export interface PassCopyCtx {
   now?: number
 }
 
+/** "0.2°W" / "140.8°E": a geostationary seat. */
+const fmtLonShort = (lon: number) => `${Math.abs(lon).toFixed(1)}°${lon < 0 ? 'W' : 'E'}`
+
 /** After this long, a missing scene is not "lag": it doesn't exist. */
 const SCENE_LAG_MS = 48 * 3_600_000
 
@@ -310,6 +313,21 @@ export function passSentences({ pass: p, meta, capture, timeZone: tz, placeLabel
   const out: Sentence[] = []
   switch (p.verdict) {
     case 'imaged': {
+      if (p.geostationary) {
+        // It never crosses: it sits, and scans. The line's crossing is good to about a minute (geostationary.ts).
+        const every = meta.profile?.cadenceMin
+        const lon = p.track[0]?.lon
+        out.push([
+          `${name} doesn’t pass. It sits `,
+          num(int(p.altitudeKm), 'km'),
+          lon !== undefined ? ` above the equator at ${fmtLonShort(lon)}` : ' above the equator',
+          every ? ' and scans the whole face of the Earth below it every ' : ' and scans the whole face of the Earth below it.',
+          ...(every ? [num(int(every), 'minutes'), '.'] : []),
+        ])
+        out.push([`This scan’s line reached ${placeLabel} at about `, localClock(p.tClosest, tz, false), `, moving ${compassWord(p.headingDeg)}.`])
+        if (capture?.band === 'infrared') out.push(['It was dark here, so this is infrared: cloud tops by temperature, colder is lighter.'])
+        break
+      }
       if (capture && isDailyMosaic(capture)) {
         out.push([`${name} crossed `, ...where(p), ' at ', localClock(p.tClosest, tz), ...moving])
         out.push([

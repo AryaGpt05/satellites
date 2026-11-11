@@ -187,7 +187,7 @@ export function cardSpec(pass: Pass, report: Report, meta: SatMeta, timeZone: st
  */
 export function summaryFacts(report: Report, placeLabel: string, meta: MetaFn): SummaryLinkInput & { best?: SummaryLinkInput['best'] & { altitudeKm: number; capture: Capture } } {
   const counts = { imaged: 0, likely: 0, could: 0, overhead: 0 }
-  for (const p of report.passes) counts[p.verdict]++
+  for (const p of report.passes) if (!p.geostationary) counts[p.verdict]++
   const head = headline(report, meta)
   const look = pickBestLook(report)
   const best =

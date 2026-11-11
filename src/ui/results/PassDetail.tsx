@@ -15,7 +15,7 @@
 import { startTransition, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { isRadarUrl, isTonedUrl, spotCloud, tonedImageBlob } from '@/imagery'
 import type { Capture, Pass, SpotCloud } from '@/types'
-import { Glyph, Readout, Rule, ScrambleOnce, cx, fmtNorad, fmtUtc } from '@/ui/system'
+import { Glyph, Readout, Rule, ScrambleOnce, cx, fmtLon, fmtNorad, fmtUtc } from '@/ui/system'
 import { reportNow } from './Ago'
 import { decodedPhoto } from './images'
 import { cardUrl } from './lib/photos'
@@ -23,7 +23,7 @@ import { Gallery } from './Gallery'
 import { PassPlan } from './PassPlan'
 import { ReplayControls } from './ReplayControls'
 import { Paragraph } from './Text'
-import { archiveName, cropSpec, downloadUrl, isDailyMosaic, isRadar, slug, captureFor } from './lib/captures'
+import { archiveName, cropSpec, downloadUrl, isDailyMosaic, isGeoFrame, isRadar, pixelLabel, slug, captureFor } from './lib/captures'
 import { compassAbbr, dec1, dec2, int, passSentences } from './lib/copy'
 import type { SatMeta } from './lib/meta'
 import { replayWindow } from './lib/replay'
@@ -107,7 +107,13 @@ function PassBody({ model, pass, entering }: { model: ResultsModel; pass: Pass; 
 
       <section className={cx(r.section, stc, s.prose)} style={st(60)}>
         <Paragraph sentences={sentences} />
-        {capture && !isDailyMosaic(capture) && !isRadar(capture) ? <SpotLine state={cloud} /> : null}
+        {capture && !isDailyMosaic(capture) && !isRadar(capture) && !isGeoFrame(capture) ? <SpotLine state={cloud} /> : null}
+        {capture && isGeoFrame(capture) ? (
+          <p className={r.footnote}>
+            A full-disc image: one picture of everything the satellite can see, at {pixelLabel(capture)} a pixel here. Coarse, but real, and the newest one
+            published; it has taken one like it {meta.profile?.cadenceMin ? `every ${int(meta.profile.cadenceMin)} minutes` : 'every few minutes'} all week.
+          </p>
+        ) : null}
         {capture && isDailyMosaic(capture) ? (
           <p className={r.footnote}>
             A daily mosaic: NASA stitches each day’s swaths into one picture at {int(capture.gsdM)} m per pixel. Coarse, but real, and from this pass’s day.
@@ -229,7 +235,8 @@ function ReadoutStrip({ pass: p, meta, capture, cloud }: { pass: Pass; meta: Sat
   const spot: SpotCloud | undefined = cloud === 'checking' || cloud === 'none' ? capture?.spot : cloud
   let last: { label: string; value: string; unit?: string }
   // A radar image needs no light: the sun is the fact worth showing (it may well have been night).
-  if (!capture || isRadar(capture)) last = { label: 'Sun', value: `${dec1(p.sunElevationDeg)}°`, unit: p.sunElevationDeg >= 0 ? 'day' : p.sunElevationDeg >= -6 ? 'twilight' : 'night' }
+  if (capture && isGeoFrame(capture)) last = { label: 'Band', value: capture.band === 'infrared' ? 'Infrared' : capture.band === 'visible' ? 'Visible' : 'Colour' }
+  else if (!capture || isRadar(capture)) last = { label: 'Sun', value: `${dec1(p.sunElevationDeg)}°`, unit: p.sunElevationDeg >= 0 ? 'day' : p.sunElevationDeg >= -6 ? 'twilight' : 'night' }
   else if (isDailyMosaic(capture)) last = { label: 'Cloud', value: '—', unit: 'mosaic' }
   else if (cloud === 'checking' && !capture.spot) last = { label: 'Cloud at spot', value: '…' }
   else if (spot && spot !== 'unknown')
@@ -237,8 +244,11 @@ function ReadoutStrip({ pass: p, meta, capture, cloud }: { pass: Pass; meta: Sat
   else last = { label: 'Cloud', value: capture.cloudCoverPct !== undefined ? `${int(capture.cloudCoverPct)}%` : '—', unit: capture.cloudCoverPct !== undefined ? 'scene' : undefined }
   const cells = [
     { label: 'Altitude', value: int(p.altitudeKm), unit: 'km' },
-    { label: 'Off-nadir', value: `${dec1(p.offNadirDeg)}°` },
-    { label: 'Pixel', value: res !== undefined ? (res < 1 ? dec2(res) : int(res)) : '—', unit: res !== undefined ? 'm' : undefined },
+    // A geostationary imager is never overhead: how high it stands in your sky says more than its mirror's angle.
+    p.geostationary ? { label: 'In your sky', value: `${dec1(p.elevationDeg)}°`, unit: 'up' } : { label: 'Off-nadir', value: `${dec1(p.offNadirDeg)}°` },
+    res !== undefined && res >= 1000
+      ? { label: 'Pixel', value: int(res / 1000), unit: 'km' }
+      : { label: 'Pixel', value: res !== undefined ? (res < 1 ? dec2(res) : int(res)) : '—', unit: res !== undefined ? 'm' : undefined },
     last,
   ]
   return (
@@ -265,7 +275,7 @@ function useSpotCloud(capture: Capture | undefined, place: { lat: number; lon: n
   const known = capture?.spot
   const [state, setState] = useState<CloudState>(() => known ?? 'none')
   useEffect(() => {
-    if (!capture || isDailyMosaic(capture) || isRadar(capture)) return setState('none')
+    if (!capture || isDailyMosaic(capture) || isRadar(capture) || isGeoFrame(capture)) return setState('none')
     if (capture.spot) return setState(capture.spot)
     const ctl = new AbortController()
     setState('checking')
@@ -303,6 +313,32 @@ function Geometry({ pass: p, meta, tz, model, entering }: { pass: Pass; meta: Sa
   const w = replayWindow(p)
   const t = model.times(p)
   void tz
+  if (p.geostationary) {
+    // A scan, not an overflight: where the satellite sits, and how its line crossed the place (to about a minute).
+    const [, startUtc] = fmtUtc(p.tStart).split(' ')
+    const [, endUtc] = fmtUtc(p.tEnd).split(' ')
+    const geoCells: { label: string; value: ReactNode; unit?: string; wide?: boolean }[] = [
+      { label: 'Scan line here · UTC', value: `≈ ${utcTime.slice(0, 5)}`, unit: utcDate },
+      { label: 'Scan line here · local', value: `≈ ${t.time}`, unit: `${t.day} ${t.zone}` },
+      { label: 'Above the equator at', value: fmtLon(p.track[0]?.lon ?? 0, 1) },
+      { label: 'In your sky', value: `${dec1(p.elevationDeg)}°`, unit: `up · ${compassAbbr(p.azimuthDeg)}` },
+      { label: 'Scan direction', value: p.headingDeg === 180 ? 'North → south' : 'South → north' },
+      { label: 'Line speed here', value: dec1(p.groundSpeedKmS), unit: 'km/s' },
+      { label: 'Sun elevation', value: `${dec1(p.sunElevationDeg)}°`, unit: p.sunElevationDeg >= 0 ? 'Day' : p.sunElevationDeg >= -6 ? 'Twilight' : 'Night' },
+      { label: 'Coverage', value: 'Full disc', unit: prof?.cadenceMin ? `every ${int(prof.cadenceMin)} min` : undefined },
+      { label: 'This scan', value: `${startUtc.slice(0, 5)} → ${endUtc.slice(0, 5)}`, unit: `UTC · ${fmtDuration(p.tEnd - p.tStart)}`, wide: true },
+      { label: 'NORAD · scan', value: <ScrambleOnce text={fmtNorad(p.norad)} />, unit: p.id, wide: true },
+    ]
+    return (
+      <div className={r.grid}>
+        {geoCells.map((c, i) => (
+          <div key={c.label} className={cx(r.cell, c.wide && r.cellWide, entering && s.st)} style={st(Math.min(300, 120 + i * 20))}>
+            <Readout label={c.label} value={c.value} unit={c.unit} />
+          </div>
+        ))}
+      </div>
+    )
+  }
   const cells: { label: string; value: ReactNode; unit?: string; wide?: boolean }[] = [
     { label: 'Closest · UTC', value: utcTime, unit: utcDate },
     { label: 'Closest · local', value: t.timeS, unit: `${t.day} ${t.zone}` },

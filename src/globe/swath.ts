@@ -61,6 +61,12 @@ export function fieldModelFor(info: SatInfo | undefined): FieldModel {
   return { mode: 'none', halfWidthKm: () => 0 }
 }
 
+/**
+ * A geostationary scan (a pass with `geostationary`: its track is the scan line's path): the line reaches right
+ * across the disc, so the ribbon is as wide as the region in view and its edges stay off screen.
+ */
+export const GEO_SCAN_FIELD: FieldModel = { mode: 'swath', halfWidthKm: () => 5000 }
+
 // ───────────────────────────── track ─────────────────────────────
 
 /**

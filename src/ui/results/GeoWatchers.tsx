@@ -11,8 +11,8 @@
  */
 import { useEffect, useState } from 'react'
 import { isEumetsatSource, latestGeoFrame, type GeoFrameBand } from '@/imagery'
-import type { GeoWatcher, LatLon, Place } from '@/types'
-import { Glyph, LiveDot, fmtLon } from '@/ui/system'
+import type { GeoWatcher, LatLon, Pass, Place } from '@/types'
+import { Glyph, LiveDot, cx, fmtLon } from '@/ui/system'
 import { Img } from './Img'
 import { int } from './lib/copy'
 import { fmtRelative } from './lib/time'
@@ -64,30 +64,53 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
 /** "infrared " for a frame that is cloud-top temperature, for the picture's alt text. */
 export const bandWords = (band: GeoFrameBand) => (band === 'infrared' ? 'infrared ' : '')
 
-export function GeoWatchers({ watchers, place, days }: { watchers: GeoWatcher[]; place: Place; days: number }) {
+/**
+ * `scans`: the report's geostationary scan passes (the newest image of a watcher, as something that can be opened).
+ * A row that has one is a button: it opens the scan like a pass (its replay, its image), as the pass list's rows do.
+ */
+export function GeoWatchers({ watchers, place, days, scans, selectedId, onSelect }: { watchers: GeoWatcher[]; place: Place; days: number; scans?: readonly Pass[]; selectedId?: string; onSelect?: (p: Pass) => void }) {
   if (!watchers.length)
     return <p className={s.none}>No operational geostationary weather imager sees this place above 5° elevation.</p>
   return (
     <div className={s.root}>
       <ul className={s.list}>
-        {watchers.map((g) => (
-          <li key={g.norad} className={s.item}>
-            <Frame watcher={g} place={place} />
-            <div className={s.info}>
-              <div className={s.nameLine}>
-                <Glyph name="weather-geo" size={13} />
-                <span className={s.name}>{g.name}</span>
-                <span className={s.operator}>{g.operator}</span>
+        {watchers.map((g) => {
+          const scan = onSelect ? scans?.find((p) => p.norad === g.norad) : undefined
+          const body = (
+            <>
+              <Frame watcher={g} place={place} />
+              <div className={s.info}>
+                <div className={s.nameLine}>
+                  <Glyph name="weather-geo" size={13} />
+                  <span className={s.name}>{g.name}</span>
+                  <span className={s.operator}>{g.operator}</span>
+                </div>
+                <div className={s.meta}>
+                  {fmtLon(g.subLon, 1)} · {g.elevationDeg.toFixed(1)}° up · every {int(g.cadenceMin)} min
+                </div>
+                <div className={s.count}>
+                  <span className={s.countNum}>{int(g.imagesInWindow)}</span> images {Math.round(days) === 7 ? 'this week' : `in ${int(days)} days`}
+                </div>
               </div>
-              <div className={s.meta}>
-                {fmtLon(g.subLon, 1)} · {g.elevationDeg.toFixed(1)}° up · every {int(g.cadenceMin)} min
-              </div>
-              <div className={s.count}>
-                <span className={s.countNum}>{int(g.imagesInWindow)}</span> images {Math.round(days) === 7 ? 'this week' : `in ${int(days)} days`}
-              </div>
-            </div>
-          </li>
-        ))}
+              {scan ? (
+                <span className={s.open} aria-hidden>
+                  <Glyph name="play" size={10} /> <span className={s.openText}>Replay</span>
+                </span>
+              ) : null}
+            </>
+          )
+          return (
+            <li key={g.norad} className={s.item}>
+              {scan ? (
+                <button type="button" className={cx(s.row, s.rowBtn, selectedId === scan.id && s.selected)} onClick={() => onSelect?.(scan)} aria-label={`${g.name}: replay its latest image`}>
+                  {body}
+                </button>
+              ) : (
+                <div className={s.row}>{body}</div>
+              )}
+            </li>
+          )
+        })}
       </ul>
       {watchers.some((g) => g.frames && isEumetsatSource(g.frames)) ? (
         <p className={s.credit}>Contains modified EUMETSAT Meteosat data {new Date().getUTCFullYear()}</p>

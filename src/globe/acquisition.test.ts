@@ -8,6 +8,7 @@ import {
   decalSpecFor,
   DIVE_KM,
   diveAt,
+  geoDiveAt,
   imageFocus,
   fmtCountdown,
   MIN_APPROACH_S,
@@ -107,12 +108,22 @@ describe('acquisition timing', () => {
 })
 
 describe('decal and scan geometry', () => {
-  it('crops per collection, smaller on phones, none for geostationary frames', () => {
+  it("crops per collection, smaller on phones; a geostationary frame is the gallery card's own image on every screen", () => {
     expect(decalSpecFor('sentinel-2-l2a', false)).toEqual({ halfSizeKm: 40, px: 1024 })
     expect(decalSpecFor('landsat-c2-l2', true)).toEqual({ halfSizeKm: 45, px: 768 })
     expect(decalSpecFor('gibs-viirs-noaa20', false)?.halfSizeKm).toBe(300)
     expect(decalSpecFor('sentinel-1-rtc', false)).toEqual({ halfSizeKm: 40, px: 1024 })
-    expect(decalSpecFor('gibs-goes-east', false)).toBeNull()
+    for (const mobile of [false, true]) {
+      expect(decalSpecFor('gibs-goes-east', mobile)).toEqual({ halfSizeKm: 400, px: 1024 })
+      expect(decalSpecFor('eumetsat-meteosat-iodc', mobile)).toEqual({ halfSizeKm: 400, px: 1024 })
+    }
+  })
+
+  it('a geostationary scan dives over thousands of km, not hundreds (its line crosses the disc at tens of km/s)', () => {
+    expect(geoDiveAt(TC - 100_000, TC, 30)).toBe(0) // 3,000 km out: the wide view
+    expect(geoDiveAt(TC - 50_000, TC, 30)).toBeGreaterThan(0.2)
+    expect(geoDiveAt(TC - 10_000, TC, 30)).toBe(1) // 300 km out: on the frame
+    expect(geoDiveAt(TC, TC, 30)).toBe(1)
   })
 
   it('the scan frame sits on the track at closest approach and points along the motion', () => {

@@ -918,7 +918,7 @@ function Overview({ model, mobile, compactTimeline, noSummaryRule = false, wide 
             <Rule index={idx(3)} className={s.rule}>
               Watched continuously
             </Rule>
-            <GeoWatchers watchers={report.geo} place={report.place} days={model.windowDays} />
+            <GeoWatchers watchers={report.geo} place={report.place} days={model.windowDays} scans={model.geoScans} selectedId={selectedId} onSelect={onSelect} />
           </section>
           <section className={s.section}>
             {/* The caveats close the overview (R2R1; phones too, U-2): the passes notch comes up the first screen, and

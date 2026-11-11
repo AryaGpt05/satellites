@@ -125,6 +125,11 @@ export function productLabel(c: Pick<Capture, 'collection' | 'provider' | 'gsdM'
   }
 }
 
+/** A capture's pixel as a label: "10 m", "375 m", "2 km" (a geostationary frame's grid). */
+export function pixelLabel(c: Pick<Capture, 'gsdM'>): string {
+  return c.gsdM >= 1000 ? `${Math.round(c.gsdM / 1000)} km` : `${Math.round(c.gsdM)} m`
+}
+
 /** Archive name for the "View source" link. */
 export function archiveName(c: Pick<Capture, 'provider'>): string {
   switch (c.provider) {

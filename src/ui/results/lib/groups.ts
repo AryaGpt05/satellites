@@ -54,7 +54,8 @@ export function groupPasses(
   ;(opts.photos ?? orderPhotos(report).photos).forEach((ph, i) => ph.pass && photoRank.set(ph.pass.id, i))
   const groups: PassGroup[] = []
   for (const verdict of VERDICTS) {
-    const passes = report.passes.filter((p) => p.verdict === verdict).sort((a, b) => b.tClosest - a.tClosest)
+    // Overflights only: a geostationary scan is opened from its watcher's row and from the gallery, not listed here.
+    const passes = report.passes.filter((p) => p.verdict === verdict && !p.geostationary).sort((a, b) => b.tClosest - a.tClosest)
     if (!passes.length) continue
     const singles: PassItem[] = []
     const bySat = new Map<number, Pass[]>()

@@ -95,11 +95,11 @@ export function createAcqState(): AcqState {
 // ───────────────────────────── the image painted onto the globe ─────────────────────────────
 
 const isDaily = (c: CaptureCollection) => /^gibs-(viirs|modis)-/.test(c)
+const isGeo = (c: CaptureCollection) => /^(gibs-(goes-east|goes-west|himawari)|eumetsat-meteosat-)/.test(c)
 
 /**
  * The decal crop for a capture: large enough to read as a developed strip around the place, small enough that the
  * archive renders it in a second or two. Sentinel-2 items are 110 km tiles, so its crop stays inside one.
- * Geostationary frames are not pass captures (no decal).
  */
 export function decalSpecFor(collection: CaptureCollection, mobile: boolean): { halfSizeKm: number; px: number } | null {
   const px = mobile ? 768 : 1024
@@ -108,6 +108,9 @@ export function decalSpecFor(collection: CaptureCollection, mobile: boolean): { 
   // Sentinel-1 radar: the same strip as Sentinel-2's (its scenes are ~250 × 170 km).
   if (collection === 'sentinel-1-rtc') return { halfSizeKm: 40, px }
   if (isDaily(collection)) return { halfSizeKm: 300, px }
+  // A geostationary frame: the gallery card itself (the same 800 km square at the same size, so one download serves
+  // both), painted where the scan line crosses the place.
+  if (isGeo(collection)) return { halfSizeKm: 400, px: 1024 }
   return null
 }
 
@@ -320,6 +323,15 @@ export function diveAt(t: number, tc: number, speedKmS: number, halfKm: number):
   if (halfKm <= 0 || halfKm > 100) return 0
   const d = (Math.abs(t - tc) / 1000) * speedKmS
   const u = clamp((DIVE_KM.far - d) / (DIVE_KM.far - DIVE_KM.near), 0, 1)
+  return Math.min(1, u * u * u * (u * (6 * u - 15) + 10))
+}
+
+/** The same for a geostationary scan, whose line crosses the disc at tens of km/s over an 800 km frame. */
+export const GEO_DIVE_KM = { far: 2600, near: 520 }
+
+export function geoDiveAt(t: number, tc: number, speedKmS: number): number {
+  const d = (Math.abs(t - tc) / 1000) * speedKmS
+  const u = clamp((GEO_DIVE_KM.far - d) / (GEO_DIVE_KM.far - GEO_DIVE_KM.near), 0, 1)
   return Math.min(1, u * u * u * (u * (6 * u - 15) + 10))
 }
 

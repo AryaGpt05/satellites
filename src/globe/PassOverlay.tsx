@@ -36,7 +36,7 @@ import { createCurtainMaterial, createRibbonMaterial, createSpacecraftMaterial, 
 import { FRAME, useRuntime } from './runtime'
 import { SatGlyph, useSatAnchor, type MarkTone, type SatTrackFn } from './SatMarker'
 import { buildSpacecraftGeometry, SPACECRAFT_SPAN } from './spacecraft'
-import { buildRibbon, fieldModelFor } from './swath'
+import { buildRibbon, fieldModelFor, GEO_SCAN_FIELD } from './swath'
 
 /** Trail length behind the satellite (≈ 2,500 km: enough to read the direction, short of the screen edge), and its sampling. */
 const TRAIL_MS = 6 * 60_000
@@ -109,12 +109,14 @@ function PassScene({ pass, place, onGone }: { pass: Pass; place?: { lat: number;
   const rt = useRuntime()
   const info = getSatInfo(pass.norad)
   const category: SatCategory = info?.category ?? 'other'
-  const field = useMemo(() => fieldModelFor(info), [info])
-  const look = useMemo(() => lookFor(pass, category, field.mode), [pass, category, field.mode])
+  const field = useMemo(() => (pass.geostationary ? GEO_SCAN_FIELD : fieldModelFor(info)), [info, pass.geostationary])
+  const look = useMemo(() => ({ ...lookFor(pass, category, field.mode), noTrack: !!pass.geostationary }), [pass, category, field.mode])
   const pointable = field.mode === 'regard' || pass.verdict === 'could'
   // Imaging spacecraft get the model and the curtain; crewed / ambient objects keep their glyph and a nadir line.
   const imager = category !== 'crewed' && category !== 'other'
-  const curtainOn = imager && field.mode !== 'none'
+  // A geostationary imager is 35,786 km up, behind any view of the ground: no model in frame, and no curtain (its
+  // foot would be the scan line a hemisphere away from its apex). The scan line on the surface says it.
+  const curtainOn = imager && field.mode !== 'none' && !pass.geostationary
 
   // ── ribbon
   const ribbon = useMemo(() => {

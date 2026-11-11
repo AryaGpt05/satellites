@@ -15,10 +15,75 @@
   border-top: 1px solid var(--line);
 }
 .item {
+  border-bottom: 1px solid var(--line);
+}
+.row {
+  position: relative;
   display: flex;
   gap: 14px;
+  width: 100%;
   padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+/* A watcher with an image opens like a pass list row: ink-2 under the pointer, the signal rule when pressed or open. */
+.rowBtn {
+  cursor: pointer;
+  transition: background-color var(--d-hover) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) and (pointer: fine) {
+  .rowBtn:hover {
+    background: var(--ink-2);
+  }
+  .rowBtn:hover .frame {
+    border-color: var(--bone-3);
+  }
+  .rowBtn:hover .open {
+    color: var(--bone);
+  }
+}
+.rowBtn:focus-visible {
+  outline-offset: -1px;
+}
+.rowBtn:active,
+.selected,
+.selected:hover {
+  background: var(--ink-2);
+}
+.rowBtn:active {
+  transition-duration: 0ms;
+}
+.rowBtn:active::before,
+.selected::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--signal);
+}
+/* The gallery card's own word for it. */
+.open {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+  font-family: var(--font-mono);
+  font-stretch: 87.5%;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--signal);
+  transition: color var(--d-hover) var(--ease-out);
+}
+/* Phones: the row's meta line needs the width, so the control is its glyph (the whole row is the target). */
+@media (max-width: 760px) {
+  .openText {
+    display: none;
+  }
 }
 /* As wide as the frame, whatever the line under it says ("31 min ago" runs a little into the gap), so every row's
    text starts on one edge whether or not it has a picture. */
