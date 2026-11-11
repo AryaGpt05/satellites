@@ -166,6 +166,7 @@ export interface TrackPoint {
  * Imagery collections we can show real pixels from.
  *  - STAC (Planetary Computer / Earth Search): per-scene, 10–30 m
  *  - NASA GIBS: daily VIIRS/MODIS true-colour mosaics (250–375 m) and 10-min geostationary GeoColor (1–2 km)
+ *  - Sentinel-1 radar (Planetary Computer `sentinel-1-rtc`): per-scene backscatter, shown at 20 m; not a photograph
  */
 export type CaptureCollection =
   | 'sentinel-2-l2a'
@@ -178,6 +179,7 @@ export type CaptureCollection =
   | 'gibs-goes-east'
   | 'gibs-goes-west'
   | 'gibs-himawari'
+  | 'sentinel-1-rtc'
 
 /** Classification of the pixel at the searched place in a capture ('cirrus' = thin cirrus, Sentinel-2 SCL class 10). */
 export type SpotCloud = 'clear' | 'cirrus' | 'cloud' | 'shadow' | 'unknown'

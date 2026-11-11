@@ -4,6 +4,7 @@
  * Contract (docs/ARCHITECTURE.md):
  *   searchCaptures   Sentinel-2 + Landsat scenes (Planetary Computer STAC; Earth Search fallback)
  *   searchClearScenes nearly cloud-free Sentinel-2 + Landsat scenes, newest first (the clear cover)
+ *   searchRadar      Sentinel-1 radar images (Planetary Computer `sentinel-1-rtc`), one per overflight
  *   weatherCaptures  NASA GIBS daily VIIRS/MODIS mosaics for daytime weather-LEO passes (pixel-verified)
  *   geoImageUrl      GOES-East/West GeoColor or Himawari frame at a time (GIBS)
  *   spotCloud        cloud / shadow / clear at the exact pixel (SCL or QA_PIXEL)
@@ -14,7 +15,7 @@
  * notes, the newest verified geostationary frame and GIBS's published frame list, URL builders,
  * classifiers, the fetch helper).
  */
-export { searchCaptures, searchCapturesDetailed, searchClearScenes, sentinel2PlanCovers, normalizePlatform, noradForPlatform, PLATFORM_NORAD } from './stac'
+export { searchCaptures, searchCapturesDetailed, searchClearScenes, searchRadar, sentinel2PlanCovers, normalizePlatform, noradForPlatform, PLATFORM_NORAD } from './stac'
 export type { CaptureSearchResult } from './stac'
 
 export { weatherCaptures, weatherCandidates, verifyWeatherCapture, geoImageUrl, latestGeoImage, geoFrames, geoFrameCandidates, geoFrameTime, utcDate, GIBS_LAYERS, GIBS_DAILY_BY_NORAD, GEO_SAFE_LAG_MS, isGibsCollection } from './gibs'
@@ -32,6 +33,7 @@ export type { ImageProbe } from './image'
 export { gibsWmsUrl, gibsDomainsUrl, worldviewUrl, pcItemMapUrl } from './endpoints'
 export { pcCropUrl, isTonedUrl } from './pcCrop'
 export { panSharpUrl, isPanSharpUrl } from './panUrl'
+export { radarCropUrl, isRadarUrl, RADAR_COLLECTION } from './radar'
 export type { CropOpts } from './endpoints'
 
 export { fetchJson, withRetry, HttpError, TimeoutError, isAbortError } from './net'

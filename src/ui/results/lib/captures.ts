@@ -88,6 +88,8 @@ export function sensorName(c: Pick<Capture, 'collection' | 'platform'>): string 
       return 'ABI'
     case 'gibs-himawari':
       return 'AHI'
+    case 'sentinel-1-rtc':
+      return 'C-SAR'
   }
 }
 
