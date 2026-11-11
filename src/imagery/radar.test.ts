@@ -157,3 +157,13 @@ describe('searchRadar', () => {
     await expect(searchRadar(BERLIN, Date.UTC(2026, 10, 4), Date.UTC(2026, 10, 11))).rejects.toThrow()
   })
 })
+
+describe('radar ramp', () => {
+  it('is built from the design’s own tokens (ink-2, ice)', async () => {
+    const { palette } = await import('@/ui/system/palette')
+    const { RADAR_INK, RADAR_ICE } = await import('../../api/_lib/radar')
+    const hex = (c: number[]) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`
+    expect(hex(RADAR_INK)).toBe(palette.ink2)
+    expect(hex(RADAR_ICE)).toBe(palette.ice)
+  })
+})

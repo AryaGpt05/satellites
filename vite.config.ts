@@ -31,7 +31,7 @@ const PURE_UI_MODULES = /src[\\/]ui[\\/]system[\\/](Sheet|sheetMath)\.tsx?$/
  * the grid arithmetic under it, api/_lib/toneRender.ts + utm.ts) builds the photos' URLs: the search's, never the
  * first screen's.
  */
-const PURE_IMAGERY_MODULES = /src[\\/]imagery[\\/](image|pixels|pixelsClient|gibs|stac|cloud|pcCrop|radar|radarTone)\.ts$|api[\\/]_lib[\\/](toneRender|utm)\.ts$/
+const PURE_IMAGERY_MODULES = /src[\\/]imagery[\\/](image|pixels|pixelsClient|gibs|stac|cloud|pcCrop|radar|radarTone)\.ts$|api[\\/]_lib[\\/](toneRender|utm|radar)\.ts$/
 
 /** lib/geo's Vector3 helpers (three's math classes): the globe's, never the first screen's (see src/lib/geo.ts). */
 const PURE_LIB_MODULES = /src[\\/]lib[\\/]geo3\.ts$/
@@ -120,7 +120,7 @@ export default defineConfig({
             { name: 'image', test: /src[\\/]imagery[\\/](image|pixels|pixelsClient|radarTone)\.ts$|api[\\/]_lib[\\/]tone\.ts$/, includeDependenciesRecursively: false },
             // The photos' URLs on the place's UTM grid (src/imagery/pcCrop.ts over api/_lib/toneRender.ts + utm.ts) are
             // built once a search starts: their own chunk, so they never ride with the geocoder's endpoints (CR-1).
-            { name: 'grid', test: /src[\\/]imagery[\\/](pcCrop|radar)\.ts$|api[\\/]_lib[\\/](toneRender|utm)\.ts$/, includeDependenciesRecursively: false },
+            { name: 'grid', test: /src[\\/]imagery[\\/](pcCrop|radar)\.ts$|api[\\/]_lib[\\/](toneRender|utm|radar)\.ts$/, includeDependenciesRecursively: false },
           ],
         },
       },
