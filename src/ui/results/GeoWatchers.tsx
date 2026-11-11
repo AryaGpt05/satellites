@@ -5,15 +5,16 @@
  * service actually has pixels for at the place (src/imagery/geoFrames.ts). A frame taken in infrared says so
  * on the picture, in ice (the night-capable hue, DESIGN §2): it is cloud tops, not the ground. A place at the
  * rim of a satellite's disc keeps its frame here while most of it is picture; once more than half is off the
- * disc the row says "Edge of its view".
+ * disc the row says "Poor quality".
+ *
+ * The section is the list alone: no sentence singles out one of the watchers above it (owner).
  */
 import { useEffect, useState } from 'react'
 import { isEumetsatSource, latestGeoFrame, type GeoFrameBand } from '@/imagery'
 import type { GeoWatcher, LatLon, Place } from '@/types'
 import { Glyph, LiveDot, fmtLon } from '@/ui/system'
 import { Img } from './Img'
-import { Paragraph } from './Text'
-import { geoSentence, int } from './lib/copy'
+import { int } from './lib/copy'
 import { fmtRelative } from './lib/time'
 import s from './GeoWatchers.module.css'
 
@@ -36,7 +37,7 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
   const source = watcher.frames
   const { halfSizeKm, px } = spec
   const key = `${source}|${place.lat},${place.lon}|${halfSizeKm}|${px}`
-  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (source ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
+  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (source ? { kind: 'loading' } : { kind: 'none', reason: 'No public image' }))
   useEffect(() => {
     if (!source) return
     const hit = probed.get(key)
@@ -46,10 +47,10 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
     latestGeoFrame(source, place, { halfSizeKm, px }, { signal: ctl.signal })
       .then((r) => {
         if (ctl.signal.aborted) return
-        // At the rim of a disc, a frame that is mostly off it shows nothing of the place: say where the place sits
-        // instead. Elsewhere, nothing with pixels means the service is not answering.
+        // At the rim of a disc, a frame that is mostly off it shows nothing of the place: no picture, and the row says
+        // why. Elsewhere, nothing with pixels means the service is not answering.
         const offDisc = !!watcher.rim && (!r || r.empty > RIM_MAX_EMPTY)
-        const v: GeoFrameState = r && !offDisc ? { kind: 'ok', url: r.url, time: r.time, band: r.band, gridKm: r.gridKm } : { kind: 'none', reason: offDisc ? 'Edge of its view' : 'No frame just now' }
+        const v: GeoFrameState = r && !offDisc ? { kind: 'ok', url: r.url, time: r.time, band: r.band, gridKm: r.gridKm } : { kind: 'none', reason: offDisc ? 'Poor quality' : 'No image just now' }
         probed.set(key, v)
         setState(v)
       })
@@ -66,10 +67,8 @@ export const bandWords = (band: GeoFrameBand) => (band === 'infrared' ? 'infrare
 export function GeoWatchers({ watchers, place, days }: { watchers: GeoWatcher[]; place: Place; days: number }) {
   if (!watchers.length)
     return <p className={s.none}>No operational geostationary weather imager sees this place above 5° elevation.</p>
-  const lead = watchers[0]
   return (
     <div className={s.root}>
-      <Paragraph sentences={[geoSentence(lead, days)]} className={s.lead} />
       <ul className={s.list}>
         {watchers.map((g) => (
           <li key={g.norad} className={s.item}>

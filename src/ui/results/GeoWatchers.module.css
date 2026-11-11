@@ -3,12 +3,6 @@
   flex-direction: column;
   gap: 16px;
 }
-.lead {
-  margin: 0;
-  font-size: var(--fs-small);
-  line-height: 1.5;
-  color: var(--bone-2);
-}
 .none {
   margin: 0;
   font-size: var(--fs-small);
