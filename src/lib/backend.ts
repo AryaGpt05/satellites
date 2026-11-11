@@ -197,6 +197,7 @@ const COLLECTIONS: readonly CaptureCollection[] = [
   'gibs-goes-east',
   'gibs-goes-west',
   'gibs-himawari',
+  'sentinel-1-rtc',
 ]
 
 /** "Waterloo" stays; "123 King St" or "43.4723°N 80.5449°W" fall back to the city in the sublabel. */

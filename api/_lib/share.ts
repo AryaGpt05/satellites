@@ -22,6 +22,8 @@ export const CAPTURE_COLLECTIONS = [
   'gibs-goes-east',
   'gibs-goes-west',
   'gibs-himawari',
+  // Sentinel-1 radar (migration 0012 lets create_share keep it)
+  'sentinel-1-rtc',
 ] as const
 export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number]
 

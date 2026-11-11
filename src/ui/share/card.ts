@@ -15,7 +15,7 @@
  * the cache (a summary's closest look, a recipient's first look), the same rect is loaded and faded in.
  * Pictures go through the results' session photo cache (loadPhoto): one request per URL for the page.
  */
-import { gibsWmsUrl, pcCropUrl } from '@/imagery'
+import { gibsWmsUrl, pcCropUrl, radarCropUrl, radarPolOfItemId } from '@/imagery'
 import { bboxAround } from '@/lib/geo'
 import type { Capture, Pass, Report } from '@/types'
 import {
@@ -74,6 +74,11 @@ export function cropUrlFor(capture: Pick<Capture, 'provider' | 'collection' | 'i
   if (capture.provider === 'planetary-computer' && (capture.collection === 'sentinel-2-l2a' || capture.collection === 'landsat-c2-l2')) {
     // Planetary Computer renders the same crop as JPEG at a fraction of the PNG's size.
     return pcCropUrl(capture.collection, capture.itemId, { lat, lon }, opts).replace(/\.png\?/, '.jpg?')
+  }
+  if (capture.collection === 'sentinel-1-rtc') {
+    // A radar image: the server's card asks for this very crop (api/_lib/imagery.ts cropPlan).
+    const pol = radarPolOfItemId(capture.itemId)
+    return pol ? radarCropUrl(capture.itemId, pol, { lat, lon }, opts).replace(/\.png\?/, '.jpg?') : undefined
   }
   if (capture.provider === 'gibs') {
     const [layer, time] = capture.itemId.split('@')

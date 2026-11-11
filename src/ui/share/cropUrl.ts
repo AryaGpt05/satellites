@@ -1,4 +1,4 @@
-import { gibsWmsUrl, pcCropUrl } from '@/imagery'
+import { gibsWmsUrl, pcCropUrl, radarCropUrl, radarPolOfItemId } from '@/imagery'
 import type { Share } from '@/lib/backend'
 import { cropSpec } from '../results/lib/captures'
 
@@ -23,6 +23,11 @@ export function shareCropUrl(share: Share, px?: number): string | undefined {
   if ((c.collection === 'sentinel-2-l2a' || c.collection === 'landsat-c2-l2') && c.provider !== 'earth-search' && PC_ITEM.test(c.itemId)) {
     // JPEG: the same render at a fraction of the PNG's size (as results' displayUrl).
     return pcCropUrl(c.collection, c.itemId, at, opts).replace(/\.png\?/, '.jpg?')
+  }
+  if (c.collection === 'sentinel-1-rtc') {
+    // A radar image: its polarisation is in its item id (api/_lib/radar.ts); toned by the loader like the app's.
+    const pol = radarPolOfItemId(c.itemId)
+    return pol ? radarCropUrl(c.itemId, pol, at, opts).replace(/\.png\?/, '.jpg?') : undefined
   }
   if (c.collection.startsWith('gibs-')) {
     const [layer, time] = c.itemId.split('@')

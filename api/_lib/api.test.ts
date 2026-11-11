@@ -612,3 +612,44 @@ describe('vercel.json routes', () => {
     expect(tex).not.toContain('immutable')
   })
 })
+
+describe('a shared Sentinel-1 radar image (migration 0012)', () => {
+  const ID = 'S1D_IW_GRDH_1SDV_20261110T170617_20261110T170642_005408_00A516_rtc'
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('is kept by a share and a deep link, and planned at the card’s 20 m on the place’s grid', () => {
+    const cap = shareFromRpc({ ...ROW, capture: { collection: 'sentinel-1-rtc', itemId: ID, gsdM: 20 } })!.capture!
+    expect(cap.collection).toBe('sentinel-1-rtc')
+    const plan = cropPlan(cap, 45.44, 12.33, 630)!
+    expect(plan.metresPerPx).toBe(20)
+    expect(plan.halfSizeKm).toBeCloseTo(6.3)
+    expect(plan.source).toBe('SENTINEL-1 RADAR')
+    expect(plan.url).toContain('/630x630.jpg?collection=sentinel-1-rtc&item=' + ID)
+    expect(plan.url).toContain('coord_crs=EPSG:32633&dst_crs=EPSG:32633&assets=vv&')
+    expect(plan.url).toContain('resampling=average')
+    // HH scenes (polar ice) read their own band; an id that is not an RTC scene is refused.
+    expect(cropPlan({ ...cap, itemId: ID.replace('1SDV', '1SDH') }, 45.44, 12.33, 630)!.url).toContain('assets=hh&')
+    expect(cropPlan({ ...cap, itemId: 'S1D_SOMETHING_ELSE' }, 45.44, 12.33, 630)).toBeNull()
+  })
+
+  it('is toned on the server as the app tones it, never embedded as raw decibels', async () => {
+    // A 128 px decibel ramp left to right, with a little speckle (a real crop is never smaller than 1 KB).
+    const W = 128
+    const px = new Uint8Array(W * W * 4)
+    for (let i = 0; i < W * W; i++) {
+      const v = Math.min(250, 40 + Math.round((i % W) * 1.6) + ((i * 7919) % 9))
+      px.set([v, v, v, 255], i * 4)
+    }
+    const jpg = Buffer.from(encodeJpeg({ data: px, width: W, height: W }, 95).data)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(jpg, { headers: { 'content-type': 'image/jpeg' } })))
+    const plan = cropPlan({ collection: 'sentinel-1-rtc', itemId: ID }, 45.44, 12.33, 630)!
+    const pic = (await fetchCropPicture(plan.url, 5_000))!
+    expect(pic.complete).toBe(true)
+    const out = decodeJpeg(Buffer.from(pic.dataUri.split(',')[1], 'base64'), { useTArray: true, formatAsRGBA: true })
+    // Stretched: the darkest column near ink, the brightest near the ramp's off-white, a faint ice cast between.
+    const at = (x: number) => out.data.slice((64 * W + x) * 4, (64 * W + x) * 4 + 3)
+    expect(at(1)[0]).toBeLessThan(45)
+    expect(at(W - 2)[0]).toBeGreaterThan(190)
+    expect(at(W / 2)[2]).toBeGreaterThan(at(W / 2)[0])
+  })
+})
