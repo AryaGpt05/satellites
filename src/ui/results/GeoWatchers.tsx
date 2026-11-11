@@ -4,7 +4,8 @@
  * Himawari on NASA GIBS, the Meteosats on EUMETSAT), the row gets a small live frame: the newest one that
  * service actually has pixels for at the place (src/imagery/geoFrames.ts). A frame taken in infrared says so
  * on the picture, in ice (the night-capable hue, DESIGN §2): it is cloud tops, not the ground. A place at the
- * rim of a satellite's disc gets no frame from it (engine/geostationary.ts): half of it would be empty.
+ * rim of a satellite's disc keeps its frame here, part empty as it may be (that is how far out the place sits);
+ * with no pixels at all the row says "Edge of its view".
  */
 import { useEffect, useState } from 'react'
 import { isEumetsatSource, latestGeoFrame, type GeoFrameBand } from '@/imagery'
@@ -33,7 +34,7 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
   const source = watcher.frames
   const { halfSizeKm, px } = spec
   const key = `${source}|${place.lat},${place.lon}|${halfSizeKm}|${px}`
-  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (source ? { kind: 'loading' } : { kind: 'none', reason: watcher.rim ? 'Edge of its view' : 'No public frame' }))
+  const [state, setState] = useState<GeoFrameState>(() => probed.get(key) ?? (source ? { kind: 'loading' } : { kind: 'none', reason: 'No public frame' }))
   useEffect(() => {
     if (!source) return
     const hit = probed.get(key)
@@ -43,8 +44,8 @@ export function useGeoFrame(watcher: GeoWatcher, place: LatLon, spec: { halfSize
     latestGeoFrame(source, place, { halfSizeKm, px }, { signal: ctl.signal })
       .then((r) => {
         if (ctl.signal.aborted) return
-        // Nothing with pixels (the place is off the imager's disc, or its service is not answering): say so.
-        const v: GeoFrameState = r ? { kind: 'ok', ...r } : { kind: 'none', reason: 'No frame just now' }
+        // Nothing with pixels: at the rim, the place is off the disc as the service draws it; else it is not answering.
+        const v: GeoFrameState = r ? { kind: 'ok', ...r } : { kind: 'none', reason: watcher.rim ? 'Edge of its view' : 'No frame just now' }
         probed.set(key, v)
         setState(v)
       })

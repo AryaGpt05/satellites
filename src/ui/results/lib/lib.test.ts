@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Capture, Pass } from '@/types'
+import type { Capture, GeoWatcher, Pass } from '@/types'
 import { byClarity, isClouded, pickBestLook } from './bestLook'
 import { captureFor, cropSpec, displayUrl, isDailyMosaic, productLabel, scaleBarKm, slug } from './captures'
 import { ARCHIVE_DOWN_LINE, archiveDown, compassAbbr, compassWord, darkSentences, geoSentence, headline, passSentences, photosLine, placeInProse, placeParts, plain, radarSentence, shareHeadline, watchedPhrase } from './copy'
@@ -476,7 +476,7 @@ describe('copy: degenerate geometry reads like a person wrote it', () => {
 
 describe('best look (decision #1)', () => {
   const cap = (id: string, over: Partial<Capture> = {}): Capture => ({ ...s2, id, itemId: id, ...over })
-  const geo = [{ norad: 60133, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008, frames: 'goes-east' as const }]
+  const geo: GeoWatcher[] = [{ norad: 60133, name: 'GOES-19', operator: 'NOAA', subLon: -75.2, elevationDeg: 39.6, cadenceMin: 10, imagesInWindow: 1008, frames: 'goes-east' }]
   const report = (captures: Capture[], passes: Pass[], g = geo) => ({ captures, passes, geo: g })
 
   it('a clear spot beats a cloudier spot even with less scene cloud', () => {
@@ -516,6 +516,14 @@ describe('best look (decision #1)', () => {
     const g = pickBestLook(report([], [pass({ verdict: 'likely' })]))
     expect(g?.kind).toBe('geo')
     expect(pickBestLook(report([], [pass({ verdict: 'likely' })], []))).toBeNull()
+  })
+  it('the geostationary lead is the highest watcher with the place well inside its disc, never one at the rim', () => {
+    const rim = { ...geo[0], name: 'Meteosat-9', elevationDeg: 12, frames: 'meteosat-iodc', rim: true } satisfies GeoWatcher
+    const inside = { ...geo[0], name: 'Meteosat-12', elevationDeg: 11, frames: 'meteosat-0deg' } satisfies GeoWatcher
+    const noFrame = { ...geo[0], name: 'Elektro-L 3', elevationDeg: 40, frames: undefined }
+    const g = pickBestLook(report([], [pass({ verdict: 'likely' })], [noFrame, rim, inside]))
+    expect(g?.kind === 'geo' && g.watcher.name).toBe('Meteosat-12')
+    expect(pickBestLook(report([], [pass({ verdict: 'likely' })], [noFrame, rim]))).toBeNull()
   })
   it('clouded: cloud at the spot or ≥ 70 % of the scene', () => {
     expect(isClouded({ cloudCoverPct: 86 })).toBe(true)

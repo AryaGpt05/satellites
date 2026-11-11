@@ -6,7 +6,8 @@
  *   detailed  the most zoomed-in CLEAR Sentinel-2 / Landsat capture (smallest gsd, clearest spot, newest);
  *             if every one is clouded, the least cloudy (honestly labelled "Clouded over")
  *   mosaic    else the sharpest weather mosaic (VIIRS / MODIS, 250–375 m): well lit, then newest
- *   geo       else the lead geostationary watcher's latest frame (GOES / Himawari / Meteosat)
+ *   geo       else the latest frame of the highest geostationary watcher that has the place well inside its disc
+ *             (GOES / Himawari / Meteosat)
  *   null      else nothing: the summary says why
  *
  * Pure: unit-tested in lib.test.ts; the controller calls it (via bestLookImageUrl) to preload the hero.
@@ -50,7 +51,8 @@ export function pickBestLook(report: Pick<Report, 'passes' | 'captures' | 'geo'>
   const { photos } = orderPhotos({ passes: report.passes, captures: report.captures })
   const cover = windowCover(photos)
   if (cover?.photo.pass) return { kind: cover.photo.kind, pass: cover.photo.pass, capture: cover.photo.capture }
-  const watcher = report.geo.find((g) => !!g.frames)
+  // Not from the rim of a disc: half of that frame can be empty (engine/geostationary.ts).
+  const watcher = report.geo.find((g) => !!g.frames && !g.rim)
   if (watcher) return { kind: 'geo', watcher }
   return null
 }

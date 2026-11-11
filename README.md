@@ -94,8 +94,8 @@ says *watched*, never *photographed*.
 - The geostationary weather satellites that watch a place all week are listed with their newest frame where a public
   map service carries it: GOES and Himawari from NASA, the two Meteosats from EUMETSAT. At night Himawari and
   Meteosat-9 are shown in infrared, labelled *IR*: cloud tops by temperature, colder is lighter. NASA draws its
-  coldest cloud tops in a colour code; Watched puts them back on the grey scale, in the same order. A place at the
-  rim of a satellite's view gets no frame from it.
+  coldest cloud tops in a colour code; Watched puts them back on the grey scale, in the same order. At the rim of a
+  satellite's view a frame can be part empty; it is shown small, never as the lead picture.
 
 Everything uncertain is labelled as such in the app.
 
