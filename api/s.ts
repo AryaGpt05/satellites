@@ -20,7 +20,7 @@
  * with no database row.
  *
  * Summary links (SH6, R3-13): a week at a place, its numbers carried in the link. Title "31 satellites watched
- * Waterloo this week.", description "12 photos were made public. …", as the results headline says it.
+ * Waterloo this week.", description "12 images were made public. …", as the results headline says it.
  *
  * Cards from /api/og are JPEG (og:image:type image/jpeg, R2SH4); the static default card is a PNG.
  */

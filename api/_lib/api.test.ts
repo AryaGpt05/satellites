@@ -143,24 +143,24 @@ describe('summary links (R3-13)', () => {
   it('says the results headline: N satellites watched, K photos made public', () => {
     const sum = summaryFromParams(new URLSearchParams(Q))!
     expect(summaryTitle(sum)).toBe('256 satellites watched Waterloo this week.')
-    expect(summaryDescription(sum)).toBe('31 photos were made public. The closest look is from Sentinel-2C. What watched you this week?')
+    expect(summaryDescription(sum)).toBe('31 images were made public. The closest look is from Sentinel-2C. What watched you this week?')
     const spec = buildSummarySpec({ ...sum, host: 'www.watched.earth' })
     expect(`${spec.lead} ${spec.place}${spec.tail}`).toBe('256 satellites watched Waterloo this week.')
-    expect(spec.sub).toBe('31 photos were made public.')
+    expect(spec.sub).toBe('31 images were made public.')
     expect(spec.plate.kind === 'image' && spec.plate.chip.segs[0].text).toBe('Closest look · Sentinel-2C · 10 m')
     expect(summaryTitle({ satellites: 1, placeLabel: 'Waterloo' })).toBe('1 satellite watched Waterloo this week.')
     expect(summaryTitle({ satellites: 0, placeLabel: 'Waterloo' })).toBe('No satellite we track watched Waterloo this week.')
-    expect(summaryDescription({ ...sum, counts: { ...sum.counts, imaged: 1 }, best: undefined })).toBe('1 photo was made public. What watched you this week?')
-    expect(summaryDescription({ ...sum, counts: { ...sum.counts, imaged: 0 } })).toMatch(/^No photos were made public\. /)
+    expect(summaryDescription({ ...sum, counts: { ...sum.counts, imaged: 1 }, best: undefined })).toBe('1 image was made public. What watched you this week?')
+    expect(summaryDescription({ ...sum, counts: { ...sum.counts, imaged: 0 } })).toMatch(/^No images were made public\. /)
   })
   it('reads the outage and partial flags', () => {
     const down = summaryFromParams(new URLSearchParams(`${Q}&sa=1`))!
     expect(down.archiveDown).toBe(true)
-    expect(summaryDescription(down)).toBe('The image archives didn’t answer, so we can’t count the public photos right now. The closest look is from Sentinel-2C. What watched you this week?')
+    expect(summaryDescription(down)).toBe('The image archives didn’t answer, so we can’t count the public images right now. The closest look is from Sentinel-2C. What watched you this week?')
     expect(buildSummarySpec({ ...down, host: '' }).sub).toBe('The image archives didn’t answer.')
     const partial = summaryFromParams(new URLSearchParams(`${Q}&sp=1`))!
     expect(partial.partial).toBe(true)
-    expect(summaryDescription(partial)).toMatch(/^At least 31 photos were made public\. /)
+    expect(summaryDescription(partial)).toMatch(/^At least 31 images were made public\. /)
     expect(summaryFromParams(new URLSearchParams(Q))).not.toHaveProperty('archiveDown')
     expect(summaryFromParams(new URLSearchParams(`${Q}&sa=yes`))).not.toHaveProperty('archiveDown')
   })
@@ -173,14 +173,14 @@ describe('summary links (R3-13)', () => {
     expect(note(`${bare}&sc=0,220,1544,66`)).toBe('No public photo this week')
     // The archives didn't answer: K is unknown, so the plate can't say there was none.
     expect(note(`${bare}&sc=0,220,1544,66&sa=1`)).toBe('No photo to show')
-    // A count with no picture in the link: never "no public photo" beside "1 photo was made public."
+    // A count with no picture in the link: never "no public photo" beside "1 image was made public."
     expect(note(`${bare}&sc=1,0,0,0`)).toBe('No photo to show')
     expect(note(Q)).toBe('image')
   })
   it('names the card and the alt text in the same words', async () => {
     const body = await (await handleSharePage(new Request(`https://www.watched.earth/api/s?${Q}`))).text()
     expect(body).toContain('<meta property="og:title" content="256 satellites watched Waterloo this week.">')
-    expect(body).toContain('<meta property="og:description" content="31 photos were made public. The closest look is from Sentinel-2C. What watched you this week?">')
+    expect(body).toContain('<meta property="og:description" content="31 images were made public. The closest look is from Sentinel-2C. What watched you this week?">')
     expect(body).toContain('<meta property="og:image:alt" content="256 satellites watched Waterloo this week. The share card, with the week’s closest photo, from Sentinel-2C.">')
     const card = new URL(/<meta property="og:image" content="([^"]+)">/.exec(body)![1].replace(/&#38;/g, '&'))
     expect(card.searchParams.get('kind')).toBe('summary')

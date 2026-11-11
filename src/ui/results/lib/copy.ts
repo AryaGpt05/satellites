@@ -84,13 +84,13 @@ export interface Headline {
   infraredSweeps: number
   /** Distinct other satellites that passed within view (likely / could / overhead) */
   more: number
-  /** Total real images: the photos made public (what "K photos were made public" counts) */
+  /** Total real images made public (what "K images were made public" counts): photos, mosaics and radar images alike */
   images: number
   /** Of which per-scene detailed images (Sentinel-2, Landsat) */
   detailed: number
   /** Of which coarse daily weather mosaics */
   mosaics: number
-  /** Sentinel-1 radar images: real images of the place, but not photographs, so never counted in `images` */
+  /** Of which Sentinel-1 radar images */
   radarImages: number
   /** Plain reason when nothing photographed the place */
   zeroReason?: string
@@ -154,7 +154,7 @@ export function headline(
     mosaicSats: mosaicSats.size,
     infraredSweeps,
     more: viewSats.size,
-    images: detailed + mosaics,
+    images: detailed + mosaics + radarImages,
     detailed,
     mosaics,
     radarImages,
@@ -167,8 +167,7 @@ export function headline(
       passes: ranked.reduce((a, [, c]) => a + c, 0),
     }
   }
-  // No photo (a radar image is not one): say why, even when radar saw the place.
-  if (!h.images) {
+  if (!h.photographed) {
     const z = zeroReason(report, meta, sunMaxDeg)
     h.zeroReason = z.text
     h.zeroKind = z.kind
@@ -204,28 +203,21 @@ export function darkSentences(h: Pick<Headline, 'sunNeverRose' | 'infraredSweeps
   return out
 }
 
-/** "4 photos" / "1 photo"; "2 radar images" / "1 radar image". */
-export const photosPhrase = (k: number) => `${int(k)} ${k === 1 ? 'photo' : 'photos'}`
-export const radarPhrase = (r: number) => `${int(r)} radar ${r === 1 ? 'image' : 'images'}`
-
 /**
- * "31 photos were made public." / "At least 4 photos…" / "1 photo was made public." / "No photos were made public this
- * week." With Sentinel-1's radar images (`radar`), counted apart, never as photos: "31 photos and 4 radar images were
- * made public." / "2 radar images were made public."
+ * "31 images were made public." / "At least 4 images…" / "1 image was made public." / "No images were made public this
+ * week." One count (owner): photos, weather mosaics and Sentinel-1's radar images alike; the footnote breaks it down.
  */
-export function photosLine(k: number, opts: { partial?: boolean; week?: 'this week' | 'that week'; radar?: number } = {}): string {
-  const r = Math.max(0, opts.radar ?? 0)
-  if (k <= 0 && r <= 0) return `No photos were made public ${opts.week ?? 'this week'}.`
+export function photosLine(k: number, opts: { partial?: boolean; week?: 'this week' | 'that week' } = {}): string {
+  if (k <= 0) return `No images were made public ${opts.week ?? 'this week'}.`
   const lead = opts.partial ? 'At least ' : ''
-  const what = k > 0 && r > 0 ? `${photosPhrase(k)} and ${radarPhrase(r)}` : k > 0 ? photosPhrase(k) : radarPhrase(r)
-  return `${lead}${what} ${k + r === 1 ? 'was' : 'were'} made public.`
+  return k === 1 ? `${lead}1 image was made public.` : `${lead}${int(k)} images were made public.`
 }
 
 /** "256 satellites watched" / "1 satellite watched" (owner F, latest: the headline verb is "watched") */
 export const watchedPhrase = (n: number) => `${int(n)} ${n === 1 ? 'satellite' : 'satellites'} watched`
 
 /** The archive outage, as the second line says it. */
-export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public photos right now.'
+export const ARCHIVE_DOWN_LINE = 'The image archives didn’t answer, so we can’t count the public images right now.'
 
 export function radarSentence(r: NonNullable<Headline['radar']>): Sentence {
   const others = r.sats - r.names.length

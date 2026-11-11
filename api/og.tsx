@@ -130,7 +130,7 @@ async function cardImage(share: ShareRecord): Promise<CardImage> {
   return pic ? { kind: 'image', ...pic } : { kind: 'transient' }
 }
 
-/** A week's summary: the closest look's crop (when it has one) beside "N satellites watched … K photos were made public." */
+/** A week's summary: the closest look's crop (when it has one) beside "N satellites watched … K images were made public." */
 async function renderSummary(q: URLSearchParams, host: string): Promise<Response | null> {
   const sum = summaryFromParams(q)
   if (!sum) return null

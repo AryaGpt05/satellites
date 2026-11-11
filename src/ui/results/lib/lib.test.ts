@@ -155,12 +155,12 @@ describe('copy', () => {
   })
 
   it('owner F: the photos line, exact strings', () => {
-    expect(photosLine(31)).toBe('31 photos were made public.')
-    expect(photosLine(1)).toBe('1 photo was made public.')
-    expect(photosLine(0)).toBe('No photos were made public this week.')
-    expect(photosLine(0, { week: 'that week' })).toBe('No photos were made public that week.')
-    expect(photosLine(4, { partial: true })).toBe('At least 4 photos were made public.')
-    expect(photosLine(1234)).toBe('1,234 photos were made public.')
+    expect(photosLine(31)).toBe('31 images were made public.')
+    expect(photosLine(1)).toBe('1 image was made public.')
+    expect(photosLine(0)).toBe('No images were made public this week.')
+    expect(photosLine(0, { week: 'that week' })).toBe('No images were made public that week.')
+    expect(photosLine(4, { partial: true })).toBe('At least 4 images were made public.')
+    expect(photosLine(1234)).toBe('1,234 images were made public.')
     expect(ARCHIVE_DOWN_LINE).not.toContain('—')
   })
 
@@ -878,26 +878,14 @@ describe('Sentinel-1 radar images: real images, never photographs', () => {
     expect(pickBestLook({ captures: [radar('R1')], passes, geo: [] })).toBeNull()
   })
 
-  it('is counted apart from the photos, and the second line says both', () => {
+  it('is counted with the photos in the one line, and broken down in the footnote', () => {
     const passes = [pass({ captureId: 'A' }), pass({ norad: 62261, captureId: 'R1' }), pass({ norad: 62261, captureId: 'R2', sunElevationDeg: -30 })]
     const h = headline({ passes, captures: [opt('A'), radar('R1'), radar('R2')], notes: [] }, metaS1)
-    expect(h.images).toBe(1)
+    expect(h.images).toBe(3)
     expect(h.detailed).toBe(1)
     expect(h.radarImages).toBe(2)
     expect(h.radar).toBeUndefined()
-    expect(photosLine(31, { radar: 4 })).toBe('31 photos and 4 radar images were made public.')
-    expect(photosLine(1, { radar: 1 })).toBe('1 photo and 1 radar image were made public.')
-    expect(photosLine(0, { radar: 2 })).toBe('2 radar images were made public.')
-    expect(photosLine(0, { radar: 1, partial: true })).toBe('At least 1 radar image was made public.')
-    expect(photosLine(0, { radar: 0 })).toBe('No photos were made public this week.')
-  })
-
-  it('a week with radar images and no photo still says why there is no photo', () => {
-    const passes = [pass({ norad: 62261, captureId: 'R1', sunElevationDeg: -20 })]
-    const h = headline({ passes, captures: [radar('R1')], notes: [] }, metaS1, -3)
-    expect(h.images).toBe(0)
-    expect(h.radarImages).toBe(1)
-    expect(h.zeroKind).toBe('dark')
+    expect(photosLine(h.images)).toBe('3 images were made public.')
   })
 
   it('its pass reads as radar: to the side, at 20 m, in the dark when it was', () => {

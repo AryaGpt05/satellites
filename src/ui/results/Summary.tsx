@@ -1,7 +1,7 @@
 /**
  * 01 / SUMMARY pieces: the headline ("In the last 7 days, 256 satellites watched Waterloo."), the second
- * line ("27 photos were made public."), readouts per verdict (each jumps to its group in the list) and the
- * report's caveats. Owner request F: these are the final words; every place that says it uses these helpers.
+ * line ("27 images were made public.": photos, weather mosaics and radar images, one count), readouts per verdict
+ * (each jumps to its group in the list) and the report's caveats (the footnote breaks the count down). Owner request F: these are the final words; every place that says it uses these helpers.
  *
  * Numbers are honest and stable (A1): the headline integer is final as soon as the passes exist and never
  * counts; only the photos line can be partial ("At least 4 photos…") and it settles in place (a 200 ms
@@ -82,7 +82,7 @@ export function Headline({ model, compact = false, enter = false }: { model: Res
 const weekWord = (model: ResultsModel) => (isOldWindow(model) ? 'that week' : 'this week')
 
 /**
- * The second line: how many photos were made public (owner F). When there are none, one plain sentence says
+ * The second line: how many images were made public (owner F; one count, radar images included). When there are none, one plain sentence says
  * why (the sun, the archives' lag, the geostationary imager that sees it anyway). An archive outage says so,
  * with Try again.
  */
@@ -123,7 +123,7 @@ export function MoreLine({ model, compact = false, enter = false, onRetry }: { m
   )
 }
 
-/** "27 photos were made public." with the number set in the display face; partial → final settles in place. */
+/** "27 images were made public." with the number set in the display face; partial → final settles in place. */
 function PhotosCount({ k, partial }: { k: number; partial: boolean }) {
   return (
     <>
@@ -131,7 +131,7 @@ function PhotosCount({ k, partial }: { k: number; partial: boolean }) {
         At least{' '}
       </span>
       <Count value={k} className={s.numDisplay} />
-      {k === 1 ? ' photo was made public.' : ' photos were made public.'}
+      {k === 1 ? ' image was made public.' : ' images were made public.'}
     </>
   )
 }
@@ -193,6 +193,12 @@ export function Notes({ model, enter = false }: { model: ResultsModel; enter?: b
             <>
               {' '}
               · <b>{int(head.mosaics)}</b> daily weather {head.mosaics === 1 ? 'mosaic' : 'mosaics'} (250–375 m)
+            </>
+          ) : null}
+          {head.radarImages ? (
+            <>
+              {' '}
+              · <b>{int(head.radarImages)}</b> radar {head.radarImages === 1 ? 'image' : 'images'} (Sentinel-1, 20 m)
             </>
           ) : null}
           . {int(counts.passes)} passes from {int(counts.satellitesConsidered)} imaging and crewed satellites checked.
