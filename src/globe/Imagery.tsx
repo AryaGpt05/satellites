@@ -25,7 +25,7 @@ import { DataTexture, LinearFilter, LinearMipmapLinearFilter, RGBAFormat, SRGBCo
 import { gibsWmsUrl } from '@/imagery'
 import { EARTH_RADIUS_KM } from '@/lib/geo'
 import { selectSelectedPass, useApp } from '@/state/store'
-import { captureOf, coverPass, decalSpecFor, decalUrl } from './acquisition'
+import { captureOf, coverPass, decalSpecFor, decalUrl, needsNoSun } from './acquisition'
 import { kmPerTexel } from './framing'
 import { panelHalfKm, panelPhotoUrl, panelTurn, patchUv } from './panel'
 import { FRAME, useRuntime, type GlobeRuntime } from './runtime'
@@ -49,9 +49,6 @@ const FRESH_S = 0.4
 const FRESH_MIN_KM = 3
 /** The context patch keeps the global map's tone at this scale (km) and adds its own detail below it. */
 const TONE_KM = 60
-
-/** A Sentinel-1 radar crop (imagery/radar.ts): it needs no sunlight, so the globe shows it on the night side too. */
-const needsNoSun = (url: string) => /[?&]collection=sentinel-1-rtc&/.test(url)
 
 interface Entry {
   url: string

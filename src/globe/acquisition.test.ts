@@ -9,6 +9,7 @@ import {
   DIVE_KM,
   diveAt,
   geoDiveAt,
+  needsNoSun,
   imageFocus,
   fmtCountdown,
   MIN_APPROACH_S,
@@ -117,6 +118,15 @@ describe('decal and scan geometry', () => {
       expect(decalSpecFor('gibs-goes-east', mobile)).toEqual({ halfSizeKm: 400, px: 1024 })
       expect(decalSpecFor('eumetsat-meteosat-iodc', mobile)).toEqual({ halfSizeKm: 400, px: 1024 })
     }
+  })
+
+  it('radar images and geostationary frames show on the night side; photos and daily mosaics only by day', () => {
+    expect(needsNoSun('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=GOES-West_ABI_GeoColor&STYLES=&TIME=2026-11-11T07:10:00Z')).toBe(true)
+    expect(needsNoSun('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&LAYERS=Himawari_AHI_Band13_Clean_Infrared&TIME=x')).toBe(true)
+    expect(needsNoSun('https://view.eumetsat.int/geoserver/ows?service=WMS&layers=msg_iodc%3Air108&time=x')).toBe(true)
+    expect(needsNoSun('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/1024x1024.jpg?collection=sentinel-1-rtc&item=x')).toBe(true)
+    expect(needsNoSun('https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&LAYERS=VIIRS_NOAA20_CorrectedReflectance_TrueColor&TIME=2026-11-10')).toBe(false)
+    expect(needsNoSun('https://planetarycomputer.microsoft.com/api/data/v1/item/bbox/1,2,3,4/1024x1024.jpg?collection=sentinel-2-l2a&item=x')).toBe(false)
   })
 
   it('a geostationary scan holds behind the spacecraft, then dives in the last seconds before the line arrives', () => {

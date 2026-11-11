@@ -115,6 +115,15 @@ export function decalSpecFor(collection: CaptureCollection, mobile: boolean): { 
 }
 
 /**
+ * Images that need no sunlight, so the globe shows them on the night side too: a Sentinel-1 radar crop
+ * (imagery/radar.ts), and a geostationary imager's frame (GOES and Himawari from NASA GIBS, the Meteosats from
+ * EUMETSAT), which is taken round the clock: at night it is city lights and cloud, or infrared. Drawn only by the day
+ * term it painted nothing after dark (seen at 23:21 in Oregon: the scan ran and the ground stayed as it was).
+ */
+export const needsNoSun = (url: string) =>
+  /[?&]collection=sentinel-1-rtc&/.test(url) || url.startsWith('https://view.eumetsat.int/geoserver/') || /[?&]LAYERS=(GOES-(East|West)_ABI_|Himawari_AHI_)/.test(url)
+
+/**
  * PC bbox crops come back as JPEG (smaller; no-data is black, keyed out in the shader), as the panel does.
  *
  * Always GEOGRAPHIC (lon/lat, EPSG:4326), even for a scene the panel cuts on its own UTM grid: the decal is drawn on
