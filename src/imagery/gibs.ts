@@ -51,6 +51,26 @@ export const GIBS_LAYERS: Readonly<Record<GibsCollection, GibsLayer>> = {
   'gibs-himawari': { collection: 'gibs-himawari', layer: 'Himawari_AHI_Band3_Red_Visible_1km', platform: 'himawari', gsdM: 1000, kind: 'subdaily', cadenceMin: 10, visibleOnly: true, tileMatrixSet: '1km' },
 }
 
+/**
+ * A sub-daily GIBS layer as the frame search needs it: its name, a tile matrix set it accepts (only used to ask for
+ * its time domain) and whether it is black in the dark. The geostationary collections above are these, and so is a
+ * layer that is no capture collection: Himawari's infrared band (./geoFrames.ts shows it when the visible band is dark).
+ */
+export interface GibsFrameLayer {
+  layer: string
+  tileMatrixSet: string
+  visibleOnly?: boolean
+}
+
+/** Himawari's 10.4 µm window band: cloud tops by temperature, so it reads the same day and night. Measured 2026-11-11. */
+export const HIMAWARI_INFRARED: GibsFrameLayer = { layer: 'Himawari_AHI_Band13_Clean_Infrared', tileMatrixSet: '2km' }
+
+function frameLayer(collection: GibsCollection): GibsFrameLayer {
+  const info = GIBS_LAYERS[collection]
+  if (info.kind !== 'subdaily') throw new TypeError(`${collection} is a daily layer`)
+  return info
+}
+
 /** Polar weather imagers whose daily mosaics GIBS serves, by NORAD id. */
 export const GIBS_DAILY_BY_NORAD: Readonly<Record<number, GibsCollection>> = {
   43013: 'gibs-viirs-noaa20', // NOAA 20 (JPSS-1)
@@ -134,18 +154,21 @@ interface DomainEntry {
   /** Listed frames in the window, newest first */
   frames: number[]
 }
-/** Last successful domain per layer; read synchronously by `geoImageUrl`. */
-const knownDomains = /* @__PURE__ */ new Map<GibsCollection, DomainEntry>()
+/** Last successful domain per layer name; read synchronously by `geoImageUrl`. */
+const knownDomains = /* @__PURE__ */ new Map<string, DomainEntry>()
 const domainLoads = /* @__PURE__ */ new Lru<string, Promise<number[]>>(16)
 
 /**
  * The frames GIBS lists for a geostationary layer over the last 6 hours, newest first (gaps left
  * out). One small XML request, cached for 5 minutes. Rejects on network failure and on abort.
  */
-export async function geoFrames(collection: GibsCollection, { signal, now = Date.now() }: { signal?: AbortSignal; now?: number } = {}): Promise<number[]> {
-  const info = GIBS_LAYERS[collection]
-  if (info.kind !== 'subdaily') throw new TypeError(`${collection} is a daily layer`)
-  const known = knownDomains.get(collection)
+export async function geoFrames(collection: GibsCollection, o: { signal?: AbortSignal; now?: number } = {}): Promise<number[]> {
+  return gibsFrames(frameLayer(collection), o)
+}
+
+/** `geoFrames` for any sub-daily layer. */
+export async function gibsFrames(info: GibsFrameLayer, { signal, now = Date.now() }: { signal?: AbortSignal; now?: number } = {}): Promise<number[]> {
+  const known = knownDomains.get(info.layer)
   if (known && Math.abs(now - known.at) < DOMAIN_TTL_MS) return known.frames
   // Hour-aligned bounds keep the URL (and GIBS's 30-minute cache of it) stable within the hour.
   const to = Math.ceil(now / 3_600_000) * 3_600_000
@@ -165,7 +188,7 @@ export async function geoFrames(collection: GibsCollection, { signal, now = Date
     )
     domainLoads.set(url, p)
     p.then(
-      (frames) => knownDomains.set(collection, { at: now, frames }),
+      (frames) => knownDomains.set(info.layer, { at: now, frames }),
       () => domainLoads.delete(url),
     )
   }
@@ -179,7 +202,7 @@ export async function geoFrames(collection: GibsCollection, { signal, now = Date
  * (older frames are published; gaps there are rare).
  */
 function snapToKnownFrame(collection: GibsCollection, t: number, now: number): number {
-  const known = knownDomains.get(collection)
+  const known = knownDomains.get(GIBS_LAYERS[collection].layer)
   if (!known || known.frames.length === 0 || now - known.at > 30 * 60_000) return t
   const oldest = known.frames[known.frames.length - 1]
   if (t < oldest) return t
@@ -298,10 +321,14 @@ export async function weatherCaptures(place: LatLon, passes: Pass[], signal?: Ab
  * `maxSteps`; for a visible-only band, frames with the place in darkness are skipped (they're black).
  */
 export function geoFrameCandidates(collection: GibsCollection, place: LatLon, now: number, listed: readonly number[] | null, maxSteps = 12): number[] {
+  return frameCandidates(GIBS_LAYERS[collection], place, now, listed, maxSteps)
+}
+
+function frameCandidates(info: Pick<GibsFrameLayer, 'visibleOnly'>, place: LatLon, now: number, listed: readonly number[] | null, maxSteps: number): number[] {
   const floor = now - GEO_SAFE_LAG_MS
   const times = listed && listed.length ? listed.filter((t) => t <= floor) : Array.from({ length: maxSteps }, (_, i) => geoFrameTime(now, now) - i * TEN_MIN)
   const window = times.slice(0, maxSteps)
-  return GIBS_LAYERS[collection].visibleOnly ? window.filter((t) => sunElevationDeg(place.lat, place.lon, t) > 0) : window
+  return info.visibleOnly ? window.filter((t) => sunElevationDeg(place.lat, place.lon, t) > 0) : window
 }
 
 /**
@@ -318,18 +345,26 @@ export async function latestGeoImage(
   collection: GibsCollection,
   place: LatLon,
   opts: CropOpts,
+  o: { signal?: AbortSignal; now?: number; maxSteps?: number } = {},
+): Promise<{ url: string; time: number } | null> {
+  return latestGibsFrame(frameLayer(collection), place, opts, o)
+}
+
+/** `latestGeoImage` for any sub-daily layer. */
+export async function latestGibsFrame(
+  info: GibsFrameLayer,
+  place: LatLon,
+  opts: CropOpts,
   { signal, now = Date.now(), maxSteps = 12 }: { signal?: AbortSignal; now?: number; maxSteps?: number } = {},
 ): Promise<{ url: string; time: number } | null> {
-  const info = GIBS_LAYERS[collection]
-  if (info.kind !== 'subdaily') throw new TypeError(`${collection} is a daily layer`)
   let listed: number[] | null = null
   try {
-    listed = await geoFrames(collection, { signal, now })
+    listed = await gibsFrames(info, { signal, now })
   } catch (err) {
     if (isAbortError(err) || signal?.aborted) throw err
     // Domain unavailable: fall back to the fixed hold-back and let the image check decide.
   }
-  for (const t of geoFrameCandidates(collection, place, now, listed, maxSteps)) {
+  for (const t of frameCandidates(info, place, now, listed, maxSteps)) {
     throwIfAborted(signal)
     const url = gibsWmsUrl(info.layer, isoSeconds(t), place, opts)
     try {
