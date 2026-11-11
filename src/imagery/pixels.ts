@@ -11,6 +11,8 @@
  * without ever drawing the full image on the main thread (createImageBitmap(HTMLImageElement) there cost 2–27 ms
  * per GIBS image on a phone).
  *
+ * A NASA infrared frame is redrawn in grey on the way (./infrared.ts), so no view ever holds its rainbow palette.
+ *
  * `fetchTonedHere` does the same for every Sentinel-2 / Landsat photo (owner rules a, b, d): fetch the encoded
  * render (api/_lib/tone.ts), decode it, apply the photo's one global curve + light sharpening, encode it again
  * (JPEG for display, PNG for "Download image") and hand back the bytes. The curve is measured once per capture and
@@ -21,6 +23,7 @@
  * shared).
  */
 import { PHOTO_PX, canShareCurve, isMagnifiedView, maskFromResponse, toneCropAsync, tonePlanForUrl, type ToneMask, type ToneParams, type TonePlan } from '../../api/_lib/tone'
+import { greyInfrared, isEnhancedInfraredUrl } from './infrared'
 import { HttpError } from './net'
 import { panSharpen } from './panSharpen'
 import { panApiPath, parsePanSharpUrl } from './panUrl'
@@ -139,7 +142,8 @@ export async function fetchCheckedImageHere(url: string, signal?: AbortSignal): 
     await res.body?.cancel().catch(() => undefined)
     return { status: res.status, contentType }
   }
-  const blob = await res.blob()
+  // NASA's colour-coded infrared layer is redrawn on one grey scale before anything shows it (./infrared.ts).
+  const blob = isEnhancedInfraredUrl(url) ? await greyInfraredBlob(await res.blob()) : await res.blob()
   let noData: number | undefined
   try {
     noData = measureNoData((await decodeImagePixels(blob, CHECK_PX)).data).noDataFraction
@@ -266,6 +270,23 @@ function encode(c: Canvas2D, type: string): Promise<Blob> {
   if ('convertToBlob' in c.canvas) return c.canvas.convertToBlob({ type, quality: JPEG_QUALITY })
   const el = c.canvas as HTMLCanvasElement
   return new Promise((resolve, reject) => el.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), type, JPEG_QUALITY))
+}
+
+/** An enhanced-infrared image, redrawn in grey (./infrared.ts) and encoded again. Rejects where no canvas can do it. */
+async function greyInfraredBlob(src: Blob): Promise<Blob> {
+  const bmp = await createImageBitmap(src, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width, height } = bmp
+  const c = canvas2d(width, height)
+  if (!c) {
+    bmp.close()
+    throw new Error('2D canvas unavailable')
+  }
+  c.ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  const img = c.ctx.getImageData(0, 0, width, height)
+  greyInfrared(img.data)
+  c.ctx.putImageData(img, 0, 0)
+  return encode(c, 'image/jpeg')
 }
 
 /**
