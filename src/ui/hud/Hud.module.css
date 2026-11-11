@@ -48,7 +48,7 @@
   opacity: 1;
 }
 /* Over a scene the quiet lines step up to bone-2: legible at 4.5:1 on the scrim even over white cloud. */
-.hud[data-scene] :is(.dim, .version, .about, .pending, .mob) {
+.hud[data-scene] :is(.dim, .about, .pending, .mob) {
   color: var(--bone-2);
 }
 /* Short landscape phones (PH-15): the landing globe's satellite halo reaches the top corners, so the top scrim is
@@ -57,7 +57,7 @@
   .hud::before {
     opacity: 1;
   }
-  .hud :is(.dim, .version, .about, .pending, .mob) {
+  .hud :is(.dim, .about, .pending, .mob) {
     color: var(--bone-2);
   }
 }
@@ -139,17 +139,6 @@
 :global(html[data-boot]) .mark {
   visibility: hidden;
 }
-.versionWrap {
-  display: inline-flex;
-  align-items: center;
-}
-.version {
-  margin-left: 1.1em;
-  color: var(--bone-3);
-  letter-spacing: var(--track-label);
-  text-transform: none;
-  transition: color var(--d-md) var(--ease-out);
-}
 .about {
   display: inline-flex;
   align-items: center;
@@ -199,14 +188,6 @@
 .sceneValue {
   margin-left: 0.7em;
   color: var(--bone);
-}
-.dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  margin-right: 10px;
-  background: var(--signal);
-  animation: hard-blink 1s steps(1, end) infinite;
 }
 @keyframes hard-blink {
   50% {
@@ -262,7 +243,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot,
   .pending::after {
     animation: none;
   }

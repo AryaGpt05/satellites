@@ -186,9 +186,6 @@ function HudImpl({ onAbout, onHome }: { onAbout?: () => void; onHome?: () => voi
               <Wordmark height={17} className={s.wordmark} />
             )}
           </span>
-          <Reveal key={`${k}-version`} skip={booting} axis="x" duration={480} delay={at(480)} as="span" className={s.versionWrap}>
-            <span className={s.version}>{VERSION}</span>
-          </Reveal>
         </div>
         {onAbout ? (
           <Reveal key={`${k}-about`} skip={booting} axis="x" duration={480} delay={at(520)} as="div" className={s.line}>
@@ -202,7 +199,6 @@ function HudImpl({ onAbout, onHome }: { onAbout?: () => void; onHome?: () => voi
 
       <CornerReadout corner="tr" label="Time" ref={topRight}>
         <Reveal key={`${k}-clock`} skip={booting} axis="x" duration={480} delay={at(0)} as="div" className={s.line}>
-          <span className={s.dot} aria-hidden data-blink />
           <UtcClock />
         </Reveal>
         {live ? null : <SceneTime />}
