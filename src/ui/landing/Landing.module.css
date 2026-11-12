@@ -12,7 +12,7 @@
  * Media queries copy src/lib/layout.ts by hand (CSS can't import it):
  *   STACKED          (max-width: 760px), (orientation: portrait) and (max-width: 1100px)
  *   WIDE             (min-width: 761px) and (orientation: landscape), (min-width: 1101px)
- *   SHORT_LANDSCAPE  (orientation: landscape) and (max-height: 540px)
+ *   SHORT_LANDSCAPE  (orientation: landscape) and (min-width: 540px) and (max-height: 540px)
  * Phone-only sizing stays on (max-width: 760px).
  */
 .landing {
@@ -773,7 +773,7 @@
 
 /* Search mode (stacked and short landscape): the field rises to the top, clear of the keyboard. The
    frozen copy that fades out on entry (data-ghost) keeps the resting layout. */
-@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (max-height: 540px) {
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (min-width: 540px) and (max-height: 540px) {
   .landing[data-searching='true'] .column:not([data-ghost]) {
     top: calc(var(--bezel-inset) + 64px + env(safe-area-inset-top, 0px));
     bottom: auto;
@@ -856,7 +856,7 @@
 
 /* The half-width column of a small landscape phone: "Use my location" becomes a 44 × 44 icon so
    "Search a place" fits in full. The long label stays as the button's (visually hidden) name. */
-@media (orientation: landscape) and (max-height: 540px) and (max-width: 760px) {
+@media (orientation: landscape) and (min-width: 540px) and (max-height: 540px) and (max-width: 760px) {
   .locateInline {
     justify-content: center;
     width: 44px;
@@ -879,7 +879,7 @@
 }
 
 /* ── short landscape phones (844 × 390, 667 × 375) ─────────────── */
-@media (orientation: landscape) and (max-height: 540px) {
+@media (orientation: landscape) and (min-width: 540px) and (max-height: 540px) {
   .landing {
     --search-w: 100%;
   }
@@ -971,7 +971,7 @@
 /* Touch, swipeable chip row: the 40 px chips take 44 px taps. The row gains 4 px of padding above and
    below (and gives it back in margin, so nothing moves) for the hit box to extend into: a scroller
    clips what overflows its padding box (2 px exactly lost a pixel each side to sub-pixel placement at 375 px). */
-@media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px), (pointer: coarse) and (orientation: landscape) and (max-height: 540px) {
+@media (pointer: coarse) and (max-width: 760px), (pointer: coarse) and (orientation: portrait) and (max-width: 1100px), (pointer: coarse) and (orientation: landscape) and (min-width: 540px) and (max-height: 540px) {
   .chips {
     margin-block: -4px;
     padding-block: 4px;
@@ -1037,7 +1037,7 @@
 
 /* Phones (the chips are one swipeable row): "Surprise me" comes right after "Or try", in view without a swipe; wide
    layouts keep it after the examples. */
-@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (max-height: 540px) {
+@media (max-width: 760px), (orientation: portrait) and (max-width: 1100px), (orientation: landscape) and (min-width: 540px) and (max-height: 540px) {
   .chipLead {
     order: -2;
   }
